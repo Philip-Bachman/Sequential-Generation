@@ -171,8 +171,6 @@ def test_imoold_generation(step_type='add', attention=False):
     # build the cost gradients, training function, samplers, etc.
     draw.build_model_funcs()
 
-    #draw.load_model_params(f_name="TBOLM_GEN_PARAMS_{}_{}.pkl".format(step_type, att_tag))
-
     ################################################################
     # Apply some updates, to check that they aren't totally broken #
     ################################################################
@@ -244,6 +242,171 @@ def test_imoold_generation(step_type='add', attention=False):
                 img = img_grid(samples[j,:,:,:])
                 img.save("TBOLM-gen-samples-%03d.png" % (j,))
 
+
+####################################################
+# Fine-tune variational posteriors on the test set #
+####################################################
+
+def test_imoold_generation_ft(step_type='add', attention=False):
+    ##########################
+    # Get some training data #
+    ##########################
+    rng = np.random.RandomState(1234)
+    Xtr, Xva, Xte = load_binarized_mnist(data_path='./data/')
+    Xtr = np.vstack((Xtr, Xva))
+    Xva = Xte
+    #del Xte
+    tr_samples = Xtr.shape[0]
+    va_samples = Xva.shape[0]
+    batch_size = 250
+
+    ############################################################
+    # Setup some parameters for the Iterative Refinement Model #
+    ############################################################
+    x_dim = Xtr.shape[1]
+    write_dim = 200
+    enc_dim = 250
+    dec_dim = 250
+    mix_dim = 20
+    z_dim = 100
+    if attention:
+        n_iter = 64
+    else:
+        n_iter = 16
+    
+    rnninits = {
+        'weights_init': IsotropicGaussian(0.01),
+        'biases_init': Constant(0.),
+    }
+    inits = {
+        'weights_init': IsotropicGaussian(0.01),
+        'biases_init': Constant(0.),
+    }
+
+    # setup the reader and writer
+    if attention:
+        read_N, write_N = (2, 5) # resolution of reader and writer
+        read_dim = 2*read_N**2   # total number of "pixels" read by reader
+        reader_mlp = AttentionReader(x_dim=x_dim, dec_dim=dec_dim,
+                                 width=28, height=28,
+                                 N=read_N, **inits)
+        writer_mlp = AttentionWriter(input_dim=dec_dim, output_dim=x_dim,
+                                 width=28, height=28,
+                                 N=write_N, **inits)
+        att_tag = "YA"
+    else:
+        read_dim = 2*x_dim
+        reader_mlp = Reader(x_dim=x_dim, dec_dim=dec_dim, **inits)
+        writer_mlp = MLP([None, None], [dec_dim, write_dim, x_dim], \
+                         name="writer_mlp", **inits)
+        att_tag = "NA"
+    
+    # setup the infinite mixture initialization model
+    mix_enc_mlp = CondNet([Tanh()], [x_dim, 250, mix_dim], \
+                          name="mix_enc_mlp", **inits)
+    mix_dec_mlp = MLP([Tanh(), Tanh()], \
+                      [mix_dim, 250, (2*enc_dim + 2*dec_dim)], \
+                      name="mix_dec_mlp", **inits)
+    # setup the components of the sequential generative model
+    enc_mlp_in = MLP([Identity()], [(read_dim + dec_dim), 4*enc_dim], \
+                     name="enc_mlp_in", **inits)
+    dec_mlp_in = MLP([Identity()], [               z_dim, 4*dec_dim], \
+                     name="dec_mlp_in", **inits)
+    enc_mlp_out = CondNet([], [enc_dim, z_dim], name="enc_mlp_out", **inits)
+    dec_mlp_out = CondNet([], [dec_dim, z_dim], name="dec_mlp_out", **inits)
+    enc_rnn = BiasedLSTM(dim=enc_dim, ig_bias=2.0, fg_bias=2.0, \
+                         name="enc_rnn", **rnninits)
+    dec_rnn = BiasedLSTM(dim=dec_dim, ig_bias=2.0, fg_bias=2.0, \
+                         name="dec_rnn", **rnninits)
+
+    draw = IMoOLDrawModels(
+                n_iter,
+                step_type=step_type, # step_type can be 'add' or 'jump'
+                mix_enc_mlp=mix_enc_mlp,
+                mix_dec_mlp=mix_dec_mlp,
+                reader_mlp=reader_mlp,
+                enc_mlp_in=enc_mlp_in,
+                enc_mlp_out=enc_mlp_out,
+                enc_rnn=enc_rnn,
+                dec_mlp_in=dec_mlp_in,
+                dec_mlp_out=dec_mlp_out,
+                dec_rnn=dec_rnn,
+                writer_mlp=writer_mlp)
+    draw.initialize()
+
+    # build the cost gradients, training function, samplers, etc.
+    draw.build_model_funcs()
+    draw.build_extra_funcs()
+
+    # load parameters from a pre-trained model into the compiled model
+    draw.load_model_params(f_name="TBOLM_GEN_PARAMS_{}_{}.pkl".format(step_type, att_tag))
+
+    ################################################################
+    # Apply some updates, to check that they aren't totally broken #
+    ################################################################
+    print("Beginning to fine-tune the model...")
+    out_file = open("TBOLM_GEN_RESULTS_{}_{}_FT.txt".format(step_type, att_tag), 'wb')
+    costs = [0. for i in range(10)]
+    learn_rate = 0.0001
+    momentum = 0.9
+    batch_idx = np.arange(batch_size) + va_samples
+    for i in range(50000):
+        if (((i + 1) % 2000) == 0):
+            learn_rate = learn_rate * 0.95
+        # get the indices of training samples for this batch update
+        batch_idx += batch_size
+        if (np.max(batch_idx) >= va_samples):
+            # we finished an "epoch", so we rejumble the training set
+            Xva = row_shuffle(Xva)
+            batch_idx = np.arange(batch_size)
+
+        # set sgd and objective function hyperparams for this update
+        zero_ary = np.zeros((1,))
+        draw.lr.set_value(to_fX(zero_ary + learn_rate))
+        draw.mom_1.set_value(to_fX(zero_ary + momentum))
+        draw.mom_2.set_value(to_fX(zero_ary + 0.99))
+
+        # perform a minibatch update and record the cost for this batch
+        Xb = to_fX(Xva.take(batch_idx, axis=0))
+        result = draw.train_var(Xb, Xb) # only train vairational parameters
+        costs = [(costs[j] + result[j]) for j in range(len(result))]
+
+        # diagnostics
+        if ((i % 200) == 0):
+            costs = [(v / 200.0) for v in costs]
+            str1 = "-- batch {0:d} --".format(i)
+            str2 = "    total_cost: {0:.4f}".format(costs[0])
+            str3 = "    nll_bound : {0:.4f}".format(costs[1])
+            str4 = "    nll_term  : {0:.4f}".format(costs[2])
+            str5 = "    kld_q2p   : {0:.4f}".format(costs[3])
+            str6 = "    kld_p2q   : {0:.4f}".format(costs[4])
+            str7 = "    reg_term  : {0:.4f}".format(costs[5])
+            joint_str = "\n".join([str1, str2, str3, str4, str5, str6, str7])
+            print(joint_str)
+            out_file.write(joint_str+"\n")
+            out_file.flush()
+            costs = [0.0 for v in costs]
+        if ((i % 1000) == 0):
+            # compute a small-sample estimate of NLL bound on validation set
+            Xb = to_fX(Xva[:5000])
+            va_costs = draw.compute_nll_bound(Xb, Xb)
+            str1 = "    va_nll_bound : {}".format(va_costs[1])
+            str2 = "    va_nll_term  : {}".format(va_costs[2])
+            str3 = "    va_kld_q2p   : {}".format(va_costs[3])
+            joint_str = "\n".join([str1, str2, str3])
+            print(joint_str)
+            out_file.write(joint_str+"\n")
+            out_file.flush()
+
+
 if __name__=="__main__":
+    #######################################################################
+    # Train "binarized MNIST" generative models (open loopish LSTM triad) #
+    #######################################################################
     test_imoold_generation(step_type='add', attention=False)
     #test_imoold_generation(step_type='jump', attention=False)
+    #######################################################
+    # Finetune parameters of the variational distribution #
+    #######################################################
+    test_imoold_generation_ft(step_type='add', attention=False)
+    #test_imoold_generation_ft(step_type='jump', attention=False)

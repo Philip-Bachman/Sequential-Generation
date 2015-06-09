@@ -148,13 +148,6 @@ def test_tfd(step_type='add',
             params=gpsi_params, \
             shared_param_dicts=None)
 
-    # # test model saving
-    # print("Testing model save to file...")
-    # GPSI.save_to_file("AAA_GPSI_SAVE_TEST.pkl")
-    # # test model loading
-    # print("Testing model load from file...")
-    # GPSI = load_gpsimputer_from_file(f_name="AAA_GPSI_SAVE_TEST.pkl", rng=rng)
-
     ################################################################
     # Apply some updates, to check that they aren't totally broken #
     ################################################################
@@ -355,13 +348,13 @@ if __name__=="__main__":
     # TFD #
     #######
     # TRAINING
+    test_tfd(step_type='add', occ_dim=25, drop_prob=0.0)
+    #test_tfd(step_type='add', occ_dim=0, drop_prob=0.8)
     #test_tfd(step_type='jump', occ_dim=25, drop_prob=0.0)
     #test_tfd(step_type='jump', occ_dim=0, drop_prob=0.8)
-    #test_tfd(step_type='add', occ_dim=25, drop_prob=0.0)
-    #test_tfd(step_type='add', occ_dim=0, drop_prob=0.8)
 
     # RESULTS
-    #test_tfd_results(step_type='jump', occ_dim=25, drop_prob=0.0)
-    #test_tfd_results(step_type='jump', occ_dim=0, drop_prob=0.8)
     #test_tfd_results(step_type='add', occ_dim=25, drop_prob=0.0)
     #test_tfd_results(step_type='add', occ_dim=0, drop_prob=0.8)
+    #test_tfd_results(step_type='jump', occ_dim=25, drop_prob=0.0)
+    #test_tfd_results(step_type='jump', occ_dim=0, drop_prob=0.8)

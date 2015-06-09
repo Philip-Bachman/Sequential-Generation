@@ -1,0 +1,5 @@
+*.txt
+*.pkl
+*.png
+*.pyc
+data/

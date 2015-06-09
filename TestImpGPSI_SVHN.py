@@ -46,8 +46,6 @@ def test_svhn(step_type='add',
     te_file = 'data/svhn_test_gray.pkl'
     ex_file = 'data/svhn_extra_gray.pkl'
     data = load_svhn_gray(tr_file, te_file, ex_file=ex_file, ex_count=200000)
-    #all_file = 'data/svhn_all_gray_zca.pkl'
-    #data = load_svhn_all_gray_zca(all_file)
     Xtr = to_fX( shift_and_scale_into_01(np.vstack([data['Xtr'], data['Xex']])) )
     Xva = to_fX( shift_and_scale_into_01(data['Xte']) )
     tr_samples = Xtr.shape[0]
@@ -145,13 +143,6 @@ def test_svhn(step_type='add',
             q_zi_given_x_xi=q_zi_given_x_xi, \
             params=gpsi_params, \
             shared_param_dicts=None)
-
-    # # test model saving
-    # print("Testing model save to file...")
-    # GPSI.save_to_file("AAA_GPSI_SAVE_TEST.pkl")
-    # # test model loading
-    # print("Testing model load from file...")
-    # GPSI = load_gpsimputer_from_file(f_name="AAA_GPSI_SAVE_TEST.pkl", rng=rng)
 
     ################################################################
     # Apply some updates, to check that they aren't totally broken #
@@ -269,8 +260,6 @@ def test_svhn_results(step_type='add',
     te_file = 'data/svhn_test_gray.pkl'
     ex_file = 'data/svhn_extra_gray.pkl'
     data = load_svhn_gray(tr_file, te_file, ex_file=ex_file, ex_count=200000)
-    #all_file = 'data/svhn_all_gray_zca.pkl'
-    #data = load_svhn_all_gray_zca(all_file)
     Xtr = to_fX( shift_and_scale_into_01(np.vstack([data['Xtr'], data['Xex']])) )
     Xva = to_fX( shift_and_scale_into_01(data['Xte']) )
     tr_samples = Xtr.shape[0]
@@ -351,13 +340,13 @@ if __name__=="__main__":
     # SVHN #
     ########
     # TRAINING
+    test_svhn(step_type='add', occ_dim=17, drop_prob=0.0)
+    #test_svhn(step_type='add', occ_dim=0, drop_prob=0.8)
     #test_svhn(step_type='jump', occ_dim=17, drop_prob=0.0)
     #test_svhn(step_type='jump', occ_dim=0, drop_prob=0.8)
-    #test_svhn(step_type='add', occ_dim=17, drop_prob=0.0)
-    #test_svhn(step_type='add', occ_dim=0, drop_prob=0.8)
 
     # RESULTS
+    test_svhn_results(step_type='add', occ_dim=17, drop_prob=0.0)
+    #test_svhn_results(step_type='add', occ_dim=0, drop_prob=0.8)
     #test_svhn_results(step_type='jump', occ_dim=17, drop_prob=0.0)
     #test_svhn_results(step_type='jump', occ_dim=0, drop_prob=0.8)
-    #test_svhn_results(step_type='add', occ_dim=17, drop_prob=0.0)
-    #test_svhn_results(step_type='add', occ_dim=0, drop_prob=0.8)

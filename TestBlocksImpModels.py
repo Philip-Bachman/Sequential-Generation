@@ -92,8 +92,8 @@ def test_imocld_imp_mnist(step_type='add', occ_dim=14, drop_prob=0.0, attention=
     rng = np.random.RandomState(1234)
     dataset = 'data/mnist.pkl.gz'
     datasets = load_udm(dataset, as_shared=False, zero_mean=False)
-    Xtr = datasets[0][0]
-    Xva = datasets[1][0]
+    Xtr = np.vstack((datasets[0][0], datasets[1][0]))
+    Xva = datasets[2][0]
     Xtr = to_fX(shift_and_scale_into_01(Xtr))
     Xva = to_fX(shift_and_scale_into_01(Xva))
     tr_samples = Xtr.shape[0]
@@ -177,7 +177,7 @@ def test_imocld_imp_mnist(step_type='add', occ_dim=14, drop_prob=0.0, attention=
     # build the cost gradients, training function, samplers, etc.
     draw.build_model_funcs()
 
-    draw.load_model_params(f_name="TBCLM_IMP_MNIST_PARAMS_OD{}_DP{}_{}_{}.pkl".format(occ_dim, dp_int, step_type, att_tag))
+    #draw.load_model_params(f_name="TBCLM_IMP_MNIST_PARAMS_OD{}_DP{}_{}_{}.pkl".format(occ_dim, dp_int, step_type, att_tag))
 
     ################################################################
     # Apply some updates, to check that they aren't totally broken #
@@ -189,7 +189,7 @@ def test_imocld_imp_mnist(step_type='add', occ_dim=14, drop_prob=0.0, attention=
     learn_rate = 0.0002
     momentum = 0.5
     batch_idx = np.arange(batch_size) + tr_samples
-    for i in [0]: #range(250000):
+    for i in range(250000):
         scale = min(1.0, ((i+1) / 1000.0))
         if (((i + 1) % 10000) == 0):
             learn_rate = learn_rate * 0.95
@@ -231,7 +231,7 @@ def test_imocld_imp_mnist(step_type='add', occ_dim=14, drop_prob=0.0, attention=
             out_file.flush()
             costs = [0.0 for v in costs]
         if ((i % 1000) == 0):
-            #draw.save_model_params("TBCLM_IMP_PARAMS_OD{}_DP{}_{}_{}.pkl".format(occ_dim, dp_int, step_type, att_tag))
+            draw.save_model_params("TBCLM_IMP_MNIST_PARAMS_OD{}_DP{}_{}_{}.pkl".format(occ_dim, dp_int, step_type, att_tag))
             # compute a small-sample estimate of NLL bound on validation set
             Xva = row_shuffle(Xva)
             Xb = to_fX(Xva[:5000])
@@ -357,7 +357,7 @@ def test_imocld_imp_svhn(step_type='add', occ_dim=14, drop_prob=0.0, attention=F
     # build the cost gradients, training function, samplers, etc.
     draw.build_model_funcs()
 
-    draw.load_model_params(f_name="TBCLM_IMP_SVHN_PARAMS_OD{}_DP{}_{}_{}.pkl".format(occ_dim, dp_int, step_type, att_tag))
+    #draw.load_model_params(f_name="TBCLM_IMP_SVHN_PARAMS_OD{}_DP{}_{}_{}.pkl".format(occ_dim, dp_int, step_type, att_tag))
 
     ################################################################
     # Apply some updates, to check that they aren't totally broken #
@@ -411,11 +411,10 @@ def test_imocld_imp_svhn(step_type='add', occ_dim=14, drop_prob=0.0, attention=F
             out_file.flush()
             costs = [0.0 for v in costs]
         if ((i % 1000) == 0):
-            #draw.save_model_params("TBCLM_IMP_SVHN_PARAMS_OD{}_DP{}_{}_{}.pkl".format(occ_dim, dp_int, step_type, att_tag))
+            draw.save_model_params("TBCLM_IMP_SVHN_PARAMS_OD{}_DP{}_{}_{}.pkl".format(occ_dim, dp_int, step_type, att_tag))
             # compute a small-sample estimate of NLL bound on validation set
             Xva = row_shuffle(Xva)
-            #Xb = to_fX(Xva[:5000])
-            Xb = to_fX(Xva[:500])
+            Xb = to_fX(Xva[:5000])
             _, Xb, Mb = construct_masked_data(Xb, drop_prob=drop_prob, \
                                     occ_dim=occ_dim, data_mean=None)
             va_costs = draw.compute_nll_bound(Xb, Mb)
@@ -541,7 +540,7 @@ def test_imocld_imp_tfd(step_type='add', occ_dim=14, drop_prob=0.0, attention=Fa
     # build the cost gradients, training function, samplers, etc.
     draw.build_model_funcs()
 
-    draw.load_model_params(f_name="TBCLM_IMP_TFD_PARAMS_OD{}_DP{}_{}_{}.pkl".format(occ_dim, dp_int, step_type, att_tag))
+    #draw.load_model_params(f_name="TBCLM_IMP_TFD_PARAMS_OD{}_DP{}_{}_{}.pkl".format(occ_dim, dp_int, step_type, att_tag))
 
     ################################################################
     # Apply some updates, to check that they aren't totally broken #
@@ -595,11 +594,10 @@ def test_imocld_imp_tfd(step_type='add', occ_dim=14, drop_prob=0.0, attention=Fa
             out_file.flush()
             costs = [0.0 for v in costs]
         if ((i % 1000) == 0):
-            #draw.save_model_params("TBCLM_IMP_TFD_PARAMS_OD{}_DP{}_{}_{}.pkl".format(occ_dim, dp_int, step_type, att_tag))
+            draw.save_model_params("TBCLM_IMP_TFD_PARAMS_OD{}_DP{}_{}_{}.pkl".format(occ_dim, dp_int, step_type, att_tag))
             # compute a small-sample estimate of NLL bound on validation set
             Xva = row_shuffle(Xva)
-            #Xb = to_fX(Xva[:5000])
-            Xb = to_fX(Xva[:500])
+            Xb = to_fX(Xva[:5000])
             _, Xb, Mb = construct_masked_data(Xb, drop_prob=drop_prob, \
                                     occ_dim=occ_dim, data_mean=None)
             va_costs = draw.compute_nll_bound(Xb, Mb)
@@ -624,7 +622,7 @@ def test_imocld_imp_tfd(step_type='add', occ_dim=14, drop_prob=0.0, attention=Fa
 if __name__=="__main__":
     #test_imocld_imp_mnist(step_type='add', occ_dim=14, drop_prob=0.0)
     #test_imocld_imp_mnist(step_type='jump', occ_dim=14, drop_prob=0.0)
-    #test_imocld_imp_mnist(step_type='add', occ_dim=16, drop_prob=0.0)
+    test_imocld_imp_mnist(step_type='add', occ_dim=16, drop_prob=0.0)
     #test_imocld_imp_mnist(step_type='jump', occ_dim=16, drop_prob=0.0)
     #test_imocld_imp_mnist(step_type='add', occ_dim=0, drop_prob=0.6)
     #test_imocld_imp_mnist(step_type='jump', occ_dim=0, drop_prob=0.6)
@@ -633,4 +631,4 @@ if __name__=="__main__":
     #test_imocld_imp_tfd(step_type='add', occ_dim=0, drop_prob=0.8)
     #test_imocld_imp_tfd(step_type='add', occ_dim=25, drop_prob=0.0)
     #test_imocld_imp_svhn(step_type='add', occ_dim=0, drop_prob=0.8)
-    test_imocld_imp_svhn(step_type='add', occ_dim=17, drop_prob=0.0)
+    #test_imocld_imp_svhn(step_type='add', occ_dim=17, drop_prob=0.0)

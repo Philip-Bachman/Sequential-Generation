@@ -60,7 +60,7 @@ def test_mnist(step_type='add',
     ############################################################
     obs_dim = Xtr.shape[1]
     z_dim = 100
-    imp_steps = 5
+    imp_steps = 6
     init_scale = 1.0
 
     x_in_sym = T.matrix('x_in_sym')
@@ -124,7 +124,6 @@ def test_mnist(step_type='add',
             params=params, shared_param_dicts=None)
     q_zi_given_x_xi.init_biases(0.2)
 
-
     ###########################################################
     # Define parameters for the GPSImputer, and initialize it #
     ###########################################################
@@ -143,13 +142,6 @@ def test_mnist(step_type='add',
             q_zi_given_x_xi=q_zi_given_x_xi, \
             params=gpsi_params, \
             shared_param_dicts=None)
-
-    # # test model saving
-    # print("Testing model save to file...")
-    # GPSI.save_to_file("AAA_GPSI_SAVE_TEST.pkl")
-    # # test model loading
-    # print("Testing model load from file...")
-    # GPSI = load_gpsimputer_from_file(f_name="AAA_GPSI_SAVE_TEST.pkl", rng=rng)
 
     ################################################################
     # Apply some updates, to check that they aren't totally broken #
@@ -347,25 +339,25 @@ if __name__=="__main__":
     # MNIST #
     #########
     # TRAINING
+    #test_mnist(step_type='add', occ_dim=14, drop_prob=0.0)
+    test_mnist(step_type='add', occ_dim=16, drop_prob=0.0)
+    #test_mnist(step_type='add', occ_dim=0, drop_prob=0.6)
+    #test_mnist(step_type='add', occ_dim=0, drop_prob=0.8)
     #test_mnist(step_type='jump', occ_dim=14, drop_prob=0.0)
     #test_mnist(step_type='jump', occ_dim=16, drop_prob=0.0)
     #test_mnist(step_type='jump', occ_dim=0, drop_prob=0.6)
     #test_mnist(step_type='jump', occ_dim=0, drop_prob=0.8)
-    #test_mnist(step_type='add', occ_dim=14, drop_prob=0.0)
-    #test_mnist(step_type='add', occ_dim=16, drop_prob=0.0)
-    #test_mnist(step_type='add', occ_dim=0, drop_prob=0.6)
-    #test_mnist(step_type='add', occ_dim=0, drop_prob=0.8)
 
     # RESULTS
-    test_mnist_results(step_type='jump', occ_dim=14, drop_prob=0.0)
-    test_mnist_results(step_type='jump', occ_dim=16, drop_prob=0.0)
-    test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.6)
-    test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.7)
-    test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.8)
-    test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.9)
-    test_mnist_results(step_type='add', occ_dim=14, drop_prob=0.0)
+    # test_mnist_results(step_type='add', occ_dim=14, drop_prob=0.0)
     test_mnist_results(step_type='add', occ_dim=16, drop_prob=0.0)
-    test_mnist_results(step_type='add', occ_dim=0, drop_prob=0.6)
-    test_mnist_results(step_type='add', occ_dim=0, drop_prob=0.7)
-    test_mnist_results(step_type='add', occ_dim=0, drop_prob=0.8)
-    test_mnist_results(step_type='add', occ_dim=0, drop_prob=0.9)
+    # test_mnist_results(step_type='add', occ_dim=0, drop_prob=0.6)
+    # test_mnist_results(step_type='add', occ_dim=0, drop_prob=0.7)
+    # test_mnist_results(step_type='add', occ_dim=0, drop_prob=0.8)
+    # test_mnist_results(step_type='add', occ_dim=0, drop_prob=0.9)
+    # test_mnist_results(step_type='jump', occ_dim=14, drop_prob=0.0)
+    # test_mnist_results(step_type='jump', occ_dim=16, drop_prob=0.0)
+    # test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.6)
+    # test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.7)
+    # test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.8)
+    # test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.9)
