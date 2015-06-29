@@ -91,17 +91,16 @@ def test_imoold_generation(step_type='add', attention=False):
     #del Xte
     tr_samples = Xtr.shape[0]
     va_samples = Xva.shape[0]
-    batch_size = 250
-
+    batch_size = 200
 
     ############################################################
     # Setup some parameters for the Iterative Refinement Model #
     ############################################################
     x_dim = Xtr.shape[1]
-    write_dim = 200
+    write_dim = 250
     enc_dim = 250
     dec_dim = 250
-    mix_dim = 20
+    mix_dim = 25
     z_dim = 100
     if attention:
         n_iter = 64
@@ -175,7 +174,7 @@ def test_imoold_generation(step_type='add', attention=False):
     # Apply some updates, to check that they aren't totally broken #
     ################################################################
     print("Beginning to train the model...")
-    out_file = open("TBOLM_GEN_RESULTS_{}_{}.txt".format(step_type, att_tag), 'wb')
+    out_file = open("S75_TBOLM_GEN_RESULTS_{}_{}.txt".format(step_type, att_tag), 'wb')
     costs = [0. for i in range(10)]
     learn_rate = 0.0002
     momentum = 0.5
@@ -222,7 +221,7 @@ def test_imoold_generation(step_type='add', attention=False):
             out_file.flush()
             costs = [0.0 for v in costs]
         if ((i % 1000) == 0):
-            draw.save_model_params("TBOLM_GEN_PARAMS_{}_{}.pkl".format(step_type, att_tag))
+            draw.save_model_params("S75_TBOLM_GEN_PARAMS_{}_{}.pkl".format(step_type, att_tag))
             # compute a small-sample estimate of NLL bound on validation set
             Xva = row_shuffle(Xva)
             Xb = to_fX(Xva[:5000])
@@ -240,7 +239,7 @@ def test_imoold_generation(step_type='add', attention=False):
             samples = samples.reshape( (n_iter, N, 28, 28) )
             for j in xrange(n_iter):
                 img = img_grid(samples[j,:,:,:])
-                img.save("TBOLM-gen-samples-%03d.png" % (j,))
+                img.save("S75_TBOLM-gen-samples-%03d.png" % (j,))
 
 
 ####################################################
@@ -270,7 +269,7 @@ def test_imoold_generation_ft(step_type='add', attention=False):
     mix_dim = 20
     z_dim = 100
     if attention:
-        n_iter = 64
+        n_iter = 50
     else:
         n_iter = 16
     
@@ -403,7 +402,8 @@ if __name__=="__main__":
     #######################################################################
     # Train "binarized MNIST" generative models (open loopish LSTM triad) #
     #######################################################################
-    test_imoold_generation(step_type='add', attention=False)
+    test_imoold_generation(step_type='add', attention=True)
+    #test_imoold_generation(step_type='add', attention=False)
     #test_imoold_generation(step_type='jump', attention=False)
     #######################################################
     # Finetune parameters of the variational distribution #

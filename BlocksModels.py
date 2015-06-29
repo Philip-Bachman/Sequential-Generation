@@ -352,6 +352,57 @@ class AttentionWriter(Initializable):
 
         self.zoomer = ZoomableAttentionWindow(height, width, N)
 
+        self.z_trafo = Linear(
+                name=self.name+'_ztrafo',
+                input_dim=input_dim, output_dim=5, 
+                weights_init=self.weights_init, biases_init=self.biases_init,
+                use_bias=True)
+
+        self.w_trafo = Linear(
+                name=self.name+'_wtrafo',
+                input_dim=input_dim, output_dim=N*N, 
+                weights_init=self.weights_init, biases_init=self.biases_init,
+                use_bias=True)
+
+        self.children = [self.z_trafo, self.w_trafo]
+        return
+
+    @application(inputs=['h'], outputs=['c_update'])
+    def apply(self, h):
+        w = self.w_trafo.apply(h)
+        l = self.z_trafo.apply(h)
+
+        center_y, center_x, delta, sigma, gamma = self.zoomer.nn2att(l)
+
+        c_update = 1./gamma * self.zoomer.write(w, center_y, center_x, delta, sigma)
+
+        return c_update
+
+    @application(inputs=['h'], outputs=['c_update', 'center_y', 'center_x', 'delta'])
+    def apply_detailed(self, h):
+        w = self.w_trafo.apply(h)
+        l = self.z_trafo.apply(h)
+
+        center_y, center_x, delta, sigma, gamma = self.zoomer.nn2att(l)
+
+        c_update = 1./gamma * self.zoomer.write(w, center_y, center_x, delta, sigma)
+
+        return c_update, center_y, center_x, delta
+
+class AttentionWriter2(Initializable):
+    def __init__(self, input_dim, output_dim, width, height, N, **kwargs):
+        super(AttentionWriter, self).__init__(name="writer", **kwargs)
+
+        self.img_width = width
+        self.img_height = height
+        self.N = N
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+
+        assert output_dim == width*height
+
+        self.zoomer = ZoomableAttentionWindow(height, width, N)
+
         self.pre_trafo = Linear(
                 name=self.name+'_pretrafo',
                 input_dim=input_dim, output_dim=input_dim, 
@@ -654,11 +705,11 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
         Build the symbolic costs and theano functions relevant to this model.
         """
         # some symbolic vars to represent various inputs/outputs
-        x_in_sym = tensor.matrix('x_in_sym')
-        x_out_sym = tensor.matrix('x_out_sym')
+        self.x_in_sym = tensor.matrix('x_in_sym')
+        self.x_out_sym = tensor.matrix('x_out_sym')
 
         # collect reconstructions of x produced by the IMoOLDRAW model
-        _, nll, kl_q2p, kl_p2q = self.reconstruct(x_in_sym, x_out_sym)
+        _, nll, kl_q2p, kl_p2q = self.reconstruct(self.x_in_sym, self.x_out_sym)
 
         # get the expected NLL part of the VFE bound
         self.nll_term = nll.mean()
@@ -712,10 +763,10 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
 
         # compile the theano function
         print("Compiling model training/update function...")
-        self.train_joint = theano.function(inputs=[x_in_sym, x_out_sym], \
+        self.train_joint = theano.function(inputs=[self.x_in_sym, self.x_out_sym], \
                                 outputs=outputs, updates=self.joint_updates)
         print("Compiling NLL bound estimator function...")
-        self.compute_nll_bound = theano.function(inputs=[x_in_sym, x_out_sym], \
+        self.compute_nll_bound = theano.function(inputs=[self.x_in_sym, self.x_out_sym], \
                                                  outputs=outputs)
         print("Compiling model sampler...")
         n_samples = tensor.iscalar("n_samples")
@@ -1131,11 +1182,11 @@ class IMoCLDrawModels(BaseRecurrent, Initializable, Random):
         Build the symbolic costs and theano functions relevant to this model.
         """
         # some symbolic vars to represent various inputs/outputs
-        x_sym = tensor.matrix('x_sym')
-        m_sym = tensor.matrix('m_sym')
+        self.x_sym = tensor.matrix('x_sym')
+        self.m_sym = tensor.matrix('m_sym')
 
         # collect reconstructions of x produced by the IMoCLDRAW model
-        _, nll, kl_q2p, kl_p2q = self.reconstruct(x_sym, m_sym)
+        _, nll, kl_q2p, kl_p2q = self.reconstruct(self.x_sym, self.m_sym)
 
         # get the expected NLL part of the VFE bound
         self.nll_term = nll.mean()
@@ -1189,14 +1240,14 @@ class IMoCLDrawModels(BaseRecurrent, Initializable, Random):
 
         # compile the theano function
         print("Compiling model training/update function...")
-        self.train_joint = theano.function(inputs=[x_sym, m_sym], \
+        self.train_joint = theano.function(inputs=[self.x_sym, self.m_sym], \
                                 outputs=outputs, updates=self.joint_updates)
         print("Compiling NLL bound estimator function...")
-        self.compute_nll_bound = theano.function(inputs=[x_sym, m_sym], \
+        self.compute_nll_bound = theano.function(inputs=[self.x_sym, self.m_sym], \
                                                  outputs=outputs)
         print("Compiling model sampler...")
-        samples = self.sample(x_sym, m_sym)
-        self.do_sample = theano.function([x_sym, m_sym], outputs=samples, \
+        samples = self.sample(self.x_sym, self.m_sym)
+        self.do_sample = theano.function([self.x_sym, self.m_sym], outputs=samples, \
                                          allow_input_downcast=True)
         return
 
@@ -1243,6 +1294,363 @@ class IMoCLDrawModels(BaseRecurrent, Initializable, Random):
                                                        x_hat, mask=m_inv))
         self.unguided_nll = theano.function(inputs=inputs, \
                                             outputs=nll_unguided)
+        return
+
+    def get_model_params(self, ary_type='numpy'):
+        """
+        Get the optimizable parameters in this model. This returns a list
+        and, to reload this model's parameters, the list must stay in order.
+
+        This can provide shared variables or numpy arrays.
+        """
+        if self.cg is None:
+            self.build_model_funcs()
+        joint_params = VariableFilter(roles=[PARAMETER])(self.cg.variables)
+        if ary_type == 'numpy':
+            for i, p in enumerate(joint_params):
+                joint_params[i] = p.get_value(borrow=False)
+        return joint_params
+
+    def set_model_params(self, numpy_param_list):
+        """
+        Set the optimizable parameters in this model. This requires a list
+        and, to reload this model's parameters, the list must be in order.
+        """
+        if self.cg is None:
+            self.build_model_funcs()
+        # grab handles for all the optimizable parameters in our cost
+        joint_params = VariableFilter(roles=[PARAMETER])(self.cg.variables)
+        for i, p in enumerate(joint_params):
+            joint_params[i].set_value(to_fX(numpy_param_list[i]))
+        return joint_params
+
+    def save_model_params(self, f_name=None):
+        """
+        Save model parameters to a pickle file, in numpy form.
+        """
+        numpy_params = self.get_model_params(ary_type='numpy')
+        f_handle = file(f_name, 'wb')
+        # dump the dict self.params, which just holds "simple" python values
+        cPickle.dump(numpy_params, f_handle, protocol=-1)
+        f_handle.close()
+        return
+
+    def load_model_params(self, f_name=None):
+        """
+        Load model parameters from a pickle file, in numpy form.
+        """
+        pickle_file = open(f_name)
+        numpy_params = cPickle.load(pickle_file)
+        self.set_model_params(numpy_params)
+        pickle_file.close()
+        return
+
+#############################################################
+# Sequential generation model, structured like the UdM VRNN #
+#############################################################
+
+class SeqGenModel(BaseRecurrent, Initializable, Random):
+    def __init__(self, n_iter, step_type, reader_mlp, writer_mlp,
+                    shared_dynamics, primary_policy, guide_policy,
+                    **kwargs):
+        super(SeqGenModel, self).__init__(**kwargs)
+        if not ((step_type == 'add') or (step_type == 'jump')):
+            raise ValueError('step_type must be jump or add')
+        # record the desired step count
+        self.n_iter = n_iter
+        self.step_type = step_type
+        # grab handles for sequential generation stuff
+        self.reader_mlp = reader_mlp
+        self.writer_mlp = writer_mlp
+        self.shared_dynamics = shared_dynamics
+        self.primary_policy = primary_policy
+        self.guide_policy = guide_policy
+
+        # record the sub-models that underlie this model
+        self.children = [self.reader_mlp, self.writer_mlp,
+                         self.shared_dynamics,
+                         self.primary_policy, self.guide_policy]
+        return
+
+    def _allocate(self):
+        # self.c_0 provides the initial state of the canvas
+        c_dim = self.get_dim('c')
+        self.c_0 = shared_floatx_nans((c_dim,), name='c_0')
+        add_role(self.c_0, PARAMETER)
+        # self.cd_0 provides the initial hidden state of the dynamics lstm
+        cd_dim = self.get_dim('c_dyn')
+        self.cd_0 = shared_floatx_nans((cd_dim,), name='cd_0')
+        add_role(self.cd_0, PARAMETER)
+        # self.hd_0 provides the initial visible state of the dynamics lstm
+        hd_dim = self.get_dim('h_dyn')
+        self.hd_0 = shared_floatx_nans((hd_dim,), name='hd_0')
+        add_role(self.hd_0, PARAMETER)
+        # add the theano shared variables to our parameter lists
+        self.params.extend([ self.c_0, self.cd_0, self.hd_0 ])
+        return
+
+    def _initialize(self):
+        # initialize to all parameters zeros...
+        for p in self.params:
+            p_nan = p.get_value(borrow=False)
+            p_zeros = numpy.zeros(p_nan.shape)
+            p.set_value(p_zeros.astype(theano.config.floatX))
+        return
+ 
+    def get_dim(self, name):
+        if name == 'c':
+            return self.writer_mlp.output_dim
+        elif name == 'h_dyn':
+            return self.shared_dynamics.get_dim('states')
+        elif name == 'c_dyn':
+            return self.shared_dynamics.get_dim('cells')
+        elif name == 'z_gen':
+            return self.primary_policy.get_dim('output')
+        elif name in ['nll', 'kl_q2p', 'kl_p2q']:
+            return 0
+        elif name == 'center_y':
+            return 0
+        elif name == 'center_x':
+            return 0
+        elif name == 'delta':
+            return 0
+        else:
+            super(SeqGenModel, self).get_dim(name)
+        return
+
+    #------------------------------------------------------------------------
+
+    @recurrent(sequences=['u'], contexts=['x', 'm'],
+               states=['c', 'h_dyn', 'c_dyn', 'nll', 'kl_q2p', 'kl_p2q'],
+               outputs=['c', 'h_dyn', 'c_dyn', 'nll', 'kl_q2p', 'kl_p2q'])
+    def iterate(self, u, c, h_dyn, c_dyn, nll, kl_q2p, kl_p2q, x, m):
+        # convert generative workspace into observation space
+        c_as_x = tensor.nnet.sigmoid(c)
+        # apply a mask for mixing observed and imputed parts of x. c_as_x
+        # gives the current reconstruction of x, for all dimensions. m will
+        # use 1 to indicate known values, and 0 to indicate values to impute.
+        x_m = (m * x) + ((1.0 - m) * c_as_x) # when m==0 everywhere, this will
+                                             # contain no information about x.
+        info_pri = 0.0*x_m # derp a doo
+        info_gui = x - x_m # compute gradient of imputation cost
+        # estimate primary policy's conditional over z
+        i_pri = tensor.concatenate([h_dyn, info_pri], axis=1)
+        z_pri_mean, z_pri_logvar, z_pri = self.primary_policy.apply(i_pri, u)
+        # estimate guide policy's conditional over z
+        i_gui = tensor.concatenate([h_dyn, info_pri, info_gui], axis=1)
+        z_gui_mean, z_gui_logvar, z_gui = self.guide_policy.apply(i_gui, u)
+        # update generation workspace (a.k.a. canvas or whatever)
+        i_wri = tensor.concatenate([h_dyn, z_gui], axis=1)
+        c_step = self.writer_mlp.apply(i_wri)
+        if self.step_type == 'add':
+            c = c + c_step
+        else:
+            c = c_step
+        # convert generative workspace into observation space
+        c_as_x = tensor.nnet.sigmoid(c)
+        # apply a mask for mixing observed and imputed parts of x. c_as_x
+        # gives the current reconstruction of x, for all dimensions. m will
+        # use 1 to indicate known values, and 0 to indicate values to impute.
+        x_m = (m * x) + ((1.0 - m) * c_as_x) # when m==0 everywhere, this will
+                                             # contain no information about x.
+        # update the shared dynamics LSTM state, based on z and c
+        i_rea = tensor.concatenate([x_m, z_gui], axis=1)
+        i_dyn = self.reader_mlp.apply(i_rea)
+        h_dyn, c_dyn = self.shared_dynamics.apply(states=h_dyn, cells=c_dyn,
+                                                  inputs=i_dyn, iterate=False)
+        # compute imputation cost at this step
+        nll = -1.0 * tensor.flatten(log_prob_bernoulli(x, x_m))
+        # compute KL(q || p) and KL(p || q) for this step
+        kl_q2p = tensor.sum(gaussian_kld(z_gui_mean, z_gui_logvar, \
+                            z_pri_mean, z_pri_logvar), axis=1)
+        kl_p2q = tensor.sum(gaussian_kld(z_pri_mean, z_pri_logvar, \
+                            z_gui_mean, z_gui_logvar), axis=1)
+        return c, h_dyn, c_dyn, nll, kl_q2p, kl_p2q
+
+    @recurrent(sequences=['u'], contexts=['x','m'],
+               states=['c', 'h_dyn', 'c_dyn'],
+               outputs=['c', 'h_dyn', 'c_dyn'])
+    def decode(self, u, c, h_dyn, c_dyn, x, m):
+        # convert generative workspace into observation space
+        c_as_x = tensor.nnet.sigmoid(c)
+        # apply a mask for mixing observed and imputed parts of x. c_as_x
+        # gives the current reconstruction of x, for all dimensions. m will
+        # use 1 to indicate known values, and 0 to indicate values to impute.
+        x_m = (m * x) + ((1.0 - m) * c_as_x) # when m==0 everywhere, this will
+                                             # contain no information about x.
+        info_pri = 0.0*x_m # derp a doo
+        # estimate primary policy's conditional over z
+        i_pri = tensor.concatenate([h_dyn, info_pri], axis=1)
+        z_pri_mean, z_pri_logvar, z_pri = \
+                self.primary_policy.apply(i_pri, u)
+        # update generation workspace (a.k.a. canvas or whatever)
+        i_wri = tensor.concatenate([h_dyn, z_pri], axis=1)
+        c_step = self.writer_mlp.apply(i_wri)
+        if self.step_type == 'add':
+            c = c + c_step
+        else:
+            c = c_step
+        # convert generative workspace into observation space
+        c_as_x = tensor.nnet.sigmoid(c)
+        # apply a mask for mixing observed and imputed parts of x. c_as_x
+        # gives the current reconstruction of x, for all dimensions. m will
+        # use 1 to indicate known values, and 0 to indicate values to impute.
+        x_m = (m * x) + ((1.0 - m) * c_as_x) # when m==0 everywhere, this will
+                                             # contain no information about x.
+        # update the shared dynamics LSTM state, based on z and c
+        i_rea = tensor.concatenate([x_m, z_pri], axis=1)
+        i_dyn = self.reader_mlp.apply(i_rea)
+        h_dyn, c_dyn = self.shared_dynamics.apply(states=h_dyn, cells=c_dyn,
+                                                  inputs=i_dyn, iterate=False)
+        return c, h_dyn, c_dyn
+
+    #------------------------------------------------------------------------
+
+    @application(inputs=['x', 'm'], 
+                 outputs=['recons', 'nll', 'kl_q2p', 'kl_p2q'])
+    def reconstruct(self, x, m):
+        # get important size and shape information
+        batch_size = x.shape[0]
+        z_gen_dim = self.get_dim('z_gen')
+        c_dim = self.get_dim('c')
+        cd_dim = self.get_dim('c_dyn')
+        hd_dim = self.get_dim('h_dyn')
+
+        # get initial state for running the generation loop
+        c0 = tensor.alloc(0.0, batch_size, c_dim) + self.c_0
+        hd0 = tensor.alloc(0.0, batch_size, hd_dim) + self.hd_0
+        cd0 = tensor.alloc(0.0, batch_size, cd_dim) + self.cd_0
+
+        # get zero-mean, unit-std. Gaussian noise for use in scan op
+        u_gen = self.theano_rng.normal(
+                    size=(self.n_iter, batch_size, z_gen_dim),
+                    avg=0., std=1.)
+
+        # run the multi-stage guided generative process
+        c, _, _, step_nlls, step_kl_q2p, step_kl_p2q = \
+                self.iterate(u=u_gen, c=c0, h_dyn=hd0, c_dyn=cd0, x=x, m=m)
+        # grab the generated observations
+        c_as_x = tensor.nnet.sigmoid(c[-1,:,:])
+        recons = (m * x) + ((1.0 - m) * c_as_x)
+        recons.name = "recons"
+        # get the NLL after the final update for each example
+        nll = step_nlls[-1]
+        nll.name = "nll"
+        # get kl cost variables
+        kl_q2p = step_kl_q2p
+        kl_q2p.name = "kl_q2p"
+        kl_p2q = step_kl_p2q
+        kl_p2q.name = "kl_p2q"
+        return recons, nll, kl_q2p, kl_p2q
+
+    @application(inputs=['x', 'm'], outputs=['recons'])
+    def sample(self, x, m):
+        """
+        Sample from model. Sampling can be performed either with or
+        without partial control (i.e. conditioning for imputation).
+
+        Returns 
+        -------
+
+        samples : tensor3 (n_samples, n_iter, x_dim)
+        """
+        # get important size and shape information
+        batch_size = x.shape[0]
+        z_gen_dim = self.get_dim('z_gen')
+        c_dim = self.get_dim('c')
+        cd_dim = self.get_dim('c_dyn')
+        hd_dim = self.get_dim('h_dyn')
+
+        # get initial state for running the generation loop
+        c0 = tensor.alloc(0.0, batch_size, c_dim) + self.c_0
+        hd0 = tensor.alloc(0.0, batch_size, hd_dim) + self.hd_0
+        cd0 = tensor.alloc(0.0, batch_size, cd_dim) + self.cd_0
+
+        # get zero-mean, unit-std. Gaussian noise for use in scan op
+        u_gen = self.theano_rng.normal(
+                    size=(self.n_iter, batch_size, z_gen_dim),
+                    avg=0., std=1.)
+
+        # run the sequential generative policy from given initial states
+        c, _, _ = self.decode(u=u_gen, c=c0, h_dyn=hd0, c_dyn=cd0, x=x, m=m)
+        # convert output into the desired form, and apply masking
+        c_as_x = tensor.nnet.sigmoid(c)
+        recons = (m * x) + ((1.0 - m) * c_as_x)
+        recons.name = "recons"
+        return recons
+
+    def build_model_funcs(self):
+        """
+        Build the symbolic costs and theano functions relevant to this model.
+        """
+        # some symbolic vars to represent various inputs/outputs
+        self.x_sym = tensor.matrix('x_sym')
+        self.m_sym = tensor.matrix('m_sym')
+
+        # collect reconstructions of x produced by the SeqGenModel
+        _, nll, kl_q2p, kl_p2q = self.reconstruct(self.x_sym, self.m_sym)
+
+        # get the expected NLL part of the VFE bound
+        self.nll_term = nll.mean()
+        self.nll_term.name = "nll_term"
+
+        # get KL(q || p) and KL(p || q)
+        self.kld_q2p_term = kl_q2p.sum(axis=0).mean()
+        self.kld_q2p_term.name = "kld_q2p_term"
+        self.kld_p2q_term = kl_p2q.sum(axis=0).mean()
+        self.kld_p2q_term.name = "kld_p2q_term"
+
+        # get the proper VFE bound on NLL
+        self.nll_bound = self.nll_term + self.kld_q2p_term
+        self.nll_bound.name = "nll_bound"
+
+        # grab handles for all the optimizable parameters in our cost
+        self.cg = ComputationGraph([self.nll_bound])
+        self.joint_params = VariableFilter(roles=[PARAMETER])(self.cg.variables)
+
+        # apply some l2 regularization to the model parameters
+        self.reg_term = (1e-5 * sum([tensor.sum(p**2.0) for p in self.joint_params]))
+        self.reg_term.name = "reg_term"
+
+        # compute the full cost w.r.t. which we will optimize
+        self.joint_cost = self.nll_term + (0.9 * self.kld_q2p_term) + \
+                          (0.1 * self.kld_p2q_term) + self.reg_term
+        self.joint_cost.name = "joint_cost"
+
+        # Get the gradient of the joint cost for all optimizable parameters
+        print("Computing gradients of joint_cost...")
+        self.joint_grads = OrderedDict()
+        grad_list = tensor.grad(self.joint_cost, self.joint_params)
+        for i, p in enumerate(self.joint_params):
+            self.joint_grads[p] = grad_list[i]
+        
+        # shared var learning rate for generator and inferencer
+        zero_ary = to_fX( numpy.zeros((1,)) )
+        self.lr = theano.shared(value=zero_ary, name='tbm_lr')
+        # shared var momentum parameters for generator and inferencer
+        self.mom_1 = theano.shared(value=zero_ary, name='tbm_mom_1')
+        self.mom_2 = theano.shared(value=zero_ary, name='tbm_mom_2')
+        # construct the updates for the generator and inferencer networks
+        self.joint_updates = get_adam_updates(params=self.joint_params, \
+                grads=self.joint_grads, alpha=self.lr, \
+                beta1=self.mom_1, beta2=self.mom_2, \
+                mom2_init=1e-4, smoothing=1e-6, max_grad_norm=10.0)
+
+        # collect the outputs to return from this function
+        outputs = [self.joint_cost, self.nll_bound, self.nll_term, \
+                   self.kld_q2p_term, self.kld_p2q_term, self.reg_term]
+
+        # compile the theano function
+        print("Compiling model training/update function...")
+        self.train_joint = theano.function(inputs=[self.x_sym, self.m_sym], \
+                                outputs=outputs, updates=self.joint_updates)
+        print("Compiling NLL bound estimator function...")
+        self.compute_nll_bound = theano.function(inputs=[self.x_sym, self.m_sym], \
+                                                 outputs=outputs)
+        print("Compiling model sampler...")
+        samples = self.sample(self.x_sym, self.m_sym)
+        self.do_sample = theano.function([self.x_sym, self.m_sym], outputs=samples, \
+                                         allow_input_downcast=True)
         return
 
     def get_model_params(self, ary_type='numpy'):
