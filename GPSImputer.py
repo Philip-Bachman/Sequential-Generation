@@ -154,15 +154,20 @@ class GPSImputer(object):
 
             # compute the next si, given the sampled zi
             hydra_out = self.p_xip1_given_zi.apply(zi)
-            si_step = hydra_out[-1]
+            si_step = hydra_out[0]
             if (self.step_type == 'jump'):
                 # jump steps always do a full swap (like standard VAE)
                 sip1 = si_step
             else:
-                # subsequent additive steps just add
-                sip1 = si + si_step
+                # additive steps adjust the current guesses incrementally
+                write_gate = T.nnet.sigmoid(2.0 + hydra_out[1])
+                erase_gate = T.nnet.sigmoid(2.0 + hydra_out[2])
+                # LSTM-style update
+                sip1 = (erase_gate * si) + (write_gate * si_step)
+                # normal update (this was used in workshop papers)
+                #sip1 = si + si_step
             # compute NLL for the current imputation
-            nlli = self._construct_nll_costs(sip1, self.x_out, self.x_mask)
+            nlli = self._construct_nll_costs(sip1, self.x_out, 0.0*self.x_mask)
             return sip1, nlli, kldi_q2p, kldi_p2q
 
         # apply scan op for the sequential imputation loop
@@ -262,7 +267,9 @@ class GPSImputer(object):
         self.sample_imputer = self._construct_sample_imputer()
         # make easy access points for some interesting parameters
         self.gen_inf_weights = self.p_zi_given_xi.shared_layers[0].W
-        self.gen_gen_weights = self.p_xip1_given_zi.output_layers[-1].W
+        self.gen_step_weights = self.p_xip1_given_zi.output_layers[0].W
+        self.gen_write_gate_weights = self.p_xip1_given_zi.output_layers[1].W
+        self.gen_erase_gate_weights = self.p_xip1_given_zi.output_layers[2].W
         return
 
     def set_sgd_params(self, lr=0.01, mom_1=0.9, mom_2=0.999):

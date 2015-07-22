@@ -30,13 +30,14 @@ RESULT_PATH = "IMP_MNIST_GPSI/"
 ###############################
 
 def test_mnist(step_type='add',
+               imp_steps=6,
                occ_dim=15,
                drop_prob=0.0):
     #########################################
     # Format the result tag more thoroughly #
     #########################################
     dp_int = int(100.0 * drop_prob)
-    result_tag = "{}GPSI_OD{}_DP{}_{}_NA".format(RESULT_PATH, occ_dim, dp_int, step_type)
+    result_tag = "{}GPSI_OD{}_DP{}_IS{}_{}_NA".format(RESULT_PATH, occ_dim, dp_int, imp_steps, step_type)
 
     ##########################
     # Get some training data #
@@ -60,7 +61,6 @@ def test_mnist(step_type='add',
     ############################################################
     obs_dim = Xtr.shape[1]
     z_dim = 100
-    imp_steps = 6
     init_scale = 1.0
 
     x_in_sym = T.matrix('x_in_sym')
@@ -71,7 +71,7 @@ def test_mnist(step_type='add',
     # p_zi_given_xi #
     #################
     params = {}
-    shared_config = [obs_dim, 1000, 1000]
+    shared_config = [obs_dim, 500, 500]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
@@ -90,8 +90,8 @@ def test_mnist(step_type='add',
     # p_xip1_given_zi #
     ###################
     params = {}
-    shared_config = [z_dim, 1000, 1000]
-    output_config = [obs_dim, obs_dim]
+    shared_config = [z_dim, 500, 500]
+    output_config = [obs_dim, obs_dim, obs_dim]
     params['shared_config'] = shared_config
     params['output_config'] = output_config
     params['activation'] = relu_actfun
@@ -108,7 +108,7 @@ def test_mnist(step_type='add',
     # q_zi_given_x_xi #
     ###################
     params = {}
-    shared_config = [(obs_dim + obs_dim), 1000, 1000]
+    shared_config = [(obs_dim + obs_dim), 500, 500]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
@@ -152,10 +152,10 @@ def test_mnist(step_type='add',
     learn_rate = 0.0002
     momentum = 0.5
     batch_idx = np.arange(batch_size) + tr_samples
-    for i in range(200000):
+    for i in range(250000):
         scale = min(1.0, ((i+1) / 5000.0))
         if (((i + 1) % 15000) == 0):
-            learn_rate = learn_rate * 0.92
+            learn_rate = learn_rate * 0.93
         if (i > 10000):
             momentum = 0.90
         else:
@@ -229,8 +229,14 @@ def test_mnist(step_type='add',
             file_name = "{0:s}_samples_ng_b{1:d}.png".format(result_tag, i)
             utils.visualize_samples(seq_samps, file_name, num_rows=20)
             # get visualizations of policy parameters
-            file_name = "{0:s}_gen_gen_weights_b{1:d}.png".format(result_tag, i)
-            W = GPSI.gen_gen_weights.get_value(borrow=False)
+            file_name = "{0:s}_gen_step_weights_b{1:d}.png".format(result_tag, i)
+            W = GPSI.gen_step_weights.get_value(borrow=False)
+            utils.visualize_samples(W[:,:obs_dim], file_name, num_rows=20)
+            file_name = "{0:s}_gen_write_gate_weights_b{1:d}.png".format(result_tag, i)
+            W = GPSI.gen_write_gate_weights.get_value(borrow=False)
+            utils.visualize_samples(W[:,:obs_dim], file_name, num_rows=20)
+            file_name = "{0:s}_gen_erase_gate_weights_b{1:d}.png".format(result_tag, i)
+            W = GPSI.gen_erase_gate_weights.get_value(borrow=False)
             utils.visualize_samples(W[:,:obs_dim], file_name, num_rows=20)
             file_name = "{0:s}_gen_inf_weights_b{1:d}.png".format(result_tag, i)
             W = GPSI.gen_inf_weights.get_value(borrow=False).T
@@ -243,13 +249,14 @@ def test_mnist(step_type='add',
 #################################
 
 def test_mnist_results(step_type='add',
+                       imp_steps=6,
                        occ_dim=15,
                        drop_prob=0.0):
     #########################################
     # Format the result tag more thoroughly #
     #########################################
     dp_int = int(100.0 * drop_prob)
-    result_tag = "{}GPSI_OD{}_DP{}_{}_NA".format(RESULT_PATH, occ_dim, dp_int, step_type)
+    result_tag = "{}GPSI_OD{}_DP{}_IS{}_{}_NA".format(RESULT_PATH, occ_dim, dp_int, imp_steps, step_type)
 
     ##########################
     # Get some training data #
@@ -273,7 +280,6 @@ def test_mnist_results(step_type='add',
     ############################################################
     obs_dim = Xtr.shape[1]
     z_dim = 100
-    imp_steps = 5
     init_scale = 1.0
 
     x_in_sym = T.matrix('x_in_sym')
@@ -340,17 +346,21 @@ if __name__=="__main__":
     #########
     # TRAINING
     #test_mnist(step_type='add', occ_dim=14, drop_prob=0.0)
-    test_mnist(step_type='add', occ_dim=16, drop_prob=0.0)
+    #test_mnist(step_type='add', occ_dim=16, drop_prob=0.0)
     #test_mnist(step_type='add', occ_dim=0, drop_prob=0.6)
     #test_mnist(step_type='add', occ_dim=0, drop_prob=0.8)
     #test_mnist(step_type='jump', occ_dim=14, drop_prob=0.0)
     #test_mnist(step_type='jump', occ_dim=16, drop_prob=0.0)
     #test_mnist(step_type='jump', occ_dim=0, drop_prob=0.6)
     #test_mnist(step_type='jump', occ_dim=0, drop_prob=0.8)
+    test_mnist(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
+    test_mnist(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
+    test_mnist(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
+    #test_mnist(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
 
     # RESULTS
     # test_mnist_results(step_type='add', occ_dim=14, drop_prob=0.0)
-    test_mnist_results(step_type='add', occ_dim=16, drop_prob=0.0)
+    # test_mnist_results(step_type='add', occ_dim=16, drop_prob=0.0)
     # test_mnist_results(step_type='add', occ_dim=0, drop_prob=0.6)
     # test_mnist_results(step_type='add', occ_dim=0, drop_prob=0.7)
     # test_mnist_results(step_type='add', occ_dim=0, drop_prob=0.8)
@@ -361,3 +371,7 @@ if __name__=="__main__":
     # test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.7)
     # test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.8)
     # test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.9)
+    test_mnist_results(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
+    test_mnist_results(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
+    test_mnist_results(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
+    #test_mnist_results(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
