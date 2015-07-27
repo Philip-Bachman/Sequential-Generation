@@ -119,80 +119,87 @@ class HydraNet(object):
             self.activation = params['activation']
         else:
             self.activation = relu_actfun
-        #########################################
-        # Initialize the shared part of network #
-        #########################################
+
+        ###
         self.shared_layers = []
-        layer_def_pairs = zip(self.shared_config[:-1],self.shared_config[1:])
-        layer_num = 0
-        # Construct input to the inference network
-        next_input = self.Xd
-        for in_def, out_def in layer_def_pairs:
-            first_layer = (layer_num == 0)
-            last_layer = (layer_num == (len(layer_def_pairs) - 1))
-            l_name = "shared_layer_{0:d}".format(layer_num)
-            if (type(in_def) is list) or (type(in_def) is tuple):
-                # Receiving input from a poolish layer...
-                in_dim = in_def[0]
-            else:
-                # Receiving input from a normal layer...
-                in_dim = in_def
-            if (type(out_def) is list) or (type(out_def) is tuple):
-                # Applying some sort of pooling in this layer...
-                out_dim = out_def[0]
-                pool_size = out_def[1]
-            else:
-                # Not applying any pooling in this layer...
-                out_dim = out_def
-                pool_size = 0
-            # Select the appropriate noise to add to this layer
-            if first_layer:
-                d_rate = self.vis_drop
-            else:
-                d_rate = self.hid_drop
-            if first_layer:
-                i_noise = self.input_noise
-                b_noise = 0.0
-            else:
-                i_noise = 0.0
-                b_noise = self.bias_noise
-            # set in-bound weights to have norm self.init_scale
-            i_scale = self.init_scale
-            if not self.is_clone:
-                ##########################################
-                # Initialize a layer with new parameters #
-                ##########################################
-                new_layer = HiddenLayer(rng=rng, input=next_input, \
-                        activation=self.activation, pool_size=pool_size, \
-                        drop_rate=d_rate, input_noise=i_noise, bias_noise=b_noise, \
-                        in_dim=in_dim, out_dim=out_dim, \
-                        name=l_name, W_scale=i_scale)
-                self.shared_layers.append(new_layer)
-                self.shared_param_dicts['shared'].append( \
-                        new_layer.shared_param_dicts)
-            else:
-                ##################################################
-                # Initialize a layer with some shared parameters #
-                ##################################################
-                init_params = self.shared_param_dicts['shared'][layer_num]
-                new_layer = HiddenLayer(rng=rng, input=next_input, \
-                        activation=self.activation, pool_size=pool_size, \
-                        drop_rate=d_rate, input_noise=i_noise, bias_noise=b_noise, \
-                        in_dim=in_dim, out_dim=out_dim, \
-                        W=init_params['W'], b=init_params['b'], \
-                        b_in=init_params['b_in'], s_in=init_params['s_in'], \
-                        name=l_name, W_scale=i_scale)
-                self.shared_layers.append(new_layer)
-            next_input = self.shared_layers[-1].output
-            # Acknowledge layer completion
-            layer_num = layer_num + 1
+        if len(self.shared_config) > 1:
+            #########################################
+            # Initialize the shared part of network #
+            #########################################
+            layer_def_pairs = zip(self.shared_config[:-1],self.shared_config[1:])
+            layer_num = 0
+            # Construct input to the inference network
+            next_input = self.Xd
+            for in_def, out_def in layer_def_pairs:
+                first_layer = (layer_num == 0)
+                last_layer = (layer_num == (len(layer_def_pairs) - 1))
+                l_name = "shared_layer_{0:d}".format(layer_num)
+                if (type(in_def) is list) or (type(in_def) is tuple):
+                    # Receiving input from a poolish layer...
+                    in_dim = in_def[0]
+                else:
+                    # Receiving input from a normal layer...
+                    in_dim = in_def
+                if (type(out_def) is list) or (type(out_def) is tuple):
+                    # Applying some sort of pooling in this layer...
+                    out_dim = out_def[0]
+                    pool_size = out_def[1]
+                else:
+                    # Not applying any pooling in this layer...
+                    out_dim = out_def
+                    pool_size = 0
+                # Select the appropriate noise to add to this layer
+                if first_layer:
+                    d_rate = self.vis_drop
+                else:
+                    d_rate = self.hid_drop
+                if first_layer:
+                    i_noise = self.input_noise
+                    b_noise = 0.0
+                else:
+                    i_noise = 0.0
+                    b_noise = self.bias_noise
+                # set in-bound weights to have norm self.init_scale
+                i_scale = self.init_scale
+                if not self.is_clone:
+                    ##########################################
+                    # Initialize a layer with new parameters #
+                    ##########################################
+                    new_layer = HiddenLayer(rng=rng, input=next_input, \
+                            activation=self.activation, pool_size=pool_size, \
+                            drop_rate=d_rate, input_noise=i_noise, bias_noise=b_noise, \
+                            in_dim=in_dim, out_dim=out_dim, \
+                            name=l_name, W_scale=i_scale)
+                    self.shared_layers.append(new_layer)
+                    self.shared_param_dicts['shared'].append( \
+                            new_layer.shared_param_dicts)
+                else:
+                    ##################################################
+                    # Initialize a layer with some shared parameters #
+                    ##################################################
+                    init_params = self.shared_param_dicts['shared'][layer_num]
+                    new_layer = HiddenLayer(rng=rng, input=next_input, \
+                            activation=self.activation, pool_size=pool_size, \
+                            drop_rate=d_rate, input_noise=i_noise, bias_noise=b_noise, \
+                            in_dim=in_dim, out_dim=out_dim, \
+                            W=init_params['W'], b=init_params['b'], \
+                            b_in=init_params['b_in'], s_in=init_params['s_in'], \
+                            name=l_name, W_scale=i_scale)
+                    self.shared_layers.append(new_layer)
+                next_input = self.shared_layers[-1].output
+                # Acknowledge layer completion
+                layer_num = layer_num + 1
         ################################
         # Initialize the output layers #
         ################################
         self.output_layers = []
         # take input from the output of the shared network
-        in_dim = self.shared_layers[-1].out_dim
-        ol_input = self.shared_layers[-1].output
+        if len(self.shared_config) > 1:
+            in_dim = self.shared_layers[-1].out_dim
+            ol_input = self.shared_layers[-1].output
+        else:
+            in_dim = self.shared_config[0]
+            ol_input = self.Xd
         for ol_num, out_dim in enumerate(self.output_config):
             ol_name = "output_layer_{0:d}".format(ol_num)
             # Select the appropriate noise to add to this layer
@@ -209,7 +216,7 @@ class HydraNet(object):
                         activation=self.activation, pool_size=pool_size, \
                         drop_rate=d_rate, input_noise=i_noise, bias_noise=b_noise, \
                         in_dim=in_dim, out_dim=out_dim, \
-                        name=l_name, W_scale=i_scale)
+                        name=ol_name, W_scale=i_scale)
                 self.output_layers.append(new_layer)
                 self.shared_param_dicts['output'].append( \
                         new_layer.shared_param_dicts)
@@ -224,7 +231,7 @@ class HydraNet(object):
                         in_dim=in_dim, out_dim=out_dim, \
                         W=init_params['W'], b=init_params['b'], \
                         b_in=init_params['b_in'], s_in=init_params['s_in'], \
-                        name=l_name, W_scale=i_scale)
+                        name=ol_name, W_scale=i_scale)
                 self.output_layers.append(new_layer)
 
         # mash all the parameters together, into a list.

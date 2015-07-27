@@ -62,7 +62,7 @@ def test_tfd(step_type='add',
     ############################################################
     # Setup some parameters for the Iterative Refinement Model #
     ############################################################
-    obs_dim = Xtr.shape[1]
+    x_dim = Xtr.shape[1]
     z_dim = 200
     imp_steps = 6
     init_scale = 1.0
@@ -75,7 +75,7 @@ def test_tfd(step_type='add',
     # p_zi_given_xi #
     #################
     params = {}
-    shared_config = [obs_dim, 1500, 1500]
+    shared_config = [x_dim, 1500, 1500]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
@@ -95,7 +95,7 @@ def test_tfd(step_type='add',
     ###################
     params = {}
     shared_config = [z_dim, 1500, 1500]
-    output_config = [obs_dim, obs_dim]
+    output_config = [x_dim, x_dim]
     params['shared_config'] = shared_config
     params['output_config'] = output_config
     params['activation'] = relu_actfun
@@ -112,7 +112,7 @@ def test_tfd(step_type='add',
     # q_zi_given_x_xi #
     ###################
     params = {}
-    shared_config = [(obs_dim + obs_dim), 1500, 1500]
+    shared_config = [(x_dim + x_dim), 1500, 1500]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
@@ -134,7 +134,7 @@ def test_tfd(step_type='add',
     ###########################################################
     print("Building the GPSImputer...")
     gpsi_params = {}
-    gpsi_params['obs_dim'] = obs_dim
+    gpsi_params['x_dim'] = x_dim
     gpsi_params['z_dim'] = z_dim
     gpsi_params['imp_steps'] = imp_steps
     gpsi_params['step_type'] = step_type
@@ -234,12 +234,12 @@ def test_tfd(step_type='add',
             file_name = "{0:s}_samples_ng_b{1:d}.png".format(result_tag, i)
             utils.visualize_samples(seq_samps, file_name, num_rows=20)
             # get visualizations of policy parameters
-            file_name = "{0:s}_gen_gen_weights_b{1:d}.png".format(result_tag, i)
-            W = GPSI.gen_gen_weights.get_value(borrow=False)
-            utils.visualize_samples(W[:,:obs_dim], file_name, num_rows=20)
-            file_name = "{0:s}_gen_inf_weights_b{1:d}.png".format(result_tag, i)
-            W = GPSI.gen_inf_weights.get_value(borrow=False).T
-            utils.visualize_samples(W[:,:obs_dim], file_name, num_rows=20)
+            # file_name = "{0:s}_gen_gen_weights_b{1:d}.png".format(result_tag, i)
+            # W = GPSI.gen_gen_weights.get_value(borrow=False)
+            # utils.visualize_samples(W[:,:x_dim], file_name, num_rows=20)
+            # file_name = "{0:s}_gen_inf_weights_b{1:d}.png".format(result_tag, i)
+            # W = GPSI.gen_inf_weights.get_value(borrow=False).T
+            # utils.visualize_samples(W[:,:x_dim], file_name, num_rows=20)
 
 ###############################
 ###############################
@@ -280,7 +280,7 @@ def test_tfd_results(step_type='add',
     ############################################################
     # Setup some parameters for the Iterative Refinement Model #
     ############################################################
-    obs_dim = Xtr.shape[1]
+    x_dim = Xtr.shape[1]
     z_dim = 200
     imp_steps = 6
     init_scale = 1.0

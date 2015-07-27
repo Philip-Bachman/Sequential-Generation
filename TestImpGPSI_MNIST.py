@@ -21,7 +21,7 @@ from load_data import load_udm, load_tfd, load_svhn_gray
 from HelperFuncs import construct_masked_data, shift_and_scale_into_01, \
                         row_shuffle, to_fX
 
-RESULT_PATH = "IMP_MNIST_GPSI/"
+RESULT_PATH = "IMP_MNIST_GPSI_2L/"
 
 ###############################
 ###############################
@@ -59,7 +59,8 @@ def test_mnist(step_type='add',
     ############################################################
     # Setup some parameters for the Iterative Refinement Model #
     ############################################################
-    obs_dim = Xtr.shape[1]
+    x_dim = Xtr.shape[1]
+    s_dim = 200
     z_dim = 100
     init_scale = 1.0
 
@@ -71,7 +72,7 @@ def test_mnist(step_type='add',
     # p_zi_given_xi #
     #################
     params = {}
-    shared_config = [obs_dim, 500, 500]
+    shared_config = [x_dim, 500, 500]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
@@ -87,11 +88,11 @@ def test_mnist(step_type='add',
             params=params, shared_param_dicts=None)
     p_zi_given_xi.init_biases(0.2)
     ###################
-    # p_xip1_given_zi #
+    # p_sip1_given_zi #
     ###################
     params = {}
     shared_config = [z_dim, 500, 500]
-    output_config = [obs_dim, obs_dim, obs_dim]
+    output_config = [s_dim, s_dim, s_dim]
     params['shared_config'] = shared_config
     params['output_config'] = output_config
     params['activation'] = relu_actfun
@@ -101,14 +102,32 @@ def test_mnist(step_type='add',
     params['bias_noise'] = 0.0
     params['input_noise'] = 0.0
     params['build_theano_funcs'] = False
-    p_xip1_given_zi = HydraNet(rng=rng, Xd=x_in_sym, \
+    p_sip1_given_zi = HydraNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
-    p_xip1_given_zi.init_biases(0.2)
+    p_sip1_given_zi.init_biases(0.2)
+    ################
+    # p_x_given_si #
+    ################
+    params = {}
+    shared_config = [s_dim, 2*s_dim]
+    output_config = [x_dim, x_dim]
+    params['shared_config'] = shared_config
+    params['output_config'] = output_config
+    params['activation'] = relu_actfun
+    params['init_scale'] = init_scale
+    params['vis_drop'] = 0.0
+    params['hid_drop'] = 0.0
+    params['bias_noise'] = 0.0
+    params['input_noise'] = 0.0
+    params['build_theano_funcs'] = False
+    p_x_given_si = HydraNet(rng=rng, Xd=x_in_sym, \
+            params=params, shared_param_dicts=None)
+    p_x_given_si.init_biases(0.0)
     ###################
     # q_zi_given_x_xi #
     ###################
     params = {}
-    shared_config = [(obs_dim + obs_dim), 500, 500]
+    shared_config = [(x_dim + x_dim), 500, 500]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
@@ -129,8 +148,9 @@ def test_mnist(step_type='add',
     ###########################################################
     print("Building the GPSImputer...")
     gpsi_params = {}
-    gpsi_params['obs_dim'] = obs_dim
+    gpsi_params['x_dim'] = x_dim
     gpsi_params['z_dim'] = z_dim
+    gpsi_params['s_dim'] = s_dim
     gpsi_params['imp_steps'] = imp_steps
     gpsi_params['step_type'] = step_type
     gpsi_params['x_type'] = 'bernoulli'
@@ -138,7 +158,8 @@ def test_mnist(step_type='add',
     GPSI = GPSImputer(rng=rng, 
             x_in=x_in_sym, x_out=x_out_sym, x_mask=x_mask_sym, \
             p_zi_given_xi=p_zi_given_xi, \
-            p_xip1_given_zi=p_xip1_given_zi, \
+            p_sip1_given_zi=p_sip1_given_zi, \
+            p_x_given_si=p_x_given_si, \
             q_zi_given_x_xi=q_zi_given_x_xi, \
             params=gpsi_params, \
             shared_param_dicts=None)
@@ -229,18 +250,18 @@ def test_mnist(step_type='add',
             file_name = "{0:s}_samples_ng_b{1:d}.png".format(result_tag, i)
             utils.visualize_samples(seq_samps, file_name, num_rows=20)
             # get visualizations of policy parameters
-            file_name = "{0:s}_gen_step_weights_b{1:d}.png".format(result_tag, i)
-            W = GPSI.gen_step_weights.get_value(borrow=False)
-            utils.visualize_samples(W[:,:obs_dim], file_name, num_rows=20)
-            file_name = "{0:s}_gen_write_gate_weights_b{1:d}.png".format(result_tag, i)
-            W = GPSI.gen_write_gate_weights.get_value(borrow=False)
-            utils.visualize_samples(W[:,:obs_dim], file_name, num_rows=20)
-            file_name = "{0:s}_gen_erase_gate_weights_b{1:d}.png".format(result_tag, i)
-            W = GPSI.gen_erase_gate_weights.get_value(borrow=False)
-            utils.visualize_samples(W[:,:obs_dim], file_name, num_rows=20)
-            file_name = "{0:s}_gen_inf_weights_b{1:d}.png".format(result_tag, i)
-            W = GPSI.gen_inf_weights.get_value(borrow=False).T
-            utils.visualize_samples(W[:,:obs_dim], file_name, num_rows=20)
+            # file_name = "{0:s}_gen_step_weights_b{1:d}.png".format(result_tag, i)
+            # W = GPSI.gen_step_weights.get_value(borrow=False)
+            # utils.visualize_samples(W[:,:x_dim], file_name, num_rows=20)
+            # file_name = "{0:s}_gen_write_gate_weights_b{1:d}.png".format(result_tag, i)
+            # W = GPSI.gen_write_gate_weights.get_value(borrow=False)
+            # utils.visualize_samples(W[:,:x_dim], file_name, num_rows=20)
+            # file_name = "{0:s}_gen_erase_gate_weights_b{1:d}.png".format(result_tag, i)
+            # W = GPSI.gen_erase_gate_weights.get_value(borrow=False)
+            # utils.visualize_samples(W[:,:x_dim], file_name, num_rows=20)
+            # file_name = "{0:s}_gen_inf_weights_b{1:d}.png".format(result_tag, i)
+            # W = GPSI.gen_inf_weights.get_value(borrow=False).T
+            # utils.visualize_samples(W[:,:x_dim], file_name, num_rows=20)
 
 #################################
 #################################
@@ -274,17 +295,6 @@ def test_mnist_results(step_type='add',
     batch_reps = 1
     all_pix_mean = np.mean(np.mean(Xtr, axis=1))
     data_mean = to_fX( all_pix_mean * np.ones((Xtr.shape[1],)) )
-
-    ############################################################
-    # Setup some parameters for the Iterative Refinement Model #
-    ############################################################
-    obs_dim = Xtr.shape[1]
-    z_dim = 100
-    init_scale = 1.0
-
-    x_in_sym = T.matrix('x_in_sym')
-    x_out_sym = T.matrix('x_out_sym')
-    x_mask_sym = T.matrix('x_mask_sym')
 
     # Load parameters from a previously trained model
     print("Testing model load from file...")
@@ -353,10 +363,10 @@ if __name__=="__main__":
     #test_mnist(step_type='jump', occ_dim=16, drop_prob=0.0)
     #test_mnist(step_type='jump', occ_dim=0, drop_prob=0.6)
     #test_mnist(step_type='jump', occ_dim=0, drop_prob=0.8)
-    test_mnist(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
-    test_mnist(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
-    test_mnist(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
-    #test_mnist(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
+    #test_mnist(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
+    #test_mnist(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
+    #test_mnist(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
+    test_mnist(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
 
     # RESULTS
     # test_mnist_results(step_type='add', occ_dim=14, drop_prob=0.0)
@@ -371,7 +381,7 @@ if __name__=="__main__":
     # test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.7)
     # test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.8)
     # test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.9)
-    test_mnist_results(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
-    test_mnist_results(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
-    test_mnist_results(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
-    #test_mnist_results(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
+    #test_mnist_results(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
+    #test_mnist_results(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
+    #test_mnist_results(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
+    test_mnist_results(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)

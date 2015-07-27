@@ -34,22 +34,23 @@ class GPSImputer(object):
         x_out: the goal state for imputation
         x_mask: mask for state dims to keep fixed during imputation
         p_zi_given_xi: InfNet for stochastic part of step
-        p_xip1_given_zi: HydraNet for deterministic part of step
+        p_sip1_given_zi: HydraNet for deterministic part of step
+        p_x_given_si: HydraNet for transform from s-space to x-space
         q_zi_given_x_xi: InfNet for the guide policy
         params: REQUIRED PARAMS SHOWN BELOW
-                obs_dim: dimension of inputs to reconstruct
+                x_dim: dimension of inputs to reconstruct
                 z_dim: dimension of latent space for policy wobble
+                s_dim: dimension of space for hypothesis construction
                 imp_steps: number of reconstruction steps to perform
                 step_type: either "add" or "jump"
                 x_type: can be "bernoulli" or "gaussian"
                 obs_transform: can be 'none' or 'sigmoid'
-                use_osm_mode: switch for testing imputation using a
-                              pre-trained VAE
     """
     def __init__(self, rng=None, 
             x_in=None, x_mask=None, x_out=None, \
             p_zi_given_xi=None, \
-            p_xip1_given_zi=None, \
+            p_sip1_given_zi=None, \
+            p_x_given_si=None, \
             q_zi_given_x_xi=None, \
             params=None, \
             shared_param_dicts=None):
@@ -58,8 +59,9 @@ class GPSImputer(object):
 
         # grab the user-provided parameters
         self.params = params
-        self.obs_dim = self.params['obs_dim']
+        self.x_dim = self.params['x_dim']
         self.z_dim = self.params['z_dim']
+        self.s_dim = self.params['s_dim']
         self.imp_steps = self.params['imp_steps']
         self.step_type = self.params['step_type']
         self.x_type = self.params['x_type']
@@ -75,20 +77,14 @@ class GPSImputer(object):
             self.obs_transform = lambda x: T.nnet.sigmoid(x)
         if self.x_type == 'bernoulli':
             self.obs_transform = lambda x: T.nnet.sigmoid(x)
-        if 'use_osm_mode' in self.params:
-            self.use_osm_mode = self.params['use_osm_mode']
-        else:
-            self.use_osm_mode = False
-            self.params['use_osm_mode'] = False
         self.shared_param_dicts = shared_param_dicts
         
         assert((self.step_type == 'add') or (self.step_type == 'jump'))
-        if self.use_osm_mode:
-            self.step_type = 'jump'
 
         # grab handles to the relevant InfNets
         self.p_zi_given_xi = p_zi_given_xi
-        self.p_xip1_given_zi = p_xip1_given_zi
+        self.p_sip1_given_zi = p_sip1_given_zi
+        self.p_x_given_si = p_x_given_si
         self.q_zi_given_x_xi = q_zi_given_x_xi
 
         # record the symbolic variables that will provide inputs to the
@@ -106,7 +102,7 @@ class GPSImputer(object):
 
         if self.shared_param_dicts is None:
             # initialize parameters "owned" by this model
-            s0_init = to_fX( np.zeros((self.obs_dim,)) )
+            s0_init = to_fX( np.zeros((self.s_dim,)) )
             self.s0 = theano.shared(value=s0_init, name='msm_s0')
             self.obs_logvar = theano.shared(value=zero_ary, name='msm_obs_logvar')
             self.bounded_logvar = 8.0 * T.tanh((1.0/8.0) * self.obs_logvar[0])
@@ -123,7 +119,7 @@ class GPSImputer(object):
         # Setup the iterative immputation loop using scan #
         ###################################################
         def imp_step_func(zi_zmuv, si):
-            si_as_x = self.obs_transform(si)
+            si_as_x = self._from_si_to_x(si)
             xi_masked = (self.x_mask * self.x_out) + \
                         ((1.0 - self.x_mask) * si_as_x)
             #grad_ll = self.x_out - xi_masked
@@ -137,23 +133,17 @@ class GPSImputer(object):
                     do_samples=False)
             zi_q = zi_q_mean + (T.exp(0.5 * zi_q_logvar) * zi_zmuv)
 
-            if self.use_osm_mode:
-                zi = zi_p
-                # compute relevant KLds for this step
-                kldi_q2p = gaussian_kld(zi_p_mean, zi_p_logvar, 0.0, 0.0)
-                kldi_p2q = gaussian_kld(zi_p_mean, zi_p_logvar, 0.0, 0.0)
-            else:
-                # make zi samples that can be switched between zi_p and zi_q
-                zi = ((self.train_switch[0] * zi_q) + \
-                     ((1.0 - self.train_switch[0]) * zi_p))
-                # compute relevant KLds for this step
-                kldi_q2p = gaussian_kld(zi_q_mean, zi_q_logvar, \
-                                        zi_p_mean, zi_p_logvar)
-                kldi_p2q = gaussian_kld(zi_p_mean, zi_p_logvar, \
-                                        zi_q_mean, zi_q_logvar)
+            # make zi samples that can be switched between zi_p and zi_q
+            zi = ((self.train_switch[0] * zi_q) + \
+                 ((1.0 - self.train_switch[0]) * zi_p))
+            # compute relevant KLds for this step
+            kldi_q2p = gaussian_kld(zi_q_mean, zi_q_logvar, \
+                                    zi_p_mean, zi_p_logvar)
+            kldi_p2q = gaussian_kld(zi_p_mean, zi_p_logvar, \
+                                    zi_q_mean, zi_q_logvar)
 
             # compute the next si, given the sampled zi
-            hydra_out = self.p_xip1_given_zi.apply(zi)
+            hydra_out = self.p_sip1_given_zi.apply(zi)
             si_step = hydra_out[0]
             if (self.step_type == 'jump'):
                 # jump steps always do a full swap (like standard VAE)
@@ -171,7 +161,7 @@ class GPSImputer(object):
             return sip1, nlli, kldi_q2p, kldi_p2q
 
         # apply scan op for the sequential imputation loop
-        self.s0_full = T.zeros_like(self.x_in) + self.s0
+        self.s0_full = T.alloc(0.0, self.x_in.shape[0], self.s_dim) + self.s0
         init_vals = [self.s0_full, None, None, None]
         self.scan_results, self.scan_updates = theano.scan(imp_step_func, \
                     outputs_info=init_vals, sequences=self.zi_zmuv)
@@ -183,7 +173,7 @@ class GPSImputer(object):
 
         # get the initial imputation state
         self.x0 = (self.x_mask * self.x_in) + \
-                  ((1.0 - self.x_mask) * self.obs_transform(self.s0_full))
+                  ((1.0 - self.x_mask) * self._from_si_to_x(self.s0_full))
 
         ######################################################################
         # ALL SYMBOLIC VARS NEEDED FOR THE OBJECTIVE SHOULD NOW BE AVAILABLE #
@@ -211,7 +201,8 @@ class GPSImputer(object):
         # Grab all of the "optimizable" parameters in "group 1"
         self.joint_params = [self.s0, self.obs_logvar]
         self.joint_params.extend(self.p_zi_given_xi.mlp_params)
-        self.joint_params.extend(self.p_xip1_given_zi.mlp_params)
+        self.joint_params.extend(self.p_sip1_given_zi.mlp_params)
+        self.joint_params.extend(self.p_x_given_si.mlp_params)
         self.joint_params.extend(self.q_zi_given_x_xi.mlp_params)
 
         #################################
@@ -266,11 +257,16 @@ class GPSImputer(object):
         print("Compiling data-guided imputer sampler...")
         self.sample_imputer = self._construct_sample_imputer()
         # make easy access points for some interesting parameters
-        self.gen_inf_weights = self.p_zi_given_xi.shared_layers[0].W
-        self.gen_step_weights = self.p_xip1_given_zi.output_layers[0].W
-        self.gen_write_gate_weights = self.p_xip1_given_zi.output_layers[1].W
-        self.gen_erase_gate_weights = self.p_xip1_given_zi.output_layers[2].W
+        #self.gen_inf_weights = self.p_zi_given_xi.shared_layers[0].W
         return
+
+    def _from_si_to_x(self, si):
+        """
+        Convert the given si from s-space to x-space.
+        """
+        x_pre_trans, _ = self.p_x_given_si.apply(si)
+        x_post_trans = self.obs_transform(x_pre_trans)
+        return x_post_trans
 
     def set_sgd_params(self, lr=0.01, mom_1=0.9, mom_2=0.999):
         """
@@ -344,7 +340,7 @@ class GPSImputer(object):
         Construct the negative log-likelihood part of free energy.
         """
         # average log-likelihood over the refinement sequence
-        xh = self.obs_transform( si )
+        xh = self._from_si_to_x( si )
         xm_inv = 1.0 - xm # we will measure nll only where xm_inv is 1
         if self.x_type == 'bernoulli':
             ll_costs = log_prob_bernoulli(xo, xh, mask=xm_inv)
@@ -528,7 +524,7 @@ class GPSImputer(object):
         xo = T.matrix()
         xm = T.matrix()
         zizmuv = self._construct_zi_zmuv(xi, 1)
-        oputs = [self.x0] + [self.obs_transform(self.si[i]) for i in range(self.imp_steps)]
+        oputs = [self.x0] + [self._from_si_to_x(self.si[i]) for i in range(self.imp_steps)]
         sample_func = theano.function(inputs=[xi, xo, xm], outputs=oputs, \
                 givens={self.x_in: xi, \
                         self.x_out: xo, \
@@ -580,7 +576,8 @@ class GPSImputer(object):
         # get numpy dicts for each of the "child" models that we must save
         child_model_dicts = {}
         child_model_dicts['p_zi_given_xi'] = self.p_zi_given_xi.save_to_dict()
-        child_model_dicts['p_xip1_given_zi'] = self.p_xip1_given_zi.save_to_dict()
+        child_model_dicts['p_sip1_given_zi'] = self.p_sip1_given_zi.save_to_dict()
+        child_model_dicts['p_x_given_si'] = self.p_x_given_si.save_to_dict()
         child_model_dicts['q_zi_given_x_xi'] = self.q_zi_given_x_xi.save_to_dict()
         # dump the numpy child model dicts to the pickle file
         cPickle.dump(child_model_dicts, f_handle, protocol=-1)
@@ -608,8 +605,10 @@ def load_gpsimputer_from_file(f_name=None, rng=None):
     xd = T.matrix()
     p_zi_given_xi = load_infnet_from_dict( \
             child_model_dicts['p_zi_given_xi'], rng=rng, Xd=xd)
-    p_xip1_given_zi = load_hydranet_from_dict( \
-            child_model_dicts['p_xip1_given_zi'], rng=rng, Xd=xd)
+    p_sip1_given_zi = load_hydranet_from_dict( \
+            child_model_dicts['p_sip1_given_zi'], rng=rng, Xd=xd)
+    p_x_given_si = load_hydranet_from_dict( \
+            child_model_dicts['p_x_given_si'], rng=rng, Xd=xd)
     q_zi_given_x_xi = load_infnet_from_dict( \
             child_model_dicts['q_zi_given_x_xi'], rng=rng, Xd=xd)
     # now, create a new GPSImputer based on the loaded data
@@ -619,7 +618,8 @@ def load_gpsimputer_from_file(f_name=None, rng=None):
     clone_net = GPSImputer(rng=rng, \
                            x_in=xi, x_mask=xm, x_out=xo, \
                            p_zi_given_xi=p_zi_given_xi, \
-                           p_xip1_given_zi=p_xip1_given_zi, \
+                           p_sip1_given_zi=p_sip1_given_zi, \
+                           p_x_given_si=p_x_given_si, \
                            q_zi_given_x_xi=q_zi_given_x_xi, \
                            params=self_dot_params, \
                            shared_param_dicts=self_dot_shared_param_dicts)
