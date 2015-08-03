@@ -41,6 +41,7 @@ class GPSImputer(object):
                 x_dim: dimension of inputs to reconstruct
                 z_dim: dimension of latent space for policy wobble
                 s_dim: dimension of space for hypothesis construction
+                use_p_x_given_si: boolean for whether to use ----
                 imp_steps: number of reconstruction steps to perform
                 step_type: either "add" or "jump"
                 x_type: can be "bernoulli" or "gaussian"
@@ -62,9 +63,15 @@ class GPSImputer(object):
         self.x_dim = self.params['x_dim']
         self.z_dim = self.params['z_dim']
         self.s_dim = self.params['s_dim']
+        self.use_p_x_given_si = self.params['use_p_x_given_si']
         self.imp_steps = self.params['imp_steps']
         self.step_type = self.params['step_type']
         self.x_type = self.params['x_type']
+        if self.use_p_x_given_si:
+            print("Constructing hypotheses via p_x_given_si...")
+        else:
+            print("Constructing hypotheses directly in x-space...")
+            assert(self.s_dim == self.x_dim)
         assert((self.x_type == 'bernoulli') or (self.x_type == 'gaussian'))
         if 'obs_transform' in self.params:
             assert((self.params['obs_transform'] == 'sigmoid') or \
@@ -264,7 +271,10 @@ class GPSImputer(object):
         """
         Convert the given si from s-space to x-space.
         """
-        x_pre_trans, _ = self.p_x_given_si.apply(si)
+        if self.use_p_x_given_si:
+            x_pre_trans, _ = self.p_x_given_si.apply(si)
+        else:
+            x_pre_trans = si
         x_post_trans = self.obs_transform(x_pre_trans)
         return x_post_trans
 

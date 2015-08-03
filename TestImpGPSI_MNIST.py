@@ -21,7 +21,8 @@ from load_data import load_udm, load_tfd, load_svhn_gray
 from HelperFuncs import construct_masked_data, shift_and_scale_into_01, \
                         row_shuffle, to_fX
 
-RESULT_PATH = "IMP_MNIST_GPSI_2L/"
+#RESULT_PATH = "IMP_MNIST_GPSI_INDIRECT/"
+RESULT_PATH = "IMP_MNIST_GPSI_DIRECT/"
 
 ###############################
 ###############################
@@ -51,7 +52,7 @@ def test_mnist(step_type='add',
     Xva = to_fX(shift_and_scale_into_01(Xva))
     tr_samples = Xtr.shape[0]
     va_samples = Xva.shape[0]
-    batch_size = 250
+    batch_size = 200
     batch_reps = 1
     all_pix_mean = np.mean(np.mean(Xtr, axis=1))
     data_mean = to_fX( all_pix_mean * np.ones((Xtr.shape[1],)) )
@@ -60,7 +61,8 @@ def test_mnist(step_type='add',
     # Setup some parameters for the Iterative Refinement Model #
     ############################################################
     x_dim = Xtr.shape[1]
-    s_dim = 200
+    s_dim = x_dim
+    #s_dim = 300
     z_dim = 100
     init_scale = 1.0
 
@@ -72,7 +74,7 @@ def test_mnist(step_type='add',
     # p_zi_given_xi #
     #################
     params = {}
-    shared_config = [x_dim, 500, 500]
+    shared_config = [x_dim, 400, 400]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
@@ -91,7 +93,7 @@ def test_mnist(step_type='add',
     # p_sip1_given_zi #
     ###################
     params = {}
-    shared_config = [z_dim, 500, 500]
+    shared_config = [z_dim, 400, 400]
     output_config = [s_dim, s_dim, s_dim]
     params['shared_config'] = shared_config
     params['output_config'] = output_config
@@ -109,7 +111,7 @@ def test_mnist(step_type='add',
     # p_x_given_si #
     ################
     params = {}
-    shared_config = [s_dim, 2*s_dim]
+    shared_config = [s_dim]
     output_config = [x_dim, x_dim]
     params['shared_config'] = shared_config
     params['output_config'] = output_config
@@ -127,7 +129,7 @@ def test_mnist(step_type='add',
     # q_zi_given_x_xi #
     ###################
     params = {}
-    shared_config = [(x_dim + x_dim), 500, 500]
+    shared_config = [(x_dim + x_dim), 400, 400]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
@@ -151,6 +153,8 @@ def test_mnist(step_type='add',
     gpsi_params['x_dim'] = x_dim
     gpsi_params['z_dim'] = z_dim
     gpsi_params['s_dim'] = s_dim
+    # switch between direct construction and construction via p_x_given_si
+    gpsi_params['use_p_x_given_si'] = False
     gpsi_params['imp_steps'] = imp_steps
     gpsi_params['step_type'] = step_type
     gpsi_params['x_type'] = 'bernoulli'
@@ -367,6 +371,7 @@ if __name__=="__main__":
     #test_mnist(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
     #test_mnist(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
     test_mnist(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
+    test_mnist(step_type='add', imp_steps=15, occ_dim=0, drop_prob=0.9)
 
     # RESULTS
     # test_mnist_results(step_type='add', occ_dim=14, drop_prob=0.0)
@@ -385,3 +390,4 @@ if __name__=="__main__":
     #test_mnist_results(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
     #test_mnist_results(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
     test_mnist_results(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
+    test_mnist_results(step_type='add', imp_steps=15, occ_dim=0, drop_prob=0.9)
