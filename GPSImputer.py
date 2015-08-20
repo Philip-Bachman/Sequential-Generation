@@ -145,9 +145,11 @@ class GPSImputer(object):
                  ((1.0 - self.train_switch[0]) * zi_p))
             # compute relevant KLds for this step
             kldi_q2p = gaussian_kld(zi_q_mean, zi_q_logvar, \
-                                    zi_p_mean, zi_p_logvar)
+                                    zi_p_mean, zi_p_logvar) # KL(q || p)
             kldi_p2q = gaussian_kld(zi_p_mean, zi_p_logvar, \
-                                    zi_q_mean, zi_q_logvar)
+                                    zi_q_mean, zi_q_logvar) # KL(p || q)
+            kldi_p2g = gaussian_kld(zi_p_mean, zi_p_logvar, \
+                                    0.0, 0.0) # KL(p || global prior)
 
             # compute the next si, given the sampled zi
             hydra_out = self.p_sip1_given_zi.apply(zi)
@@ -165,11 +167,11 @@ class GPSImputer(object):
                 #sip1 = si + si_step
             # compute NLL for the current imputation
             nlli = self._construct_nll_costs(sip1, self.x_out, 0.0*self.x_mask)
-            return sip1, nlli, kldi_q2p, kldi_p2q
+            return sip1, nlli, kldi_q2p, kldi_p2q, kldi_p2g
 
         # apply scan op for the sequential imputation loop
         self.s0_full = T.alloc(0.0, self.x_in.shape[0], self.s_dim) + self.s0
-        init_vals = [self.s0_full, None, None, None]
+        init_vals = [self.s0_full, None, None, None, None]
         self.scan_results, self.scan_updates = theano.scan(imp_step_func, \
                     outputs_info=init_vals, sequences=self.zi_zmuv)
 
@@ -177,6 +179,7 @@ class GPSImputer(object):
         self.nlli = self.scan_results[1]
         self.kldi_q2p = self.scan_results[2]
         self.kldi_p2q = self.scan_results[3]
+        self.kldi_p2g = self.scan_results[4]
 
         # get the initial imputation state
         self.x0 = (self.x_mask * self.x_in) + \
@@ -200,7 +203,8 @@ class GPSImputer(object):
         # init shared var for weighting prior kld against reconstruction
         self.lam_kld_p = theano.shared(value=zero_ary, name='gpsi_lam_kld_p')
         self.lam_kld_q = theano.shared(value=zero_ary, name='gpsi_lam_kld_q')
-        self.set_lam_kld(lam_kld_p=0.5, lam_kld_q=0.5)
+        self.lam_kld_g = theano.shared(value=zero_ary, name='gpsi_lam_kld_g')
+        self.set_lam_kld(lam_kld_p=0.05, lam_kld_q=0.95, lam_kld_g=0.1)
         # init shared var for controlling l2 regularization on params
         self.lam_l2w = theano.shared(value=zero_ary, name='msm_lam_l2w')
         self.set_lam_l2w(1e-5)
@@ -215,9 +219,10 @@ class GPSImputer(object):
         #################################
         # CONSTRUCT THE KLD-BASED COSTS #
         #################################
-        self.kld_p, self.kld_q = self._construct_kld_costs(p=1.0)
+        self.kld_p, self.kld_q, self.kld_g = self._construct_kld_costs(p=1.0)
         self.kld_costs = (self.lam_kld_p[0] * self.kld_p) + \
-                         (self.lam_kld_q[0] * self.kld_q)
+                         (self.lam_kld_q[0] * self.kld_q) + \
+                         (self.lam_kld_g[0] * self.kld_g)
         self.kld_cost = T.mean(self.kld_costs)
         #################################
         # CONSTRUCT THE NLL-BASED COSTS #
@@ -302,7 +307,7 @@ class GPSImputer(object):
         self.lam_nll.set_value(to_fX(new_lam))
         return
 
-    def set_lam_kld(self, lam_kld_p=1.0, lam_kld_q=1.0):
+    def set_lam_kld(self, lam_kld_p=0.0, lam_kld_q=1.0, lam_kld_g=0.0):
         """
         Set the relative weight of prior KL-divergence vs. data likelihood.
         """
@@ -311,6 +316,8 @@ class GPSImputer(object):
         self.lam_kld_p.set_value(to_fX(new_lam))
         new_lam = zero_ary + lam_kld_q
         self.lam_kld_q.set_value(to_fX(new_lam))
+        new_lam = zero_ary + lam_kld_g
+        self.lam_kld_g.set_value(to_fX(new_lam))
         return
 
     def set_lam_l2w(self, lam_l2w=1e-3):
@@ -366,13 +373,16 @@ class GPSImputer(object):
         """
         kld_pis = []
         kld_qis = []
+        kld_gis = []
         for i in range(self.imp_steps):
             kld_pis.append(T.sum(self.kldi_p2q[i]**p, axis=1))
             kld_qis.append(T.sum(self.kldi_q2p[i]**p, axis=1))
+            kld_gis.append(T.sum(self.kldi_p2g[i]**p, axis=1))
         # compute the batch-wise costs
         kld_pi = sum(kld_pis)
         kld_qi = sum(kld_qis)
-        return [kld_pi, kld_qi]
+        kld_gi = sum(kld_gis)
+        return [kld_pi, kld_qi, kld_gi]
 
     def _construct_reg_costs(self):
         """
@@ -440,7 +450,7 @@ class GPSImputer(object):
         xm = T.matrix()
         zizmuv = self._construct_zi_zmuv(xi, 1)
         # compile theano function for computing the costs
-        all_step_costs = [self.nlli, self.kldi_q2p, self.kldi_p2q]
+        all_step_costs = [self.nlli, self.kldi_q2p, self.kldi_p2q, self.kldi_p2g]
         cost_func = theano.function(inputs=[xi, xo, xm], \
                     outputs=all_step_costs, \
                     givens={ self.x_in: xi, \
@@ -454,11 +464,12 @@ class GPSImputer(object):
             _all_costs = cost_func(to_fX(XI), to_fX(XO), to_fX(XM))
             _kld_q2p = np.sum(np.mean(_all_costs[1], axis=1, keepdims=True), axis=0)
             _kld_p2q = np.sum(np.mean(_all_costs[2], axis=1, keepdims=True), axis=0)
+            _kld_p2g = np.sum(np.mean(_all_costs[3], axis=1, keepdims=True), axis=0)
             _step_klds = np.mean(np.sum(_all_costs[1], axis=2, keepdims=True), axis=1)
             _step_klds = to_fX( np.asarray([k for k in _step_klds]) )
             _step_nlls = np.mean(_all_costs[0], axis=1)
             _step_nlls = to_fX( np.asarray([k for k in _step_nlls]) )
-            results = [_step_nlls, _step_klds, _kld_q2p, _kld_p2q]
+            results = [_step_nlls, _step_klds, _kld_q2p, _kld_p2q, _kld_p2g]
             return results
         return raw_cost_computer
 
@@ -498,8 +509,6 @@ class GPSImputer(object):
             mean_step_kld = step_kld_sum / float(sample_count)
             return [mean_step_nll, mean_step_kld]
         return best_cost_computer
-
-
 
     def _construct_train_joint(self):
         """

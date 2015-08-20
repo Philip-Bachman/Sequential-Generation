@@ -1431,7 +1431,7 @@ class SeqGenModel(BaseRecurrent, Initializable, Random):
         # use 1 to indicate known values, and 0 to indicate values to impute.
         x_m = (m * x) + ((1.0 - m) * c_as_x) # when m==0 everywhere, this will
                                              # contain no information about x.
-        info_pri = 0.0*x_m # derp a doo
+        info_pri = x_m     # derp a doo
         info_gui = x - x_m # compute gradient of imputation cost
         # estimate primary policy's conditional over z
         i_pri = tensor.concatenate([h_dyn, info_pri], axis=1)
@@ -1478,7 +1478,7 @@ class SeqGenModel(BaseRecurrent, Initializable, Random):
         # use 1 to indicate known values, and 0 to indicate values to impute.
         x_m = (m * x) + ((1.0 - m) * c_as_x) # when m==0 everywhere, this will
                                              # contain no information about x.
-        info_pri = 0.0*x_m # derp a doo
+        info_pri = x_m # derp a doo
         # estimate primary policy's conditional over z
         i_pri = tensor.concatenate([h_dyn, info_pri], axis=1)
         z_pri_mean, z_pri_logvar, z_pri = \

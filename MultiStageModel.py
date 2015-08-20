@@ -103,6 +103,9 @@ class MultiStageModel(object):
         # this weight balances l1 vs. l2 penalty on posterior KLds
         self.l1l2_weight = theano.shared(value=zero_ary, name='msm_l1l2_weight')
         self.set_l1l2_weight(1.0)
+        # this parameter controls dropout rate in the generator read function
+        self.drop_rate = theano.shared(value=zero_ary, name='msm_drop_rate')
+        self.set_drop_rate(0.0)
 
         #############################
         # Setup self.z and self.s0. #
@@ -133,17 +136,27 @@ class MultiStageModel(object):
         for i in range(self.ir_steps):
             print("Building MSM step {0:d}...".format(i+1))
             si_obs = self.si[i]
+            # get a drop mask that drops things with probability p
+            drop_rnd = self.rng.uniform(size=si_obs.shape, low=0.0, high=1.0, \
+                                        dtype=theano.config.floatX)
+
+            drop_mask = drop_rnd > self.drop_rate[0]
+            drop_scale = 1.0 / (1.0 - self.drop_rate[0])
+            si_obs_nz = drop_scale * (drop_mask * si_obs) # basic dropout noise
+            #new_vals = self.rng.uniform(size=si_obs.shape, low=0.0, high=1.0, \
+            #                            dtype=theano.config.floatX) > 0.5
+            #si_obs_nz = (drop_mask * si_obs) + ((1.0 - drop_mask) * new_vals) # salt and pepper noise
             # get samples of next hi, conditioned on current si
             self.p_hi_given_si.append( \
                     p_hi_given_si.shared_param_clone(rng=rng, \
-                    Xd=self.obs_transform(si_obs)))
+                    Xd=self.obs_transform(si_obs_nz)))
             hi_p = self.p_hi_given_si[i].output
             # now we build the model for variational hi given si
             grad_ll = self.x - self.obs_transform(si_obs)
             self.q_hi_given_x_si.append(\
                     q_hi_given_x_si.shared_param_clone(rng=rng, \
                     Xd=T.horizontal_stack( \
-                    self.x, self.obs_transform(si_obs))))
+                    self.x, self.obs_transform(si_obs_nz))))
             hi_q = self.q_hi_given_x_si[i].output
             # make hi samples that can be switched between hi_p and hi_q
             self.hi.append( ((self.train_switch[0] * hi_q) + \
@@ -331,6 +344,17 @@ class MultiStageModel(object):
         new_val = zero_ary + l1l2_weight
         new_val = new_val.astype(theano.config.floatX)
         self.l1l2_weight.set_value(new_val)
+        return
+
+    def set_drop_rate(self, drop_rate=0.0):
+        """
+        Set the dropout rate for generator read function.
+        """
+        assert((drop_rate >= 0.0) and (drop_rate <= 1.0))
+        zero_ary = np.zeros((1,))
+        new_val = zero_ary + drop_rate
+        new_val = new_val.astype(theano.config.floatX)
+        self.drop_rate.set_value(new_val)
         return
 
     def set_input_bias(self, new_bias=None):

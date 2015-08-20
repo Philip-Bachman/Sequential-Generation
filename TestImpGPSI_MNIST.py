@@ -22,7 +22,8 @@ from HelperFuncs import construct_masked_data, shift_and_scale_into_01, \
                         row_shuffle, to_fX
 
 #RESULT_PATH = "IMP_MNIST_GPSI_INDIRECT/"
-RESULT_PATH = "IMP_MNIST_GPSI_DIRECT/"
+#RESULT_PATH = "IMP_MNIST_GPSI_DIRECT/"
+RESULT_PATH = "IMP_MNIST_GPSI_DIRECT_P2G/"
 
 ###############################
 ###############################
@@ -48,6 +49,10 @@ def test_mnist(step_type='add',
     datasets = load_udm(dataset, as_shared=False, zero_mean=False)
     Xtr = datasets[0][0]
     Xva = datasets[1][0]
+    Xte = datasets[2][0]
+    # Merge validation set and training set, and test on test set.
+    #Xtr = np.concatenate((Xtr, Xva), axis=0)
+    #Xva = Xte
     Xtr = to_fX(shift_and_scale_into_01(Xtr))
     Xva = to_fX(shift_and_scale_into_01(Xva))
     tr_samples = Xtr.shape[0]
@@ -179,6 +184,7 @@ def test_mnist(step_type='add',
     batch_idx = np.arange(batch_size) + tr_samples
     for i in range(250000):
         scale = min(1.0, ((i+1) / 5000.0))
+        lam_scale = 1.0 - min(1.0, ((i+1) / 100000.0)) # decays from 1.0->0.0
         if (((i + 1) % 15000) == 0):
             learn_rate = learn_rate * 0.93
         if (i > 10000):
@@ -196,7 +202,7 @@ def test_mnist(step_type='add',
                             mom_1=scale*momentum, mom_2=0.98)
         GPSI.set_train_switch(1.0)
         GPSI.set_lam_nll(lam_nll=1.0)
-        GPSI.set_lam_kld(lam_kld_p=0.1, lam_kld_q=0.9)
+        GPSI.set_lam_kld(lam_kld_p=0.1, lam_kld_q=0.9, lam_kld_g=(0.25 * lam_scale))
         GPSI.set_lam_l2w(1e-4)
         # perform a minibatch update and record the cost for this batch
         xb = to_fX( Xtr.take(batch_idx, axis=0) )
@@ -308,7 +314,7 @@ def test_mnist_results(step_type='add',
     ################################################################
     # Apply some updates, to check that they aren't totally broken #
     ################################################################
-    log_name = "{}_FINAL_RESULTS.txt".format(result_tag)
+    log_name = "{}_FINAL_RESULTS_NEW.txt".format(result_tag)
     out_file = open(log_name, 'wb')
 
     Xva = row_shuffle(Xva)
@@ -367,9 +373,14 @@ if __name__=="__main__":
     #test_mnist(step_type='jump', occ_dim=16, drop_prob=0.0)
     #test_mnist(step_type='jump', occ_dim=0, drop_prob=0.6)
     #test_mnist(step_type='jump', occ_dim=0, drop_prob=0.8)
-    #test_mnist(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
-    #test_mnist(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
-    #test_mnist(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
+    test_mnist(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
+    test_mnist(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
+    test_mnist(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
+
+    test_mnist_results(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
+    test_mnist_results(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
+    test_mnist_results(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
+
     test_mnist(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
     test_mnist(step_type='add', imp_steps=15, occ_dim=0, drop_prob=0.9)
 
@@ -386,8 +397,8 @@ if __name__=="__main__":
     # test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.7)
     # test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.8)
     # test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.9)
-    #test_mnist_results(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
-    #test_mnist_results(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
-    #test_mnist_results(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
+    test_mnist_results(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
+    test_mnist_results(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
+    test_mnist_results(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
     test_mnist_results(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
     test_mnist_results(step_type='add', imp_steps=15, occ_dim=0, drop_prob=0.9)

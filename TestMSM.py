@@ -16,7 +16,7 @@ from NetLayers import relu_actfun, softplus_actfun
 from HelperFuncs import apply_mask, binarize_data, row_shuffle
 from InfNet import InfNet
 from MultiStageModel import MultiStageModel
-from load_data import load_udm, load_udm_ss, load_mnist
+from load_data import load_udm, load_binarized_mnist
 import utils
 
 ########################################
@@ -30,13 +30,12 @@ def test_with_model_init():
     # Get some training data #
     ##########################
     rng = np.random.RandomState(1234)
-    dataset = 'data/mnist.pkl.gz'
-    datasets = load_udm(dataset, zero_mean=False)
-    Xtr_shared = datasets[0][0]
-    Xva_shared = datasets[1][0]
-    Xtr = Xtr_shared.get_value(borrow=False).astype(theano.config.floatX)
-    Xva = Xva_shared.get_value(borrow=False).astype(theano.config.floatX)
+    Xtr, Xva, Xte = load_binarized_mnist(data_path='./data/')
+    Xtr = np.vstack((Xtr, Xva))
+    Xva = Xte
+    #del Xte
     tr_samples = Xtr.shape[0]
+    va_samples = Xva.shape[0]
     batch_size = 200
     batch_reps = 1
 
@@ -55,13 +54,13 @@ def test_with_model_init():
     # p_s0_obs_given_z_obs #
     ########################
     params = {}
-    shared_config = [z_dim, 250, 250]
+    shared_config = [z_dim, 400, 400]
     top_config = [shared_config[-1], obs_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
     params['activation'] = relu_actfun
-    params['init_scale'] = 1.2
+    params['init_scale'] = 1.0
     params['lam_l2a'] = 1e-3
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
@@ -75,13 +74,13 @@ def test_with_model_init():
     # p_hi_given_si #
     #################
     params = {}
-    shared_config = [obs_dim, 250, 250]
+    shared_config = [obs_dim, 400, 400]
     top_config = [shared_config[-1], h_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
     params['activation'] = relu_actfun
-    params['init_scale'] = 1.2
+    params['init_scale'] = 1.0
     params['lam_l2a'] = 0.0
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
@@ -95,13 +94,13 @@ def test_with_model_init():
     # p_sip1_given_si_hi #
     ######################
     params = {}
-    shared_config = [h_dim, 250, 250]
+    shared_config = [h_dim, 400, 400]
     top_config = [shared_config[-1], obs_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
     params['activation'] = relu_actfun
-    params['init_scale'] = 1.2
+    params['init_scale'] = 1.0
     params['lam_l2a'] = 0.0
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
@@ -115,13 +114,13 @@ def test_with_model_init():
     # q_z_given_x #
     ###############
     params = {}
-    shared_config = [obs_dim, 250, 250]
+    shared_config = [obs_dim, 400, 400]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
     params['activation'] = relu_actfun
-    params['init_scale'] = 1.2
+    params['init_scale'] = 1.0
     params['lam_l2a'] = 0.0
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
@@ -135,13 +134,13 @@ def test_with_model_init():
     # q_hi_given_x_si #
     ###################
     params = {}
-    shared_config = [(obs_dim + obs_dim), 500, 500]
+    shared_config = [(obs_dim + obs_dim), 400, 400]
     top_config = [shared_config[-1], h_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
     params['activation'] = relu_actfun
-    params['init_scale'] = 1.2
+    params['init_scale'] = 1.0
     params['lam_l2a'] = 0.0
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
@@ -167,7 +166,7 @@ def test_with_model_init():
             q_z_given_x=q_z_given_x, \
             q_hi_given_x_si=q_hi_given_x_si, \
             obs_dim=obs_dim, z_dim=z_dim, h_dim=h_dim, \
-            model_init_obs=True, ir_steps=2, \
+            model_init_obs=True, ir_steps=3, \
             params=msm_params)
     obs_mean = (0.9 * np.mean(Xtr, axis=0)) + 0.05
     obs_mean_logit = np.log(obs_mean / (1.0 - obs_mean))
@@ -177,37 +176,43 @@ def test_with_model_init():
     ################################################################
     # Apply some updates, to check that they aren't totally broken #
     ################################################################
+    log_name = "{}_RESULTS.txt".format("MSM_TEST")
+    out_file = open(log_name, 'wb')
     costs = [0. for i in range(10)]
-    learn_rate = 0.0003
-    momentum = 0.8
+    learn_rate = 0.0002
+    momentum = 0.9
     for i in range(300000):
-        scale = min(1.0, ((i+1) / 10000.0))
-        extra_kl = max(0.0, ((50000.0 - i) / 50000.0))
+        scale = min(1.0, ((i+1) / 15000.0))
         if (((i + 1) % 10000) == 0):
             learn_rate = learn_rate * 0.95
         # randomly sample a minibatch
         tr_idx = npr.randint(low=0,high=tr_samples,size=(batch_size,))
-        Xb = binarize_data(Xtr.take(tr_idx, axis=0))
-        Xb = Xb.astype(theano.config.floatX)
+        Xb = Xtr.take(tr_idx, axis=0)
+        #Xb = binarize_data(Xtr.take(tr_idx, axis=0))
         # set sgd and objective function hyperparams for this update
         MSM.set_sgd_params(lr_1=scale*learn_rate, lr_2=scale*learn_rate, \
                            mom_1=(scale*momentum), mom_2=0.98)
         MSM.set_train_switch(1.0)
         MSM.set_l1l2_weight(1.0)
+        MSM.set_drop_rate(drop_rate=0.25)
         MSM.set_lam_nll(lam_nll=1.0)
-        MSM.set_lam_kld(lam_kld_1=(1.0+extra_kl), lam_kld_2=(1.0+extra_kl))
+        MSM.set_lam_kld(lam_kld_1=1.0, lam_kld_2=1.0)
         MSM.set_lam_l2w(1e-6)
-        MSM.set_kzg_weight(0.01)
+        MSM.set_kzg_weight(0.05)
         # perform a minibatch update and record the cost for this batch
         result = MSM.train_joint(Xb, batch_reps)
         costs = [(costs[j] + result[j]) for j in range(len(result))]
         if ((i % 500) == 0):
             costs = [(v / 500.0) for v in costs]
-            print("-- batch {0:d} --".format(i))
-            print("    joint_cost: {0:.4f}".format(costs[0]))
-            print("    nll_cost  : {0:.4f}".format(costs[1]))
-            print("    kld_cost  : {0:.4f}".format(costs[2]))
-            print("    reg_cost  : {0:.4f}".format(costs[3]))
+            str1 = "-- batch {0:d} --".format(i)
+            str2 = "    joint_cost: {0:.4f}".format(costs[0])
+            str3 = "    nll_cost  : {0:.4f}".format(costs[1])
+            str4 = "    kld_cost  : {0:.4f}".format(costs[2])
+            str5 = "    reg_cost  : {0:.4f}".format(costs[3])
+            joint_str = "\n".join([str1, str2, str3, str4, str5])
+            print(joint_str)
+            out_file.write(joint_str+"\n")
+            out_file.flush()
             costs = [0.0 for v in costs]
         if (((i % 2000) == 0) or ((i < 10000) and ((i % 1000) == 0))):
             Xva = row_shuffle(Xva)
@@ -254,7 +259,10 @@ def test_with_model_init():
             file_name = "MX_FREE_ENERGY_b{0:d}.png".format(i)
             fe_terms = MSM.compute_fe_terms(binarize_data(Xva[0:5000]), 20)
             fe_mean = np.mean(fe_terms[0]) + np.mean(fe_terms[1])
-            print("    nll_bound : {0:.4f}".format(fe_mean))
+            out_str = "    nll_bound : {0:.4f}".format(fe_mean)
+            print(out_str)
+            out_file.write(out_str+"\n")
+            out_file.flush()
             utils.plot_scatter(fe_terms[1], fe_terms[0], file_name, \
                     x_label='Posterior KLd', y_label='Negative Log-likelihood')
     return
