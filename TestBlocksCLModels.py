@@ -239,7 +239,7 @@ def test_imocld_generation(step_type='add', attention=False):
             # draw some independent samples from the model
             Xb = to_fX(Xva[:256])
             Mb = 0.0 * Xb
-            samples = draw.do_sample(Xb, Mb)
+            samples, _ = draw.do_sample(Xb, Mb)
             n_iter, N, D = samples.shape
             samples = samples.reshape( (n_iter, N, 28, 28) )
             for j in xrange(n_iter):

@@ -136,27 +136,17 @@ class MultiStageModel(object):
         for i in range(self.ir_steps):
             print("Building MSM step {0:d}...".format(i+1))
             si_obs = self.si[i]
-            # get a drop mask that drops things with probability p
-            drop_rnd = self.rng.uniform(size=si_obs.shape, low=0.0, high=1.0, \
-                                        dtype=theano.config.floatX)
-
-            drop_mask = drop_rnd > self.drop_rate[0]
-            drop_scale = 1.0 / (1.0 - self.drop_rate[0])
-            si_obs_nz = drop_scale * (drop_mask * si_obs) # basic dropout noise
-            #new_vals = self.rng.uniform(size=si_obs.shape, low=0.0, high=1.0, \
-            #                            dtype=theano.config.floatX) > 0.5
-            #si_obs_nz = (drop_mask * si_obs) + ((1.0 - drop_mask) * new_vals) # salt and pepper noise
             # get samples of next hi, conditioned on current si
             self.p_hi_given_si.append( \
                     p_hi_given_si.shared_param_clone(rng=rng, \
-                    Xd=self.obs_transform(si_obs_nz)))
+                    Xd=self.obs_transform(si_obs)))
             hi_p = self.p_hi_given_si[i].output
             # now we build the model for variational hi given si
             grad_ll = self.x - self.obs_transform(si_obs)
             self.q_hi_given_x_si.append(\
                     q_hi_given_x_si.shared_param_clone(rng=rng, \
                     Xd=T.horizontal_stack( \
-                    self.x, self.obs_transform(si_obs_nz))))
+                    grad_ll, self.obs_transform(si_obs))))
             hi_q = self.q_hi_given_x_si[i].output
             # make hi samples that can be switched between hi_p and hi_q
             self.hi.append( ((self.train_switch[0] * hi_q) + \

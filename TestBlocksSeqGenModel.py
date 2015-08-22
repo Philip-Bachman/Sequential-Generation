@@ -227,7 +227,7 @@ def test_sgm_mnist(step_type='add', occ_dim=14, drop_prob=0.0, attention=False):
             Xb = to_fX(Xva[:100])
             _, Xb, Mb = construct_masked_data(Xb, drop_prob=drop_prob, \
                                     occ_dim=occ_dim, data_mean=None)
-            samples = model.do_sample(Xb, Mb)
+            samples, _ = model.do_sample(Xb, Mb)
             n_iter, N, D = samples.shape
             samples = samples.reshape( (n_iter, N, 28, 28) )
             for j in xrange(n_iter):

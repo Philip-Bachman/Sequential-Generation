@@ -97,7 +97,7 @@ def test_imoold_generation(step_type='add', attention=False):
     # Setup some parameters for the Iterative Refinement Model #
     ############################################################
     x_dim = Xtr.shape[1]
-    write_dim = 250
+    write_dim = 200
     enc_dim = 250
     dec_dim = 250
     mix_dim = 25
@@ -174,7 +174,7 @@ def test_imoold_generation(step_type='add', attention=False):
     # Apply some updates, to check that they aren't totally broken #
     ################################################################
     print("Beginning to train the model...")
-    out_file = open("S75_TBOLM_GEN_RESULTS_{}_{}.txt".format(step_type, att_tag), 'wb')
+    out_file = open("TBOLM_GEN_RESULTS_{}_{}.txt".format(step_type, att_tag), 'wb')
     costs = [0. for i in range(10)]
     learn_rate = 0.0002
     momentum = 0.5
@@ -221,7 +221,7 @@ def test_imoold_generation(step_type='add', attention=False):
             out_file.flush()
             costs = [0.0 for v in costs]
         if ((i % 1000) == 0):
-            draw.save_model_params("S75_TBOLM_GEN_PARAMS_{}_{}.pkl".format(step_type, att_tag))
+            draw.save_model_params("TBOLM_GEN_PARAMS_{}_{}.pkl".format(step_type, att_tag))
             # compute a small-sample estimate of NLL bound on validation set
             Xva = row_shuffle(Xva)
             Xb = to_fX(Xva[:5000])
@@ -234,12 +234,13 @@ def test_imoold_generation(step_type='add', attention=False):
             out_file.write(joint_str+"\n")
             out_file.flush()
             # draw some independent samples from the model
-            samples = draw.do_sample(16*16)
+            samples, x_logodds = draw.do_sample(16*16)
+            utils.plot_kde_histogram(x_logodds[-1,:,:], "TBOLM-log_odds_hist.png", bins=30)
             n_iter, N, D = samples.shape
             samples = samples.reshape( (n_iter, N, 28, 28) )
             for j in xrange(n_iter):
                 img = img_grid(samples[j,:,:,:])
-                img.save("S75_TBOLM-gen-samples-%03d.png" % (j,))
+                img.save("TBOLM-gen-samples-%03d.png" % (j,))
 
 
 ####################################################
@@ -367,7 +368,7 @@ def test_imoold_generation_ft(step_type='add', attention=False):
 
         # perform a minibatch update and record the cost for this batch
         Xb = to_fX(Xva.take(batch_idx, axis=0))
-        result = draw.train_var(Xb, Xb) # only train vairational parameters
+        result = draw.train_var(Xb, Xb) # only train variational parameters
         costs = [(costs[j] + result[j]) for j in range(len(result))]
 
         # diagnostics
@@ -402,8 +403,7 @@ if __name__=="__main__":
     #######################################################################
     # Train "binarized MNIST" generative models (open loopish LSTM triad) #
     #######################################################################
-    test_imoold_generation(step_type='add', attention=True)
-    #test_imoold_generation(step_type='add', attention=False)
+    test_imoold_generation(step_type='add', attention=False)
     #test_imoold_generation(step_type='jump', attention=False)
     #######################################################
     # Finetune parameters of the variational distribution #

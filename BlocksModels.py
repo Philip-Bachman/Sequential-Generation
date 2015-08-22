@@ -35,13 +35,10 @@ def log_prob_bernoulli(p_true, p_approx, mask=None):
     """
     if mask is None:
         mask = tensor.ones((1, p_approx.shape[1]))
-    log_prob_1 = p_true * tensor.log(p_approx+1e-6)
-    log_prob_0 = (1.0 - p_true) * tensor.log((1.0 - p_approx)+1e-6)
+    log_prob_1 = p_true * tensor.log(p_approx+0.0*1e-6)
+    log_prob_0 = (1.0 - p_true) * tensor.log((1.0 - p_approx)+0.0*1e-6)
     log_prob_01 = log_prob_1 + log_prob_0
     row_log_probs = tensor.sum((log_prob_01 * mask), axis=1, keepdims=True)
-    #row_log_probs = -1.0 * tensor.sum( \
-    #    (tensor.nnet.binary_crossentropy(p_approx, p_true) * mask), \
-    #    axis=1, keepdims=True)
     return row_log_probs
 
 def gaussian_kld(mu_left, logvar_left, mu_right, logvar_right):
@@ -662,7 +659,7 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
         kl_p2q.name = "kl_p2q"
         return recons, nll, kl_q2p, kl_p2q
 
-    @application(inputs=['n_samples'], outputs=['samples'])
+    @application(inputs=['n_samples'], outputs=['x_samples','c_samples'])
     def sample(self, n_samples):
         """Sample from model.
 
@@ -696,9 +693,10 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
                     size=(self.n_iter, n_samples, z_gen_dim),
                     avg=0., std=1.)
 
-        c, _, _, = self.decode(u=u_gen, c=c0, h_dec=hd0, c_dec=cd0)
-        #c, _, _, center_y, center_x, delta = self.decode(u)
-        return tensor.nnet.sigmoid(c)
+        c_samples, _, _, = self.decode(u=u_gen, c=c0, h_dec=hd0, c_dec=cd0)
+        #c_samples, _, _, center_y, center_x, delta = self.decode(u)
+        x_samples = tensor.nnet.sigmoid(c_samples)
+        return [x_samples, c_samples]
 
     def build_model_funcs(self):
         """
@@ -770,8 +768,9 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
                                                  outputs=outputs)
         print("Compiling model sampler...")
         n_samples = tensor.iscalar("n_samples")
-        samples = self.sample(n_samples)
-        self.do_sample = theano.function([n_samples], outputs=samples, \
+        x_samples, c_samples = self.sample(n_samples)
+        self.do_sample = theano.function([n_samples], \
+                                         outputs=[x_samples, c_samples], \
                                          allow_input_downcast=True)
         return
 
@@ -1007,7 +1006,7 @@ class IMoCLDrawModels(BaseRecurrent, Initializable, Random):
             c = self.writer_mlp.apply(c_dec)
         # compute the NLL of the reconstruction as of this step
         c_as_x = tensor.nnet.sigmoid(c)
-        m_inv = 1.0 - m
+        m_inv = 1.0 - 0.0*m
         nll = -1.0 * tensor.flatten(log_prob_bernoulli(x, c_as_x, mask=m_inv))
         # compute KL(q || p) and KL(p || q) for this step
         kl_q2p = tensor.sum(gaussian_kld(q_zg_mean, q_zg_logvar, \
@@ -1121,7 +1120,7 @@ class IMoCLDrawModels(BaseRecurrent, Initializable, Random):
         kl_p2q.name = "kl_p2q"
         return recons, nll, kl_q2p, kl_p2q
 
-    @application(inputs=['x', 'm'], outputs=['recons'])
+    @application(inputs=['x', 'm'], outputs=['recons','c_samples'])
     def sample(self, x, m):
         """
         Sample from model. Sampling can be performed either with or
@@ -1169,13 +1168,13 @@ class IMoCLDrawModels(BaseRecurrent, Initializable, Random):
                     size=(self.n_iter, batch_size, z_gen_dim),
                     avg=0., std=1.)
         # run the sequential generative policy from given initial states
-        c, _, _, _, _ = self.decode(u=u_gen, c=c0, h_enc=he0, c_enc=ce0, \
-                                    h_dec=hd0, c_dec=cd0, x=x, m=m)
+        c_samples, _, _, _, _ = self.decode(u=u_gen, c=c0, h_enc=he0, c_enc=ce0, \
+                                            h_dec=hd0, c_dec=cd0, x=x, m=m)
         # convert output into the desired form, and apply masking
-        c_as_x = tensor.nnet.sigmoid(c)
+        c_as_x = tensor.nnet.sigmoid(c_samples)
         recons = (m * x) + ((1.0 - m) * c_as_x)
         recons.name = "recons"
-        return recons
+        return [recons, c_samples]
 
     def build_model_funcs(self):
         """
@@ -1211,8 +1210,8 @@ class IMoCLDrawModels(BaseRecurrent, Initializable, Random):
         self.reg_term.name = "reg_term"
 
         # compute the full cost w.r.t. which we will optimize
-        self.joint_cost = self.nll_term + (0.9 * self.kld_q2p_term) + \
-                          (0.1 * self.kld_p2q_term) + self.reg_term
+        self.joint_cost = self.nll_term + (0.95 * self.kld_q2p_term) + \
+                          (0.05 * self.kld_p2q_term) + self.reg_term
         self.joint_cost.name = "joint_cost"
 
         # Get the gradient of the joint cost for all optimizable parameters
@@ -1246,8 +1245,9 @@ class IMoCLDrawModels(BaseRecurrent, Initializable, Random):
         self.compute_nll_bound = theano.function(inputs=[self.x_sym, self.m_sym], \
                                                  outputs=outputs)
         print("Compiling model sampler...")
-        samples = self.sample(self.x_sym, self.m_sym)
-        self.do_sample = theano.function([self.x_sym, self.m_sym], outputs=samples, \
+        x_samples, c_samples = self.sample(self.x_sym, self.m_sym)
+        self.do_sample = theano.function([self.x_sym, self.m_sym], \
+                                         outputs=[x_samples, c_samples], \
                                          allow_input_downcast=True)
         return
 
@@ -1287,8 +1287,8 @@ class IMoCLDrawModels(BaseRecurrent, Initializable, Random):
                                          updates=self.var_updates)
 
         # create a function for computing unguided reconstruction cost
-        samples = self.sample(self.x_sym, self.m_sym) # do unguided sampling
-        x_hat = samples[-1,:,:]                       # get final sampled state
+        x_samples, _ = self.sample(self.x_sym, self.m_sym) # do unguided sampling
+        x_hat = x_samples[-1,:,:]                       # get final sampled state
         m_inv = 1.0 - self.m_sym                      # invert occlusion mask
         nll_unguided = -1.0 * tensor.flatten(log_prob_bernoulli(self.x_sym, \
                                                        x_hat, mask=m_inv))
@@ -1543,7 +1543,7 @@ class SeqGenModel(BaseRecurrent, Initializable, Random):
         kl_p2q.name = "kl_p2q"
         return recons, nll, kl_q2p, kl_p2q
 
-    @application(inputs=['x', 'm'], outputs=['recons'])
+    @application(inputs=['x', 'm'], outputs=['recons','c_samples'])
     def sample(self, x, m):
         """
         Sample from model. Sampling can be performed either with or
@@ -1572,12 +1572,12 @@ class SeqGenModel(BaseRecurrent, Initializable, Random):
                     avg=0., std=1.)
 
         # run the sequential generative policy from given initial states
-        c, _, _ = self.decode(u=u_gen, c=c0, h_dyn=hd0, c_dyn=cd0, x=x, m=m)
+        c_samples, _, _ = self.decode(u=u_gen, c=c0, h_dyn=hd0, c_dyn=cd0, x=x, m=m)
         # convert output into the desired form, and apply masking
-        c_as_x = tensor.nnet.sigmoid(c)
+        c_as_x = tensor.nnet.sigmoid(c_samples)
         recons = (m * x) + ((1.0 - m) * c_as_x)
         recons.name = "recons"
-        return recons
+        return [recons, c_samples]
 
     def build_model_funcs(self):
         """
@@ -1648,8 +1648,9 @@ class SeqGenModel(BaseRecurrent, Initializable, Random):
         self.compute_nll_bound = theano.function(inputs=[self.x_sym, self.m_sym], \
                                                  outputs=outputs)
         print("Compiling model sampler...")
-        samples = self.sample(self.x_sym, self.m_sym)
-        self.do_sample = theano.function([self.x_sym, self.m_sym], outputs=samples, \
+        x_samples, c_samples = self.sample(self.x_sym, self.m_sym)
+        self.do_sample = theano.function([self.x_sym, self.m_sym], \
+                                         outputs=[x_samples, c_samples], \
                                          allow_input_downcast=True)
         return
 

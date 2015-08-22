@@ -92,13 +92,17 @@ def test_imocld_imp_mnist(step_type='add', occ_dim=14, drop_prob=0.0, attention=
     rng = np.random.RandomState(1234)
     dataset = 'data/mnist.pkl.gz'
     datasets = load_udm(dataset, as_shared=False, zero_mean=False)
-    Xtr = np.vstack((datasets[0][0], datasets[1][0]))
-    Xva = datasets[2][0]
+    Xtr = datasets[0][0]
+    Xva = datasets[1][0]
+    Xte = datasets[2][0]
+    # Merge validation set and training set, and test on test set.
+    #Xtr = np.concatenate((Xtr, Xva), axis=0)
+    #Xva = Xte
     Xtr = to_fX(shift_and_scale_into_01(Xtr))
     Xva = to_fX(shift_and_scale_into_01(Xva))
     tr_samples = Xtr.shape[0]
     va_samples = Xva.shape[0]
-    batch_size = 250
+    batch_size = 200
 
     ############################################################
     # Setup some parameters for the Iterative Refinement Model #
@@ -109,7 +113,7 @@ def test_imocld_imp_mnist(step_type='add', occ_dim=14, drop_prob=0.0, attention=
     dec_dim = 300
     mix_dim = 20
     z_dim = 100
-    n_iter = 16
+    n_iter = 20
     dp_int = int(100.0 * drop_prob)
     
     rnninits = {
@@ -249,7 +253,7 @@ def test_imocld_imp_mnist(step_type='add', occ_dim=14, drop_prob=0.0, attention=
             Xb = to_fX(Xva[:100])
             _, Xb, Mb = construct_masked_data(Xb, drop_prob=drop_prob, \
                                     occ_dim=occ_dim, data_mean=None)
-            samples = draw.do_sample(Xb, Mb)
+            samples, _ = draw.do_sample(Xb, Mb)
             n_iter, N, D = samples.shape
             samples = samples.reshape( (n_iter, N, 28, 28) )
             for j in xrange(n_iter):
@@ -429,7 +433,7 @@ def test_imocld_imp_svhn(step_type='add', occ_dim=14, drop_prob=0.0, attention=F
             Xb = to_fX(Xva[:100])
             _, Xb, Mb = construct_masked_data(Xb, drop_prob=drop_prob, \
                                     occ_dim=occ_dim, data_mean=None)
-            samples = draw.do_sample(Xb, Mb)
+            samples, _ = draw.do_sample(Xb, Mb)
             n_iter, N, D = samples.shape
             samples = samples.reshape( (n_iter, N, 32, 32) )
             for j in xrange(n_iter):
@@ -612,7 +616,7 @@ def test_imocld_imp_tfd(step_type='add', occ_dim=14, drop_prob=0.0, attention=Fa
             Xb = to_fX(Xva[:100])
             _, Xb, Mb = construct_masked_data(Xb, drop_prob=drop_prob, \
                                     occ_dim=occ_dim, data_mean=None)
-            samples = draw.do_sample(Xb, Mb)
+            samples, _ = draw.do_sample(Xb, Mb)
             n_iter, N, D = samples.shape
             samples = samples.reshape( (n_iter, N, 48, 48) )
             for j in xrange(n_iter):
@@ -622,11 +626,13 @@ def test_imocld_imp_tfd(step_type='add', occ_dim=14, drop_prob=0.0, attention=Fa
 if __name__=="__main__":
     #test_imocld_imp_mnist(step_type='add', occ_dim=14, drop_prob=0.0)
     #test_imocld_imp_mnist(step_type='jump', occ_dim=14, drop_prob=0.0)
-    test_imocld_imp_mnist(step_type='add', occ_dim=16, drop_prob=0.0)
+    #test_imocld_imp_mnist(step_type='add', occ_dim=16, drop_prob=0.0)
     #test_imocld_imp_mnist(step_type='jump', occ_dim=16, drop_prob=0.0)
     #test_imocld_imp_mnist(step_type='add', occ_dim=0, drop_prob=0.6)
     #test_imocld_imp_mnist(step_type='jump', occ_dim=0, drop_prob=0.6)
     #test_imocld_imp_mnist(step_type='add', occ_dim=0, drop_prob=0.8)
+    #test_imocld_imp_mnist(step_type='jump', occ_dim=0, drop_prob=0.8)
+    test_imocld_imp_mnist(step_type='add', occ_dim=0, drop_prob=0.9)
     #test_imocld_imp_mnist(step_type='jump', occ_dim=0, drop_prob=0.8)
     #test_imocld_imp_tfd(step_type='add', occ_dim=0, drop_prob=0.8)
     #test_imocld_imp_tfd(step_type='add', occ_dim=25, drop_prob=0.0)

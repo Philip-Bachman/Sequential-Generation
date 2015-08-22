@@ -144,7 +144,7 @@ def test_imocld_mnist(step_type='add', attention=False):
                                 occ_dim=occ_dim, data_mean=None)
         Xb = np.repeat(Xb, 2, axis=0)
         Mb = np.repeat(Mb, 2, axis=0)
-        samples = draw.do_sample(Xb, Mb)
+        samples, _ = draw.do_sample(Xb, Mb)
 
         # save the samples to a pkl file, in their numpy array form
         sample_pkl_name = "IMP-MNIST-OD{0:d}-DP{1:d}-{2:s}.pkl".format(occ_dim, dp_int, step_type)

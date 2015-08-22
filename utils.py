@@ -198,7 +198,10 @@ def plot_kde_histogram(X, f_name, bins=25):
     Plot KDE-smoothed histogram of the data in X. Assume data is univariate.
     """
     import matplotlib.pyplot as plt
-    X_samp = X.ravel()[:,np.newaxis]
+    X = X.ravel()
+    np.random.shuffle(X)
+    X = X[0:min(X.shape[0], 1000000)]
+    X_samp = X[:,np.newaxis]
     X_min = np.min(X_samp)
     X_max = np.max(X_samp)
     X_range = X_max - X_min

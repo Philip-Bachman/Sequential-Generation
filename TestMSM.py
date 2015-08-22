@@ -54,7 +54,7 @@ def test_with_model_init():
     # p_s0_obs_given_z_obs #
     ########################
     params = {}
-    shared_config = [z_dim, 400, 400]
+    shared_config = [z_dim, 250, 250]
     top_config = [shared_config[-1], obs_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
@@ -74,7 +74,7 @@ def test_with_model_init():
     # p_hi_given_si #
     #################
     params = {}
-    shared_config = [obs_dim, 400, 400]
+    shared_config = [obs_dim, 250, 250]
     top_config = [shared_config[-1], h_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
@@ -94,7 +94,7 @@ def test_with_model_init():
     # p_sip1_given_si_hi #
     ######################
     params = {}
-    shared_config = [h_dim, 400, 400]
+    shared_config = [h_dim, 250, 250]
     top_config = [shared_config[-1], obs_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
@@ -114,7 +114,7 @@ def test_with_model_init():
     # q_z_given_x #
     ###############
     params = {}
-    shared_config = [obs_dim, 400, 400]
+    shared_config = [obs_dim, 250, 250]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
@@ -134,7 +134,7 @@ def test_with_model_init():
     # q_hi_given_x_si #
     ###################
     params = {}
-    shared_config = [(obs_dim + obs_dim), 400, 400]
+    shared_config = [(obs_dim + obs_dim), 250, 250]
     top_config = [shared_config[-1], h_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
@@ -166,7 +166,7 @@ def test_with_model_init():
             q_z_given_x=q_z_given_x, \
             q_hi_given_x_si=q_hi_given_x_si, \
             obs_dim=obs_dim, z_dim=z_dim, h_dim=h_dim, \
-            model_init_obs=True, ir_steps=3, \
+            model_init_obs=True, ir_steps=5, \
             params=msm_params)
     obs_mean = (0.9 * np.mean(Xtr, axis=0)) + 0.05
     obs_mean_logit = np.log(obs_mean / (1.0 - obs_mean))
@@ -194,7 +194,7 @@ def test_with_model_init():
                            mom_1=(scale*momentum), mom_2=0.98)
         MSM.set_train_switch(1.0)
         MSM.set_l1l2_weight(1.0)
-        MSM.set_drop_rate(drop_rate=0.25)
+        MSM.set_drop_rate(drop_rate=0.0)
         MSM.set_lam_nll(lam_nll=1.0)
         MSM.set_lam_kld(lam_kld_1=1.0, lam_kld_2=1.0)
         MSM.set_lam_l2w(1e-6)
@@ -229,42 +229,43 @@ def test_with_model_init():
             file_name = "MX_SAMPLES_b{0:d}.png".format(i)
             utils.visualize_samples(seq_samps, file_name, num_rows=20)
             # visualize some important weights in the model
-            file_name = "MX_INF_1_WEIGHTS_b{0:d}.png".format(i)
-            W = MSM.inf_1_weights.get_value(borrow=False).T
-            utils.visualize_samples(W[:,:obs_dim], file_name, num_rows=20)
-            file_name = "MX_INF_2_WEIGHTS_b{0:d}.png".format(i)
-            W = MSM.inf_2_weights.get_value(borrow=False).T
-            utils.visualize_samples(W[:,:obs_dim], file_name, num_rows=20)
-            file_name = "MX_GEN_1_WEIGHTS_b{0:d}.png".format(i)
-            W = MSM.gen_1_weights.get_value(borrow=False)
-            utils.visualize_samples(W[:,:obs_dim], file_name, num_rows=20)
-            file_name = "MX_GEN_2_WEIGHTS_b{0:d}.png".format(i)
-            W = MSM.gen_2_weights.get_value(borrow=False)
-            utils.visualize_samples(W[:,:obs_dim], file_name, num_rows=20)
-            file_name = "MX_GEN_INF_WEIGHTS_b{0:d}.png".format(i)
-            W = MSM.gen_inf_weights.get_value(borrow=False).T
-            utils.visualize_samples(W[:,:obs_dim], file_name, num_rows=20)
+            # file_name = "MX_INF_1_WEIGHTS_b{0:d}.png".format(i)
+            # W = MSM.inf_1_weights.get_value(borrow=False).T
+            # utils.visualize_samples(W[:,:obs_dim], file_name, num_rows=20)
+            # file_name = "MX_INF_2_WEIGHTS_b{0:d}.png".format(i)
+            # W = MSM.inf_2_weights.get_value(borrow=False).T
+            # utils.visualize_samples(W[:,:obs_dim], file_name, num_rows=20)
+            # file_name = "MX_GEN_1_WEIGHTS_b{0:d}.png".format(i)
+            # W = MSM.gen_1_weights.get_value(borrow=False)
+            # utils.visualize_samples(W[:,:obs_dim], file_name, num_rows=20)
+            # file_name = "MX_GEN_2_WEIGHTS_b{0:d}.png".format(i)
+            # W = MSM.gen_2_weights.get_value(borrow=False)
+            # utils.visualize_samples(W[:,:obs_dim], file_name, num_rows=20)
+            # file_name = "MX_GEN_INF_WEIGHTS_b{0:d}.png".format(i)
+            # W = MSM.gen_inf_weights.get_value(borrow=False).T
+            # utils.visualize_samples(W[:,:obs_dim], file_name, num_rows=20)
             # compute information about posterior KLds on validation set
-            post_klds = MSM.compute_post_klds(Xva[0:5000])
-            file_name = "MX_H0_KLDS_b{0:d}.png".format(i)
-            utils.plot_stem(np.arange(post_klds[0].shape[1]), \
-                    np.mean(post_klds[0], axis=0), file_name)
-            file_name = "MX_HI_COND_KLDS_b{0:d}.png".format(i)
-            utils.plot_stem(np.arange(post_klds[1].shape[1]), \
-                    np.mean(post_klds[1], axis=0), file_name)
-            file_name = "MX_HI_GLOB_KLDS_b{0:d}.png".format(i)
-            utils.plot_stem(np.arange(post_klds[2].shape[1]), \
-                    np.mean(post_klds[2], axis=0), file_name)
+            #post_klds = MSM.compute_post_klds(Xva[0:5000])
+            #file_name = "MX_H0_KLDS_b{0:d}.png".format(i)
+            #utils.plot_stem(np.arange(post_klds[0].shape[1]), \
+            #        np.mean(post_klds[0], axis=0), file_name)
+            #file_name = "MX_HI_COND_KLDS_b{0:d}.png".format(i)
+            #utils.plot_stem(np.arange(post_klds[1].shape[1]), \
+            #        np.mean(post_klds[1], axis=0), file_name)
+            #file_name = "MX_HI_GLOB_KLDS_b{0:d}.png".format(i)
+            #utils.plot_stem(np.arange(post_klds[2].shape[1]), \
+            #        np.mean(post_klds[2], axis=0), file_name)
             # compute information about free-energy on validation set
-            file_name = "MX_FREE_ENERGY_b{0:d}.png".format(i)
             fe_terms = MSM.compute_fe_terms(binarize_data(Xva[0:5000]), 20)
+            #file_name = "MX_FREE_ENERGY_b{0:d}.png".format(i)
+            #utils.plot_scatter(fe_terms[1], fe_terms[0], file_name, \
+            #        x_label='Posterior KLd', y_label='Negative Log-likelihood')
             fe_mean = np.mean(fe_terms[0]) + np.mean(fe_terms[1])
             out_str = "    nll_bound : {0:.4f}".format(fe_mean)
             print(out_str)
             out_file.write(out_str+"\n")
             out_file.flush()
-            utils.plot_scatter(fe_terms[1], fe_terms[0], file_name, \
-                    x_label='Posterior KLd', y_label='Negative Log-likelihood')
+
     return
 
 if __name__=="__main__":

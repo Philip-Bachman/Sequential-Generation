@@ -22,8 +22,7 @@ from HelperFuncs import construct_masked_data, shift_and_scale_into_01, \
                         row_shuffle, to_fX
 
 #RESULT_PATH = "IMP_MNIST_GPSI_INDIRECT/"
-#RESULT_PATH = "IMP_MNIST_GPSI_DIRECT/"
-RESULT_PATH = "IMP_MNIST_GPSI_DIRECT_P2G/"
+RESULT_PATH = "IMP_MNIST_GPSI_DIRECT/"
 
 ###############################
 ###############################
@@ -129,7 +128,7 @@ def test_mnist(step_type='add',
     params['build_theano_funcs'] = False
     p_x_given_si = HydraNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
-    p_x_given_si.init_biases(0.0)
+    p_x_given_si.init_biases(0.2)
     ###################
     # q_zi_given_x_xi #
     ###################
@@ -202,7 +201,7 @@ def test_mnist(step_type='add',
                             mom_1=scale*momentum, mom_2=0.98)
         GPSI.set_train_switch(1.0)
         GPSI.set_lam_nll(lam_nll=1.0)
-        GPSI.set_lam_kld(lam_kld_p=0.1, lam_kld_q=0.9, lam_kld_g=(0.25 * lam_scale))
+        GPSI.set_lam_kld(lam_kld_p=0.05, lam_kld_q=0.95, lam_kld_g=(0.25 * lam_scale))
         GPSI.set_lam_l2w(1e-4)
         # perform a minibatch update and record the cost for this batch
         xb = to_fX( Xtr.take(batch_idx, axis=0) )
@@ -376,11 +375,6 @@ if __name__=="__main__":
     test_mnist(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
     test_mnist(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
     test_mnist(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
-
-    test_mnist_results(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
-    test_mnist_results(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
-    test_mnist_results(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
-
     test_mnist(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
     test_mnist(step_type='add', imp_steps=15, occ_dim=0, drop_prob=0.9)
 
