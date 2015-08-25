@@ -35,8 +35,8 @@ def log_prob_bernoulli(p_true, p_approx, mask=None):
     """
     if mask is None:
         mask = tensor.ones((1, p_approx.shape[1]))
-    log_prob_1 = p_true * tensor.log(p_approx+0.0*1e-6)
-    log_prob_0 = (1.0 - p_true) * tensor.log((1.0 - p_approx)+0.0*1e-6)
+    log_prob_1 = p_true * tensor.log(p_approx+1e-8)
+    log_prob_0 = (1.0 - p_true) * tensor.log((1.0 - p_approx)+1e-8)
     log_prob_01 = log_prob_1 + log_prob_0
     row_log_probs = tensor.sum((log_prob_01 * mask), axis=1, keepdims=True)
     return row_log_probs
@@ -728,7 +728,7 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
         self.joint_params = VariableFilter(roles=[PARAMETER])(self.cg.variables)
 
         # apply some l2 regularization to the model parameters
-        self.reg_term = (1e-5 * sum([tensor.sum(p**2.0) for p in self.joint_params]))
+        self.reg_term = (1e-4 * sum([tensor.sum(p**2.0) for p in self.joint_params]))
         self.reg_term.name = "reg_term"
 
         # compute the full cost w.r.t. which we will optimize

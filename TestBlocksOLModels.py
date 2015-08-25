@@ -91,7 +91,7 @@ def test_imoold_generation(step_type='add', attention=False):
     #del Xte
     tr_samples = Xtr.shape[0]
     va_samples = Xva.shape[0]
-    batch_size = 200
+    batch_size = 250
 
     ############################################################
     # Setup some parameters for the Iterative Refinement Model #
