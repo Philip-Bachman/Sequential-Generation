@@ -37,7 +37,7 @@ def test_mnist(step_type='add',
     # Format the result tag more thoroughly #
     #########################################
     dp_int = int(100.0 * drop_prob)
-    result_tag = "{}AAA_GPSI_OD{}_DP{}_IS{}_{}_NA".format(RESULT_PATH, occ_dim, dp_int, imp_steps, step_type)
+    result_tag = "{}BBB_GPSI_OD{}_DP{}_IS{}_{}_NA".format(RESULT_PATH, occ_dim, dp_int, imp_steps, step_type)
 
     ##########################
     # Get some training data #
@@ -77,7 +77,7 @@ def test_mnist(step_type='add',
     # p_zi_given_xi #
     #################
     params = {}
-    shared_config = [(x_dim + x_dim), 400, 400]
+    shared_config = [(x_dim + x_dim + x_dim), 400, 400]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
@@ -132,7 +132,7 @@ def test_mnist(step_type='add',
     # q_zi_given_xi #
     #################
     params = {}
-    shared_config = [(x_dim + x_dim), 400, 400]
+    shared_config = [(x_dim + x_dim + x_dim), 400, 400]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config

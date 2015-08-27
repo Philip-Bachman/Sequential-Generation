@@ -31,7 +31,7 @@ RESULT_PATH = "SRRM_RESULTS/"
 
 def test_mnist(step_type='add', \
                init_steps=1, \
-               reveal_steps=4, \
+               reveal_steps=5, \
                refine_steps=2, \
                reveal_rate=0.25):
     #########################################
@@ -170,7 +170,7 @@ def test_mnist(step_type='add', \
     log_name = "{}_RESULTS.txt".format(result_tag)
     out_file = open(log_name, 'wb')
     costs = [0. for i in range(10)]
-    learn_rate = 0.0002
+    learn_rate = 0.0001
     momentum = 0.5
     batch_idx = np.arange(batch_size) + tr_samples
     for i in range(250000):

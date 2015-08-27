@@ -177,8 +177,8 @@ class SRRModel(object):
                     do_samples=False)
             zi_p = zi_p_mean + (T.exp(0.5 * zi_p_logvar) * zi_zmuv)
             # get samples of next zi, according to the guide policy
-            zi_q_mean, zi_q_logvar = self.q_zi_given_xi.apply( \
-                    T.horizontal_stack(xi_full, grad_full), \
+            zi_q_mean, zi_q_logvar = self.p_zi_given_xi.apply( \
+                    T.horizontal_stack(xi_masked, grad_full), \
                     do_samples=False)
             zi_q = zi_q_mean + (T.exp(0.5 * zi_q_logvar) * zi_zmuv)
             # make zi samples that can be switched between zi_p and zi_q

@@ -1345,52 +1345,65 @@ class IMoCLDrawModels(BaseRecurrent, Initializable, Random):
         pickle_file.close()
         return
 
-#############################################################
-# Sequential generation model, structured like the UdM VRNN #
-#############################################################
 
-class SeqGenModel(BaseRecurrent, Initializable, Random):
-    def __init__(self, n_iter, step_type, reader_mlp, writer_mlp,
-                    shared_dynamics, primary_policy, guide_policy,
+##########################################################
+# LSTM-based sequential revelation and refinement model  #
+##########################################################
+
+class SRR_LSTM(BaseRecurrent, Initializable, Random):
+    def __init__(self, n_iter, step_type,
+                    mix_enc_mlp, mix_dec_mlp, mix_var_mlp,
+                    reader_mlp, writer_mlp,
+                    enc_mlp_in, enc_rnn, enc_mlp_out,
+                    dec_mlp_in, dec_rnn,
+                    var_mlp_in, var_rnn, var_mlp_out,
                     **kwargs):
-        super(SeqGenModel, self).__init__(**kwargs)
+        super(SRR_LSTM, self).__init__(**kwargs)
         if not ((step_type == 'add') or (step_type == 'jump')):
             raise ValueError('step_type must be jump or add')
         # record the desired step count
         self.n_iter = n_iter
         self.step_type = step_type
-        # grab handles for sequential generation stuff
+        # grab handles for mixture stuff
+        self.mix_enc_mlp = mix_enc_mlp
+        self.mix_dec_mlp = mix_dec_mlp
+        self.mix_var_mlp = mix_var_mlp
+        # grab handles for shared read/write models
         self.reader_mlp = reader_mlp
         self.writer_mlp = writer_mlp
-        self.shared_dynamics = shared_dynamics
-        self.primary_policy = primary_policy
-        self.guide_policy = guide_policy
+        # grab handles for sequential read/write models
+        self.enc_mlp_in = enc_mlp_in
+        self.enc_rnn = enc_rnn
+        self.enc_mlp_out = enc_mlp_out
+        self.dec_mlp_in = dec_mlp_in
+        self.dec_rnn = dec_rnn
+        self.var_mlp_in = var_mlp_in
+        self.var_rnn = var_rnn
+        self.var_mlp_out = var_mlp_out
+        # setup a "null pointer" that will point to the computation graph
+        # for this model, which can be built by self.build_model_funcs()...
+        self.cg = None
 
         # record the sub-models that underlie this model
-        self.children = [self.reader_mlp, self.writer_mlp,
-                         self.shared_dynamics,
-                         self.primary_policy, self.guide_policy]
+        self.children = [self.mix_enc_mlp, self.mix_dec_mlp, self.mix_var_mlp,
+                         self.reader_mlp, self.writer_mlp,
+                         self.enc_mlp_in, self.enc_rnn, self.enc_mlp_out,
+                         self.dec_mlp_in, self.dec_rnn,
+                         self.var_mlp_in, self.var_rnn, self.var_mlp_out]
         return
 
     def _allocate(self):
-        # self.c_0 provides the initial state of the canvas
+        # allocate shared arrays to hold parameters owned by this model
         c_dim = self.get_dim('c')
+        # self.c_0 provides the initial state of the canvas
         self.c_0 = shared_floatx_nans((c_dim,), name='c_0')
         add_role(self.c_0, PARAMETER)
-        # self.cd_0 provides the initial hidden state of the dynamics lstm
-        cd_dim = self.get_dim('c_dyn')
-        self.cd_0 = shared_floatx_nans((cd_dim,), name='cd_0')
-        add_role(self.cd_0, PARAMETER)
-        # self.hd_0 provides the initial visible state of the dynamics lstm
-        hd_dim = self.get_dim('h_dyn')
-        self.hd_0 = shared_floatx_nans((hd_dim,), name='hd_0')
-        add_role(self.hd_0, PARAMETER)
         # add the theano shared variables to our parameter lists
-        self.params.extend([ self.c_0, self.cd_0, self.hd_0 ])
+        self.params.extend([ self.c_0 ])
         return
 
     def _initialize(self):
-        # initialize to all parameters zeros...
+        # initialize all parameters to zeros...
         for p in self.params:
             p_nan = p.get_value(borrow=False)
             p_zeros = numpy.zeros(p_nan.shape)
@@ -1399,13 +1412,25 @@ class SeqGenModel(BaseRecurrent, Initializable, Random):
  
     def get_dim(self, name):
         if name == 'c':
-            return self.writer_mlp.output_dim
-        elif name == 'h_dyn':
-            return self.shared_dynamics.get_dim('states')
-        elif name == 'c_dyn':
-            return self.shared_dynamics.get_dim('cells')
+            return self.reader_mlp.get_dim('x_dim')
+        elif name in ['m','mi']:
+            return self.reader_mlp.get_dim('x_dim')
+        elif name == 'z_mix':
+            return self.mix_enc_mlp.get_dim('output')
         elif name == 'z_gen':
-            return self.primary_policy.get_dim('output')
+            return self.enc_mlp_out.get_dim('output')
+        elif name == 'h_enc':
+            return self.enc_rnn.get_dim('states')
+        elif name == 'c_enc':
+            return self.enc_rnn.get_dim('cells')
+        elif name == 'h_dec':
+            return self.dec_rnn.get_dim('states')
+        elif name == 'c_dec':
+            return self.dec_rnn.get_dim('cells')
+        elif name == 'h_var':
+            return self.var_rnn.get_dim('states')
+        elif name == 'c_var':
+            return self.var_rnn.get_dim('cells')
         elif name in ['nll', 'kl_q2p', 'kl_p2q']:
             return 0
         elif name == 'center_y':
@@ -1415,111 +1440,149 @@ class SeqGenModel(BaseRecurrent, Initializable, Random):
         elif name == 'delta':
             return 0
         else:
-            super(SeqGenModel, self).get_dim(name)
+            super(SRR_LSTM, self).get_dim(name)
         return
 
     #------------------------------------------------------------------------
 
-    @recurrent(sequences=['u'], contexts=['x', 'm'],
-               states=['c', 'h_dyn', 'c_dyn', 'nll', 'kl_q2p', 'kl_p2q'],
-               outputs=['c', 'h_dyn', 'c_dyn', 'nll', 'kl_q2p', 'kl_p2q'])
-    def iterate(self, u, c, h_dyn, c_dyn, nll, kl_q2p, kl_p2q, x, m):
-        # convert generative workspace into observation space
-        c_as_x = tensor.nnet.sigmoid(c)
-        # apply a mask for mixing observed and imputed parts of x. c_as_x
-        # gives the current reconstruction of x, for all dimensions. m will
-        # use 1 to indicate known values, and 0 to indicate values to impute.
-        x_m = (m * x) + ((1.0 - m) * c_as_x) # when m==0 everywhere, this will
-                                             # contain no information about x.
-        info_pri = x_m     # derp a doo
-        info_gui = x - x_m # compute gradient of imputation cost
-        # estimate primary policy's conditional over z
-        i_pri = tensor.concatenate([h_dyn, info_pri], axis=1)
-        z_pri_mean, z_pri_logvar, z_pri = self.primary_policy.apply(i_pri, u)
-        # estimate guide policy's conditional over z
-        i_gui = tensor.concatenate([h_dyn, info_pri, info_gui], axis=1)
-        z_gui_mean, z_gui_logvar, z_gui = self.guide_policy.apply(i_gui, u)
-        # update generation workspace (a.k.a. canvas or whatever)
-        i_wri = tensor.concatenate([h_dyn, z_gui], axis=1)
-        c_step = self.writer_mlp.apply(i_wri)
+    @recurrent(sequences=['u', 'm'], contexts=['x'],
+               states=['mi', 'c', 'h_enc', 'c_enc', 'h_dec', 'c_dec', 'h_var', 'c_var', 'nll', 'kl_q2p', 'kl_p2q'],
+               outputs=['mi', 'c', 'h_enc', 'c_enc', 'h_dec', 'c_dec', 'h_var', 'c_var', 'nll', 'kl_q2p', 'kl_p2q'])
+    def iterate(self, u, m, mi, c, h_enc, c_enc, h_dec, c_dec, h_var, c_var, nll, kl_q2p, kl_p2q, x):
         if self.step_type == 'add':
-            c = c + c_step
+            # additive steps use c as a "direct workspace", which means it's
+            # already directly comparable to x.
+            c_as_x = tensor.nnet.sigmoid(c)
         else:
-            c = c_step
-        # convert generative workspace into observation space
-        c_as_x = tensor.nnet.sigmoid(c)
-        # apply a mask for mixing observed and imputed parts of x. c_as_x
-        # gives the current reconstruction of x, for all dimensions. m will
-        # use 1 to indicate known values, and 0 to indicate values to impute.
-        x_m = (m * x) + ((1.0 - m) * c_as_x) # when m==0 everywhere, this will
-                                             # contain no information about x.
-        # update the shared dynamics LSTM state, based on z and c
-        i_rea = tensor.concatenate([x_m, z_gui], axis=1)
-        i_dyn = self.reader_mlp.apply(i_rea)
-        h_dyn, c_dyn = self.shared_dynamics.apply(states=h_dyn, cells=c_dyn,
-                                                  inputs=i_dyn, iterate=False)
-        # compute imputation cost at this step
-        nll = -1.0 * tensor.flatten(log_prob_bernoulli(x, x_m))
-        # compute KL(q || p) and KL(p || q) for this step
-        kl_q2p = tensor.sum(gaussian_kld(z_gui_mean, z_gui_logvar, \
-                            z_pri_mean, z_pri_logvar), axis=1)
-        kl_p2q = tensor.sum(gaussian_kld(z_pri_mean, z_pri_logvar, \
-                            z_gui_mean, z_gui_logvar), axis=1)
-        return c, h_dyn, c_dyn, nll, kl_q2p, kl_p2q
+            # non-additive steps use c_dec as a "latent workspace", which means
+            # it needs to be transformed before being comparable to x.
+            c_as_x = tensor.nnet.sigmoid(self.writer_mlp.apply(c_dec))
+        # get the partial reconstruction of x, with known values indicated by
+        # mi==1, and reconstructed values indicated by mi==0.
+        x_m = (mi * x) + ((1.0 - mi) * c_as_x)
+        # get the feedback available for use by the guide and primary policy
+        x_hat_var = x - c_as_x        # LL grad w.r.t. c_as_x everywhere
+        x_hat_enc = mi * (x - c_as_x) # LL grad w.r.t. c_as_x where mi==1
+        # update the guide RNN state
+        r_var = self.reader_mlp.apply(x_m, x_hat_var, h_dec)
+        i_var = self.var_mlp_in.apply(tensor.concatenate([r_var, h_dec], axis=1))
+        h_var, c_var = self.var_rnn.apply(states=h_var, cells=c_var,
+                                          inputs=i_var, iterate=False)
+        # update the encoder RNN state
+        r_enc = self.reader_mlp.apply(x_m, x_hat_enc, h_dec)
+        i_enc = self.enc_mlp_in.apply(tensor.concatenate([r_enc, h_dec], axis=1))
+        h_enc, c_enc = self.enc_rnn.apply(states=h_enc, cells=c_enc,
+                                          inputs=i_enc, iterate=False)
+        # estimate guide conditional over z given h_var
+        q_zg_mean, q_zg_logvar, q_zg = \
+                self.var_mlp_out.apply(h_var, u)
+        # estimate primary conditional over z given h_enc
+        p_zg_mean, p_zg_logvar, p_zg = \
+                self.enc_mlp_out.apply(h_enc, u)
+        # update the decoder RNN state, using guidance from the guide
+        i_dec = self.dec_mlp_in.apply(tensor.concatenate([q_zg], axis=1))
+        #i_dec = self.dec_mlp_in.apply(tensor.concatenate([q_zg, h_enc], axis=1))
+        h_dec, c_dec = self.dec_rnn.apply(states=h_dec, cells=c_dec, \
+                                          inputs=i_dec, iterate=False)
+        # update the "workspace" (stored in c)
+        if self.step_type == 'add':
+            c = c + self.writer_mlp.apply(h_dec)
+        else:
+            c = self.writer_mlp.apply(c_dec)
 
-    @recurrent(sequences=['u'], contexts=['x','m'],
-               states=['c', 'h_dyn', 'c_dyn'],
-               outputs=['c', 'h_dyn', 'c_dyn'])
-    def decode(self, u, c, h_dyn, c_dyn, x, m):
-        # convert generative workspace into observation space
+        # update revelation mask
+        mi_new = (1.0 - mi) * m # values that will be revealed
+        mi = mi + mi_new        # all visible values for next iter
+        # compute the NLL of the reconstruction as of this step
         c_as_x = tensor.nnet.sigmoid(c)
-        # apply a mask for mixing observed and imputed parts of x. c_as_x
-        # gives the current reconstruction of x, for all dimensions. m will
-        # use 1 to indicate known values, and 0 to indicate values to impute.
-        x_m = (m * x) + ((1.0 - m) * c_as_x) # when m==0 everywhere, this will
-                                             # contain no information about x.
-        info_pri = x_m # derp a doo
-        # estimate primary policy's conditional over z
-        i_pri = tensor.concatenate([h_dyn, info_pri], axis=1)
-        z_pri_mean, z_pri_logvar, z_pri = \
-                self.primary_policy.apply(i_pri, u)
-        # update generation workspace (a.k.a. canvas or whatever)
-        i_wri = tensor.concatenate([h_dyn, z_pri], axis=1)
-        c_step = self.writer_mlp.apply(i_wri)
+        nll = -1.0 * tensor.flatten(log_prob_bernoulli(x, c_as_x, mask=mi_new))
+        # compute KL(q || p) and KL(p || q) for this step
+        kl_q2p = tensor.sum(gaussian_kld(q_zg_mean, q_zg_logvar, \
+                            p_zg_mean, p_zg_logvar), axis=1)
+        kl_p2q = tensor.sum(gaussian_kld(p_zg_mean, p_zg_logvar, \
+                            q_zg_mean, q_zg_logvar), axis=1)
+        return mi, c, h_enc, c_enc, h_dec, c_dec, h_var, c_var, nll, kl_q2p, kl_p2q
+
+    @recurrent(sequences=['u','m'], contexts=['x'],
+               states=['mi','c', 'h_enc', 'c_enc', 'h_dec', 'c_dec'],
+               outputs=['mi','c', 'h_enc', 'c_enc', 'h_dec', 'c_dec'])
+    def decode(self, u, m, mi, c, h_enc, c_enc, h_dec, c_dec, x):
+        # get current state of the reconstruction/imputation
         if self.step_type == 'add':
-            c = c + c_step
+            c_as_x = tensor.nnet.sigmoid(c)
         else:
-            c = c_step
-        # convert generative workspace into observation space
-        c_as_x = tensor.nnet.sigmoid(c)
-        # apply a mask for mixing observed and imputed parts of x. c_as_x
-        # gives the current reconstruction of x, for all dimensions. m will
-        # use 1 to indicate known values, and 0 to indicate values to impute.
-        x_m = (m * x) + ((1.0 - m) * c_as_x) # when m==0 everywhere, this will
-                                             # contain no information about x.
-        # update the shared dynamics LSTM state, based on z and c
-        i_rea = tensor.concatenate([x_m, z_pri], axis=1)
-        i_dyn = self.reader_mlp.apply(i_rea)
-        h_dyn, c_dyn = self.shared_dynamics.apply(states=h_dyn, cells=c_dyn,
-                                                  inputs=i_dyn, iterate=False)
-        return c, h_dyn, c_dyn
+            c_as_x = tensor.nnet.sigmoid(self.writer_mlp.apply(c_dec))
+        x_m = (mi * x) + ((1.0 - mi) * c_as_x)  # mask the known/imputed vals
+        x_hat_enc = mi * (x - c_as_x)           # get feedback used by encoder
+        # update the encoder RNN state
+        r_enc = self.reader_mlp.apply(x_m, x_hat_enc, h_dec)
+        i_enc = self.enc_mlp_in.apply(tensor.concatenate([r_enc, h_dec], axis=1))
+        h_enc, c_enc = self.enc_rnn.apply(states=h_enc, cells=c_enc,
+                                          inputs=i_enc, iterate=False)
+        # estimate primary conditional over z given h_enc
+        p_zg_mean, p_zg_logvar, p_zg = \
+                self.enc_mlp_out.apply(h_enc, u)
+        # update the decoder RNN state, using guidance from the guide
+        i_dec = self.dec_mlp_in.apply(tensor.concatenate([p_zg], axis=1))
+        #i_dec = self.dec_mlp_in.apply(tensor.concatenate([p_zg, h_enc], axis=1))
+        h_dec, c_dec = self.dec_rnn.apply(states=h_dec, cells=c_dec, \
+                                          inputs=i_dec, iterate=False)
+        # update the "workspace" (stored in c)
+        if self.step_type == 'add':
+            c = c + self.writer_mlp.apply(h_dec)
+        else:
+            c = self.writer_mlp.apply(c_dec)
+        # update revelation mask
+        mi_new = (1.0 - mi) * m # values that will be revealed
+        mi = mi + mi_new        # all visible values for next iter
+        return mi, c, h_enc, c_enc, h_dec, c_dec
 
     #------------------------------------------------------------------------
 
-    @application(inputs=['x', 'm'], 
+    @application(inputs=['x'], 
                  outputs=['recons', 'nll', 'kl_q2p', 'kl_p2q'])
     def reconstruct(self, x, m):
         # get important size and shape information
         batch_size = x.shape[0]
+        z_mix_dim = self.get_dim('z_mix')
         z_gen_dim = self.get_dim('z_gen')
-        c_dim = self.get_dim('c')
-        cd_dim = self.get_dim('c_dyn')
-        hd_dim = self.get_dim('h_dyn')
+        ce_dim = self.get_dim('c_enc')
+        cd_dim = self.get_dim('c_dec')
+        cv_dim = self.get_dim('c_var')
+        he_dim = self.get_dim('h_enc')
+        hd_dim = self.get_dim('h_dec')
+        hv_dim = self.get_dim('h_var')
 
-        # get initial state for running the generation loop
-        c0 = tensor.alloc(0.0, batch_size, c_dim) + self.c_0
-        hd0 = tensor.alloc(0.0, batch_size, hd_dim) + self.hd_0
-        cd0 = tensor.alloc(0.0, batch_size, cd_dim) + self.cd_0
+        # get initial state of the reconstruction/imputation
+        c0 = tensor.zeros_like(x) + self.c_0
+        c_as_x = tensor.nnet.sigmoid(c0)
+        x_m = (m * x) + ((1.0 - m) * c_as_x)
+
+        # sample zero-mean, unit std. Gaussian noise for mixture init
+        u_mix = self.theano_rng.normal(
+                    size=(batch_size, z_mix_dim),
+                    avg=0., std=1.)
+        # transform ZMUV noise based on q(z_mix | x)
+        q_zm_mean, q_zm_logvar, q_zm = \
+                self.mix_var_mlp.apply(x, u_mix)   # use full x info
+        p_zm_mean, p_zm_logvar, p_zm = \
+                self.mix_enc_mlp.apply(x_m, u_mix) # use masked x info
+        # transform samples from q(z_mix | x) into initial generator state
+        mix_init = self.mix_dec_mlp.apply(q_zm)
+        cd0 = mix_init[:, :cd_dim]
+        hd0 = mix_init[:, cd_dim:(cd_dim+hd_dim)]
+        ce0 = mix_init[:, (cd_dim+hd_dim):(cd_dim+hd_dim+ce_dim)]
+        he0 = mix_init[:, (cd_dim+hd_dim+ce_dim):(cd_dim+hd_dim+ce_dim+he_dim)]
+        cv0 = mix_init[:, (cd_dim+hd_dim+ce_dim+he_dim):(cd_dim+hd_dim+ce_dim+he_dim+cv_dim)]
+        hv0 = mix_init[:, (cd_dim+hd_dim+ce_dim+he_dim+cv_dim):]
+
+        # compute KL-divergence information for the mixture init step
+        kl_q2p_mix = tensor.sum(gaussian_kld(q_zm_mean, q_zm_logvar, \
+                                p_zm_mean, p_zm_logvar), axis=1)
+        kl_p2q_mix = tensor.sum(gaussian_kld(p_zm_mean, p_zm_logvar, \
+                                p_zm_mean, p_zm_logvar), axis=1)
+        kl_q2p_mix = kl_q2p_mix.reshape((1, batch_size))
+        kl_p2q_mix = kl_p2q_mix.reshape((1, batch_size))
 
         # get zero-mean, unit-std. Gaussian noise for use in scan op
         u_gen = self.theano_rng.normal(
@@ -1527,57 +1590,79 @@ class SeqGenModel(BaseRecurrent, Initializable, Random):
                     avg=0., std=1.)
 
         # run the multi-stage guided generative process
-        c, _, _, step_nlls, step_kl_q2p, step_kl_p2q = \
-                self.iterate(u=u_gen, c=c0, h_dyn=hd0, c_dyn=cd0, x=x, m=m)
-        # grab the generated observations
+        c, _, _, _, _, _, _, step_nlls, kl_q2p_gen, kl_p2q_gen = \
+                self.iterate(u=u_gen, c=c0, \
+                             h_enc=he0, c_enc=ce0, \
+                             h_dec=hd0, c_dec=cd0, \
+                             h_var=hv0, c_var=cv0, \
+                             x=x, m=m)
+
+        # grab the observations generated by the multi-stage process
         c_as_x = tensor.nnet.sigmoid(c[-1,:,:])
         recons = (m * x) + ((1.0 - m) * c_as_x)
         recons.name = "recons"
         # get the NLL after the final update for each example
         nll = step_nlls[-1]
         nll.name = "nll"
-        # get kl cost variables
-        kl_q2p = step_kl_q2p
+        # group up the klds from mixture init and multi-stage generation
+        kl_q2p = tensor.vertical_stack(kl_q2p_mix, kl_q2p_gen)
         kl_q2p.name = "kl_q2p"
-        kl_p2q = step_kl_p2q
+        kl_p2q = tensor.vertical_stack(kl_p2q_mix, kl_p2q_gen)
         kl_p2q.name = "kl_p2q"
         return recons, nll, kl_q2p, kl_p2q
 
-    @application(inputs=['x', 'm'], outputs=['recons','c_samples'])
-    def sample(self, x, m):
+    @application(inputs=['x'], outputs=['x_samples'])
+    def sample(self, x):
         """
         Sample from model. Sampling can be performed either with or
         without partial control (i.e. conditioning for imputation).
-
-        Returns 
-        -------
-
-        samples : tensor3 (n_samples, n_iter, x_dim)
         """
         # get important size and shape information
         batch_size = x.shape[0]
+        z_mix_dim = self.get_dim('z_mix')
         z_gen_dim = self.get_dim('z_gen')
-        c_dim = self.get_dim('c')
-        cd_dim = self.get_dim('c_dyn')
-        hd_dim = self.get_dim('h_dyn')
+        ce_dim = self.get_dim('c_enc')
+        cd_dim = self.get_dim('c_dec')
+        cv_dim = self.get_dim('c_var')
+        he_dim = self.get_dim('h_enc')
+        hd_dim = self.get_dim('h_dec')
+        hv_dim = self.get_dim('h_var')
 
-        # get initial state for running the generation loop
-        c0 = tensor.alloc(0.0, batch_size, c_dim) + self.c_0
-        hd0 = tensor.alloc(0.0, batch_size, hd_dim) + self.hd_0
-        cd0 = tensor.alloc(0.0, batch_size, cd_dim) + self.cd_0
+        # get initial state of the reconstruction/imputation
+        m0 = tensor.zeros_like(x)
+        c0 = tensor.zeros_like(x) + self.c_0
+        c_as_x = tensor.nnet.sigmoid(c0)
+        x_m = (m * x) + ((1.0 - m) * c_as_x)
+
+        # sample zero-mean, unit std. Gaussian noise for mixture init
+        u_mix = self.theano_rng.normal(
+                    size=(batch_size, z_mix_dim),
+                    avg=0., std=1.)
+        # transform ZMUV noise based on q(z_mix | x)
+        p_zm_mean, p_zm_logvar, p_zm = \
+                self.mix_enc_mlp.apply(x_m, u_mix) # use masked x info
+        # transform samples from q(z_mix | x) into initial generator state
+        mix_init = self.mix_dec_mlp.apply(p_zm)
+        cd0 = mix_init[:, :cd_dim]
+        hd0 = mix_init[:, cd_dim:(cd_dim+hd_dim)]
+        ce0 = mix_init[:, (cd_dim+hd_dim):(cd_dim+hd_dim+ce_dim)]
+        he0 = mix_init[:, (cd_dim+hd_dim+ce_dim):(cd_dim+hd_dim+ce_dim+he_dim)]
+        cv0 = mix_init[:, (cd_dim+hd_dim+ce_dim+he_dim):(cd_dim+hd_dim+ce_dim+he_dim+cv_dim)]
+        hv0 = mix_init[:, (cd_dim+hd_dim+ce_dim+he_dim+cv_dim):]
 
         # get zero-mean, unit-std. Gaussian noise for use in scan op
         u_gen = self.theano_rng.normal(
                     size=(self.n_iter, batch_size, z_gen_dim),
                     avg=0., std=1.)
-
         # run the sequential generative policy from given initial states
-        c_samples, _, _ = self.decode(u=u_gen, c=c0, h_dyn=hd0, c_dyn=cd0, x=x, m=m)
+        (self, u, m, mi, c, h_enc, c_enc, h_dec, c_dec, x)
+        c_samples, _, _, _, _ = self.decode(u=u_gen, m=m, mi=m0, c=c0, \
+                                            h_enc=he0, c_enc=ce0, \
+                                            h_dec=hd0, c_dec=cd0, x=x)
         # convert output into the desired form, and apply masking
-        c_as_x = tensor.nnet.sigmoid(c_samples)
-        recons = (m * x) + ((1.0 - m) * c_as_x)
-        recons.name = "recons"
-        return [recons, c_samples]
+        x_samples = tensor.nnet.sigmoid(c_samples)
+        x_samples.name = "x_samples"
+        return x_samples
 
     def build_model_funcs(self):
         """
@@ -1585,10 +1670,9 @@ class SeqGenModel(BaseRecurrent, Initializable, Random):
         """
         # some symbolic vars to represent various inputs/outputs
         self.x_sym = tensor.matrix('x_sym')
-        self.m_sym = tensor.matrix('m_sym')
 
-        # collect reconstructions of x produced by the SeqGenModel
-        _, nll, kl_q2p, kl_p2q = self.reconstruct(self.x_sym, self.m_sym)
+        # collect costs for the model
+        _, nll, kl_q2p, kl_p2q = self.reconstruct(self.x_sym)
 
         # get the expected NLL part of the VFE bound
         self.nll_term = nll.mean()
@@ -1613,8 +1697,8 @@ class SeqGenModel(BaseRecurrent, Initializable, Random):
         self.reg_term.name = "reg_term"
 
         # compute the full cost w.r.t. which we will optimize
-        self.joint_cost = self.nll_term + (0.9 * self.kld_q2p_term) + \
-                          (0.1 * self.kld_p2q_term) + self.reg_term
+        self.joint_cost = self.nll_term + (0.95 * self.kld_q2p_term) + \
+                          (0.05 * self.kld_p2q_term) + self.reg_term
         self.joint_cost.name = "joint_cost"
 
         # Get the gradient of the joint cost for all optimizable parameters
@@ -1642,16 +1726,52 @@ class SeqGenModel(BaseRecurrent, Initializable, Random):
 
         # compile the theano function
         print("Compiling model training/update function...")
-        self.train_joint = theano.function(inputs=[self.x_sym, self.m_sym], \
+        self.train_joint = theano.function(inputs=[self.x_sym], \
                                 outputs=outputs, updates=self.joint_updates)
         print("Compiling NLL bound estimator function...")
-        self.compute_nll_bound = theano.function(inputs=[self.x_sym, self.m_sym], \
+        self.compute_nll_bound = theano.function(inputs=[self.x_sym], \
                                                  outputs=outputs)
         print("Compiling model sampler...")
-        x_samples, c_samples = self.sample(self.x_sym, self.m_sym)
-        self.do_sample = theano.function([self.x_sym, self.m_sym], \
+        x_samples, c_samples = self.sample(self.x_sym)
+        self.do_sample = theano.function([self.x_sym], \
                                          outputs=[x_samples, c_samples], \
                                          allow_input_downcast=True)
+        return
+
+    def build_extra_funcs(self):
+        """
+        Build functions for computing performance and other stuff.
+        """
+        # get a list of "bricks" for the variational distributions
+        var_bricks = [self.mix_var_mlp, self.var_mlp_in, self.var_rnn,
+                      self.var_mlp_out]
+
+        # grab handles for all the variational parameters in our cost
+        cg_vars = self.cg.variables # self.cg should already be built...
+        self.var_params = VariableFilter(roles=[PARAMETER], bricks=var_bricks)(cg_vars)
+
+        # get the gradient of the joint cost for variational parameters
+        print("Computing gradients of joint_cost (for var params)...")
+        self.var_grads = OrderedDict()
+        grad_list = tensor.grad(self.joint_cost, self.var_params)
+        for i, p in enumerate(self.var_params):
+            self.var_grads[p] = grad_list[i]
+
+        # construct a function for training only the variational parameters
+        self.var_updates = get_adam_updates(params=self.var_params, \
+                grads=self.var_grads, alpha=self.lr, \
+                beta1=self.mom_1, beta2=self.mom_2, \
+                mom2_init=1e-4, smoothing=1e-6, max_grad_norm=10.0)
+
+        inputs = [self.x_sym]
+        # collect the outputs to return from this function
+        outputs = [self.joint_cost, self.nll_bound, self.nll_term, \
+                   self.kld_q2p_term, self.kld_p2q_term, self.reg_term]
+
+        # compile the theano function
+        print("Compiling model training/update function (for var params)...")
+        self.train_var = theano.function(inputs=inputs, outputs=outputs, \
+                                         updates=self.var_updates)
         return
 
     def get_model_params(self, ary_type='numpy'):

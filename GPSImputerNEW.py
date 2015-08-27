@@ -125,6 +125,7 @@ class GPSImputer(object):
         ##################################################
         # Setup the iterative imputation loop using scan #
         ##################################################
+        self.ones_mask = T.ones_like(self.x_mask)
         def imp_step_func(zi_zmuv, si):
             si_as_x = self._from_si_to_x(si)
             xi_unmasked = self.x_out
@@ -134,12 +135,12 @@ class GPSImputer(object):
             grad_masked = self.x_mask * grad_unmasked
             # get samples of next zi, according to the global policy
             zi_p_mean, zi_p_logvar = self.p_zi_given_xi.apply( \
-                    T.horizontal_stack(xi_masked, grad_masked), \
+                    T.horizontal_stack(xi_masked, grad_masked, self.x_mask), \
                     do_samples=False)
             zi_p = zi_p_mean + (T.exp(0.5 * zi_p_logvar) * zi_zmuv)
             # get samples of next zi, according to the guide policy
             zi_q_mean, zi_q_logvar = self.q_zi_given_xi.apply( \
-                    T.horizontal_stack(xi_masked, grad_unmasked), \
+                    T.horizontal_stack(xi_masked, grad_unmasked, self.ones_mask), \
                     do_samples=False)
             zi_q = zi_q_mean + (T.exp(0.5 * zi_q_logvar) * zi_zmuv)
 
