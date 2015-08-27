@@ -109,7 +109,7 @@ def test_tfd(step_type='add',
             params=params, shared_param_dicts=None)
     p_xip1_given_zi.init_biases(0.2)
     ###################
-    # q_zi_given_x_xi #
+    # q_zi_given_xi #
     ###################
     params = {}
     shared_config = [(x_dim + x_dim), 1500, 1500]
@@ -124,9 +124,9 @@ def test_tfd(step_type='add',
     params['bias_noise'] = 0.0
     params['input_noise'] = 0.0
     params['build_theano_funcs'] = False
-    q_zi_given_x_xi = InfNet(rng=rng, Xd=x_in_sym, \
+    q_zi_given_xi = InfNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
-    q_zi_given_x_xi.init_biases(0.2)
+    q_zi_given_xi.init_biases(0.2)
 
 
     ###########################################################
@@ -144,7 +144,7 @@ def test_tfd(step_type='add',
             x_in=x_in_sym, x_out=x_out_sym, x_mask=x_mask_sym, \
             p_zi_given_xi=p_zi_given_xi, \
             p_xip1_given_zi=p_xip1_given_zi, \
-            q_zi_given_x_xi=q_zi_given_x_xi, \
+            q_zi_given_xi=q_zi_given_xi, \
             params=gpsi_params, \
             shared_param_dicts=None)
 

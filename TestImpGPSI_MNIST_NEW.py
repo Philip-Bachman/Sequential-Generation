@@ -16,41 +16,46 @@ import utils
 from NetLayers import relu_actfun, softplus_actfun, tanh_actfun
 from InfNet import InfNet
 from HydraNet import HydraNet
-from GPSImputer import GPSImputer, load_gpsimputer_from_file
+from GPSImputerNEW import GPSImputer, load_gpsimputer_from_file
 from load_data import load_udm, load_tfd, load_svhn_gray
 from HelperFuncs import construct_masked_data, shift_and_scale_into_01, \
                         row_shuffle, to_fX
 
-RESULT_PATH = "IMP_SVHN_GPSI/"
+RESULT_PATH = "IMP_MNIST_GPSI_NEW/"
 
-##############################
-##############################
-## TEST GPS IMPUTER ON SVHN ##
-##############################
-##############################
+###############################
+###############################
+## TEST GPS IMPUTER ON MNIST ##
+###############################
+###############################
 
-def test_svhn(step_type='add',
+def test_mnist(step_type='add',
+               imp_steps=6,
                occ_dim=15,
                drop_prob=0.0):
     #########################################
     # Format the result tag more thoroughly #
     #########################################
     dp_int = int(100.0 * drop_prob)
-    result_tag = "{}GPSI_OD{}_DP{}_{}_NA".format(RESULT_PATH, occ_dim, dp_int, step_type)
+    result_tag = "{}AAA_GPSI_OD{}_DP{}_IS{}_{}_NA".format(RESULT_PATH, occ_dim, dp_int, imp_steps, step_type)
 
     ##########################
     # Get some training data #
     ##########################
     rng = np.random.RandomState(1234)
-    tr_file = 'data/svhn_train_gray.pkl'
-    te_file = 'data/svhn_test_gray.pkl'
-    ex_file = 'data/svhn_extra_gray.pkl'
-    data = load_svhn_gray(tr_file, te_file, ex_file=ex_file, ex_count=200000)
-    Xtr = to_fX( shift_and_scale_into_01(np.vstack([data['Xtr'], data['Xex']])) )
-    Xva = to_fX( shift_and_scale_into_01(data['Xte']) )
+    dataset = 'data/mnist.pkl.gz'
+    datasets = load_udm(dataset, as_shared=False, zero_mean=False)
+    Xtr = datasets[0][0]
+    Xva = datasets[1][0]
+    Xte = datasets[2][0]
+    # Merge validation set and training set, and test on test set.
+    #Xtr = np.concatenate((Xtr, Xva), axis=0)
+    #Xva = Xte
+    Xtr = to_fX(shift_and_scale_into_01(Xtr))
+    Xva = to_fX(shift_and_scale_into_01(Xva))
     tr_samples = Xtr.shape[0]
     va_samples = Xva.shape[0]
-    batch_size = 250
+    batch_size = 200
     batch_reps = 1
     all_pix_mean = np.mean(np.mean(Xtr, axis=1))
     data_mean = to_fX( all_pix_mean * np.ones((Xtr.shape[1],)) )
@@ -59,8 +64,9 @@ def test_svhn(step_type='add',
     # Setup some parameters for the Iterative Refinement Model #
     ############################################################
     x_dim = Xtr.shape[1]
-    z_dim = 200
-    imp_steps = 6
+    s_dim = x_dim
+    #s_dim = 300
+    z_dim = 100
     init_scale = 1.0
 
     x_in_sym = T.matrix('x_in_sym')
@@ -71,7 +77,7 @@ def test_svhn(step_type='add',
     # p_zi_given_xi #
     #################
     params = {}
-    shared_config = [x_dim, 1500, 1500]
+    shared_config = [(x_dim + x_dim), 400, 400]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
@@ -87,10 +93,28 @@ def test_svhn(step_type='add',
             params=params, shared_param_dicts=None)
     p_zi_given_xi.init_biases(0.2)
     ###################
-    # p_xip1_given_zi #
+    # p_sip1_given_zi #
     ###################
     params = {}
-    shared_config = [z_dim, 1500, 1500]
+    shared_config = [z_dim, 400, 400]
+    output_config = [s_dim, s_dim, s_dim]
+    params['shared_config'] = shared_config
+    params['output_config'] = output_config
+    params['activation'] = relu_actfun
+    params['init_scale'] = init_scale
+    params['vis_drop'] = 0.0
+    params['hid_drop'] = 0.0
+    params['bias_noise'] = 0.0
+    params['input_noise'] = 0.0
+    params['build_theano_funcs'] = False
+    p_sip1_given_zi = HydraNet(rng=rng, Xd=x_in_sym, \
+            params=params, shared_param_dicts=None)
+    p_sip1_given_zi.init_biases(0.2)
+    ################
+    # p_x_given_si #
+    ################
+    params = {}
+    shared_config = [s_dim]
     output_config = [x_dim, x_dim]
     params['shared_config'] = shared_config
     params['output_config'] = output_config
@@ -101,14 +125,14 @@ def test_svhn(step_type='add',
     params['bias_noise'] = 0.0
     params['input_noise'] = 0.0
     params['build_theano_funcs'] = False
-    p_xip1_given_zi = HydraNet(rng=rng, Xd=x_in_sym, \
+    p_x_given_si = HydraNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
-    p_xip1_given_zi.init_biases(0.2)
-    ###################
+    p_x_given_si.init_biases(0.2)
+    #################
     # q_zi_given_xi #
-    ###################
+    #################
     params = {}
-    shared_config = [(x_dim + x_dim), 1500, 1500]
+    shared_config = [(x_dim + x_dim), 400, 400]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
@@ -124,7 +148,6 @@ def test_svhn(step_type='add',
             params=params, shared_param_dicts=None)
     q_zi_given_xi.init_biases(0.2)
 
-
     ###########################################################
     # Define parameters for the GPSImputer, and initialize it #
     ###########################################################
@@ -132,6 +155,9 @@ def test_svhn(step_type='add',
     gpsi_params = {}
     gpsi_params['x_dim'] = x_dim
     gpsi_params['z_dim'] = z_dim
+    gpsi_params['s_dim'] = s_dim
+    # switch between direct construction and construction via p_x_given_si
+    gpsi_params['use_p_x_given_si'] = False
     gpsi_params['imp_steps'] = imp_steps
     gpsi_params['step_type'] = step_type
     gpsi_params['x_type'] = 'bernoulli'
@@ -139,7 +165,8 @@ def test_svhn(step_type='add',
     GPSI = GPSImputer(rng=rng, 
             x_in=x_in_sym, x_out=x_out_sym, x_mask=x_mask_sym, \
             p_zi_given_xi=p_zi_given_xi, \
-            p_xip1_given_zi=p_xip1_given_zi, \
+            p_sip1_given_zi=p_sip1_given_zi, \
+            p_x_given_si=p_x_given_si, \
             q_zi_given_xi=q_zi_given_xi, \
             params=gpsi_params, \
             shared_param_dicts=None)
@@ -153,10 +180,11 @@ def test_svhn(step_type='add',
     learn_rate = 0.0002
     momentum = 0.5
     batch_idx = np.arange(batch_size) + tr_samples
-    for i in range(200005):
+    for i in range(250000):
         scale = min(1.0, ((i+1) / 5000.0))
+        lam_scale = 1.0 - min(1.0, ((i+1) / 100000.0)) # decays from 1.0->0.0
         if (((i + 1) % 15000) == 0):
-            learn_rate = learn_rate * 0.92
+            learn_rate = learn_rate * 0.93
         if (i > 10000):
             momentum = 0.90
         else:
@@ -172,7 +200,7 @@ def test_svhn(step_type='add',
                             mom_1=scale*momentum, mom_2=0.98)
         GPSI.set_train_switch(1.0)
         GPSI.set_lam_nll(lam_nll=1.0)
-        GPSI.set_lam_kld(lam_kld_p=0.1, lam_kld_q=0.9)
+        GPSI.set_lam_kld(lam_kld_p=0.05, lam_kld_q=0.95, lam_kld_g=(0.2 * lam_scale))
         GPSI.set_lam_l2w(1e-4)
         # perform a minibatch update and record the cost for this batch
         xb = to_fX( Xtr.take(batch_idx, axis=0) )
@@ -208,8 +236,8 @@ def test_svhn(step_type='add',
             print(joint_str)
             out_file.write(joint_str+"\n")
             out_file.flush()
+        if ((i % 5000) == 0):
             GPSI.save_to_file("{}_PARAMS.pkl".format(result_tag))
-        if ((i % 20000) == 0):
             # Get some validation samples for evaluating model performance
             xb = to_fX( Xva[0:100] )
             xi, xo, xm = construct_masked_data(xb, drop_prob=drop_prob, \
@@ -230,56 +258,51 @@ def test_svhn(step_type='add',
             file_name = "{0:s}_samples_ng_b{1:d}.png".format(result_tag, i)
             utils.visualize_samples(seq_samps, file_name, num_rows=20)
             # get visualizations of policy parameters
-            # file_name = "{0:s}_gen_gen_weights_b{1:d}.png".format(result_tag, i)
-            # W = GPSI.gen_gen_weights.get_value(borrow=False)
+            # file_name = "{0:s}_gen_step_weights_b{1:d}.png".format(result_tag, i)
+            # W = GPSI.gen_step_weights.get_value(borrow=False)
+            # utils.visualize_samples(W[:,:x_dim], file_name, num_rows=20)
+            # file_name = "{0:s}_gen_write_gate_weights_b{1:d}.png".format(result_tag, i)
+            # W = GPSI.gen_write_gate_weights.get_value(borrow=False)
+            # utils.visualize_samples(W[:,:x_dim], file_name, num_rows=20)
+            # file_name = "{0:s}_gen_erase_gate_weights_b{1:d}.png".format(result_tag, i)
+            # W = GPSI.gen_erase_gate_weights.get_value(borrow=False)
             # utils.visualize_samples(W[:,:x_dim], file_name, num_rows=20)
             # file_name = "{0:s}_gen_inf_weights_b{1:d}.png".format(result_tag, i)
             # W = GPSI.gen_inf_weights.get_value(borrow=False).T
             # utils.visualize_samples(W[:,:x_dim], file_name, num_rows=20)
 
-################################
-################################
-## CHECK SVHN IMPUTER RESULTS ##
-################################
-################################
+#################################
+#################################
+## CHECK MNIST IMPUTER RESULTS ##
+#################################
+#################################
 
-def test_svhn_results(step_type='add',
+def test_mnist_results(step_type='add',
+                       imp_steps=6,
                        occ_dim=15,
                        drop_prob=0.0):
     #########################################
     # Format the result tag more thoroughly #
     #########################################
     dp_int = int(100.0 * drop_prob)
-    result_tag = "{}GPSI_OD{}_DP{}_{}_NA".format(RESULT_PATH, occ_dim, dp_int, step_type)
+    result_tag = "{}GPSI_OD{}_DP{}_IS{}_{}_NA".format(RESULT_PATH, occ_dim, dp_int, imp_steps, step_type)
 
     ##########################
     # Get some training data #
     ##########################
     rng = np.random.RandomState(1234)
-    tr_file = 'data/svhn_train_gray.pkl'
-    te_file = 'data/svhn_test_gray.pkl'
-    ex_file = 'data/svhn_extra_gray.pkl'
-    data = load_svhn_gray(tr_file, te_file, ex_file=ex_file, ex_count=200000)
-    Xtr = to_fX( shift_and_scale_into_01(np.vstack([data['Xtr'], data['Xex']])) )
-    Xva = to_fX( shift_and_scale_into_01(data['Xte']) )
+    dataset = 'data/mnist.pkl.gz'
+    datasets = load_udm(dataset, as_shared=False, zero_mean=False)
+    Xtr = datasets[0][0]
+    Xva = datasets[1][0]
+    Xtr = to_fX(shift_and_scale_into_01(Xtr))
+    Xva = to_fX(shift_and_scale_into_01(Xva))
     tr_samples = Xtr.shape[0]
     va_samples = Xva.shape[0]
     batch_size = 250
     batch_reps = 1
     all_pix_mean = np.mean(np.mean(Xtr, axis=1))
     data_mean = to_fX( all_pix_mean * np.ones((Xtr.shape[1],)) )
-
-    ############################################################
-    # Setup some parameters for the Iterative Refinement Model #
-    ############################################################
-    x_dim = Xtr.shape[1]
-    z_dim = 200
-    imp_steps = 6
-    init_scale = 1.0
-
-    x_in_sym = T.matrix('x_in_sym')
-    x_out_sym = T.matrix('x_out_sym')
-    x_mask_sym = T.matrix('x_mask_sym')
 
     # Load parameters from a previously trained model
     print("Testing model load from file...")
@@ -289,7 +312,7 @@ def test_svhn_results(step_type='add',
     ################################################################
     # Apply some updates, to check that they aren't totally broken #
     ################################################################
-    log_name = "{}_FINAL_RESULTS.txt".format(result_tag)
+    log_name = "{}_FINAL_RESULTS_NEW.txt".format(result_tag)
     out_file = open(log_name, 'wb')
 
     Xva = row_shuffle(Xva)
@@ -336,17 +359,39 @@ def test_svhn_results(step_type='add',
     out_file.flush()
 
 if __name__=="__main__":
-    ########
-    # SVHN #
-    ########
+    #########
+    # MNIST #
+    #########
     # TRAINING
-    test_svhn(step_type='add', occ_dim=17, drop_prob=0.0)
-    #test_svhn(step_type='add', occ_dim=0, drop_prob=0.8)
-    #test_svhn(step_type='jump', occ_dim=17, drop_prob=0.0)
-    #test_svhn(step_type='jump', occ_dim=0, drop_prob=0.8)
+    #test_mnist(step_type='add', occ_dim=14, drop_prob=0.0)
+    #test_mnist(step_type='add', occ_dim=16, drop_prob=0.0)
+    #test_mnist(step_type='add', occ_dim=0, drop_prob=0.6)
+    #test_mnist(step_type='add', occ_dim=0, drop_prob=0.8)
+    #test_mnist(step_type='jump', occ_dim=14, drop_prob=0.0)
+    #test_mnist(step_type='jump', occ_dim=16, drop_prob=0.0)
+    #test_mnist(step_type='jump', occ_dim=0, drop_prob=0.6)
+    #test_mnist(step_type='jump', occ_dim=0, drop_prob=0.8)
+    #test_mnist(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
+    #test_mnist(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
+    test_mnist(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
+    #test_mnist(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
+    #test_mnist(step_type='add', imp_steps=15, occ_dim=0, drop_prob=0.9)
 
     # RESULTS
-    test_svhn_results(step_type='add', occ_dim=17, drop_prob=0.0)
-    #test_svhn_results(step_type='add', occ_dim=0, drop_prob=0.8)
-    #test_svhn_results(step_type='jump', occ_dim=17, drop_prob=0.0)
-    #test_svhn_results(step_type='jump', occ_dim=0, drop_prob=0.8)
+    # test_mnist_results(step_type='add', occ_dim=14, drop_prob=0.0)
+    # test_mnist_results(step_type='add', occ_dim=16, drop_prob=0.0)
+    # test_mnist_results(step_type='add', occ_dim=0, drop_prob=0.6)
+    # test_mnist_results(step_type='add', occ_dim=0, drop_prob=0.7)
+    # test_mnist_results(step_type='add', occ_dim=0, drop_prob=0.8)
+    # test_mnist_results(step_type='add', occ_dim=0, drop_prob=0.9)
+    # test_mnist_results(step_type='jump', occ_dim=14, drop_prob=0.0)
+    # test_mnist_results(step_type='jump', occ_dim=16, drop_prob=0.0)
+    # test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.6)
+    # test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.7)
+    # test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.8)
+    # test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.9)
+    #test_mnist_results(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
+    #test_mnist_results(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
+    test_mnist_results(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
+    #test_mnist_results(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
+    #test_mnist_results(step_type='add', imp_steps=15, occ_dim=0, drop_prob=0.9)

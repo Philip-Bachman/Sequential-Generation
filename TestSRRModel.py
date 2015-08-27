@@ -30,15 +30,16 @@ RESULT_PATH = "SRRM_RESULTS/"
 ###############################
 
 def test_mnist(step_type='add', \
-               init_steps=3, \
-               reveal_steps=7, \
-               refine_steps=1, \
-               reveal_rate=0.2):
+               init_steps=1, \
+               reveal_steps=4, \
+               refine_steps=2, \
+               reveal_rate=0.25):
     #########################################
     # Format the result tag more thoroughly #
     #########################################
+    rev_rate_int = int(reveal_rate * 100.0)
     result_tag = "{}SRRM_IN{}_RV{}_RF{}_RT{}_ST{}".format(RESULT_PATH, \
-            init_steps, reveal_steps, refine_steps, reveal_rate, step_type)
+            init_steps, reveal_steps, refine_steps, rev_rate_int, step_type)
 
     ##########################
     # Get some training data #
@@ -191,7 +192,7 @@ def test_mnist(step_type='add', \
         SRRM.set_sgd_params(lr=scale*learn_rate, \
                             mom_1=scale*momentum, mom_2=0.98)
         SRRM.set_train_switch(1.0)
-        SRRM.set_lam_kld(lam_kld_p=0.05, lam_kld_q=0.95, lam_kld_g=(0.2 * lam_scale))
+        SRRM.set_lam_kld(lam_kld_p=0.05, lam_kld_q=0.95, lam_kld_g=(0.0 * lam_scale))
         SRRM.set_lam_l2w(1e-4)
         # perform a minibatch update and record the cost for this batch
         xb = to_fX( Xtr.take(batch_idx, axis=0) )
@@ -227,7 +228,7 @@ def test_mnist(step_type='add', \
             # draw some sample imputations from the model
             xo = Xva[0:100]
             samp_count = xo.shape[0]
-            xm_seq, xi_seq, mi_seq = SRRM.sequence_sampler(xo, use_guide_policy=False)
+            xm_seq, xi_seq, mi_seq = SRRM.sequence_sampler(xo, use_guide_policy=True)
             seq_len = len(xm_seq)
             seq_samps = np.zeros((seq_len*samp_count, xm_seq[0].shape[1]))
             ######

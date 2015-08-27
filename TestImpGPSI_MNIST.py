@@ -21,8 +21,7 @@ from load_data import load_udm, load_tfd, load_svhn_gray
 from HelperFuncs import construct_masked_data, shift_and_scale_into_01, \
                         row_shuffle, to_fX
 
-#RESULT_PATH = "IMP_MNIST_GPSI_INDIRECT/"
-RESULT_PATH = "IMP_MNIST_GPSI_DIRECT/"
+RESULT_PATH = "IMP_MNIST_GPSI/"
 
 ###############################
 ###############################
@@ -130,7 +129,7 @@ def test_mnist(step_type='add',
             params=params, shared_param_dicts=None)
     p_x_given_si.init_biases(0.2)
     ###################
-    # q_zi_given_x_xi #
+    # q_zi_given_xi #
     ###################
     params = {}
     shared_config = [(x_dim + x_dim), 400, 400]
@@ -145,9 +144,9 @@ def test_mnist(step_type='add',
     params['bias_noise'] = 0.0
     params['input_noise'] = 0.0
     params['build_theano_funcs'] = False
-    q_zi_given_x_xi = InfNet(rng=rng, Xd=x_in_sym, \
+    q_zi_given_xi = InfNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
-    q_zi_given_x_xi.init_biases(0.2)
+    q_zi_given_xi.init_biases(0.2)
 
     ###########################################################
     # Define parameters for the GPSImputer, and initialize it #
@@ -168,7 +167,7 @@ def test_mnist(step_type='add',
             p_zi_given_xi=p_zi_given_xi, \
             p_sip1_given_zi=p_sip1_given_zi, \
             p_x_given_si=p_x_given_si, \
-            q_zi_given_x_xi=q_zi_given_x_xi, \
+            q_zi_given_xi=q_zi_given_xi, \
             params=gpsi_params, \
             shared_param_dicts=None)
 

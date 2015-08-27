@@ -122,21 +122,24 @@ class GPSImputer(object):
             self.obs_logvar = self.shared_param_dicts['obs_logvar']
             self.bounded_logvar = 8.0 * T.tanh((1.0/8.0) * self.obs_logvar[0])
 
-        ###################################################
-        # Setup the iterative immputation loop using scan #
-        ###################################################
+        ##################################################
+        # Setup the iterative imputation loop using scan #
+        ##################################################
         def imp_step_func(zi_zmuv, si):
             si_as_x = self._from_si_to_x(si)
-            xi_masked = (self.x_mask * self.x_out) + \
+            xi_unmasked = self.x_out
+            xi_masked = (self.x_mask * xi_unmasked) + \
                         ((1.0 - self.x_mask) * si_as_x)
-            #grad_ll = self.x_out - xi_masked
+            grad_unmasked = self.x_out - si_as_x
+            grad_masked = self.x_mask * grad_unmasked
             # get samples of next zi, according to the global policy
             zi_p_mean, zi_p_logvar = self.p_zi_given_xi.apply( \
-                    xi_masked, do_samples=False)
+                    T.horizontal_stack(xi_masked, grad_masked), \
+                    do_samples=False)
             zi_p = zi_p_mean + (T.exp(0.5 * zi_p_logvar) * zi_zmuv)
             # get samples of next zi, according to the guide policy
             zi_q_mean, zi_q_logvar = self.q_zi_given_xi.apply( \
-                    T.horizontal_stack(xi_masked, self.x_out), \
+                    T.horizontal_stack(xi_masked, grad_unmasked), \
                     do_samples=False)
             zi_q = zi_q_mean + (T.exp(0.5 * zi_q_logvar) * zi_zmuv)
 
@@ -649,115 +652,6 @@ def load_gpsimputer_from_file(f_name=None, rng=None):
         print("    {0:s}: {1:s}".format(str(k), str(self_dot_params[k])))
     print("==================================================")
     return clone_net
-
-class TemplateMatchImputer(object):
-    """
-    Simple class for performing imputation via template matching.
-
-    I.e. -- we fill in missing values in a partial observation by taking
-            the corresponding values from the "training" observation which
-            best matches the known values. we'll compute scores for matching
-            on either the known values or the unknown values.
-
-    Parameters:
-            x_train: the available examples to match against
-            x_type: whether to use 'gaussian' or 'bernoulli' log prob
-    """
-    def __init__(self, x_train=None, x_type=None):
-        self.x_train = theano.shared(value=to_fX(x_train), name='x_train')
-        self.x_type = x_type
-        self.logvar = 0.0
-        self.best_match_nll, self.best_match_img = self._construct_funcs()
-        return
-
-    def _log_bernoulli(self, p_true, p_approx, mask=None):
-        """
-        Compute log probability of some binary variables with probabilities
-        given by p_true, for probability estimates given by p_approx. We'll
-        compute joint log probabilities over row-wise groups.
-        """
-        if mask is None:
-            mask = T.ones((1, p_approx.shape[1]))
-        log_prob_1 = p_true * T.log(p_approx+1e-6)
-        log_prob_0 = (1.0 - p_true) * T.log((1.0 - p_approx)+1e-6)
-        log_prob_01 = log_prob_1 + log_prob_0
-        row_log_probs_m_is_1 = T.sum((log_prob_01 * mask), axis=1)
-        row_log_probs_m_is_0 = T.sum((log_prob_01 * (1.0-mask)), axis=1)
-        return row_log_probs_m_is_1, row_log_probs_m_is_0
-
-    def _log_gaussian(self, mu_true, mu_approx, log_vars=1.0, mask=None):
-        """
-        Compute log probability of some continuous variables with values given
-        by mu_true, w.r.t. gaussian distributions with means given by mu_approx
-        and log variances given by les_logvars.
-        """
-        if mask is None:
-            mask = T.ones((1, mu_approx.shape[1]))
-        ind_log_probs = C - (0.5 * log_vars)  - \
-                ((mu_true - mu_approx)**2.0 / (2.0 * T.exp(log_vars)))
-        row_log_probs = T.sum((ind_log_probs * mask), axis=1)
-        row_log_probs = T.cast(row_log_probs, 'floatX')
-        return row_log_probs
-
-    def _compute_log_prob(self, x_true, x_approx, mask=None):
-        """
-        helper function for switching between bernoulli/gaussian.
-        """
-        if self.x_type == 'bernoulli':
-            ll = self._log_bernoulli(x_true, x_approx, mask=mask)
-        else:
-            ll = self._log_gaussian(x_true, x_approx, \
-                         log_vars=self.logvar, mask=mask)
-        return ll
-
-    def _construct_funcs(self):
-        """
-        compute log-likelihood of the imputations for values in x_test
-        for which m_test is 0. imputation is performed by template matching
-        against a fixed set of "training" examples.
-        """
-        # we'll just brute force the search.
-        x_t = T.vector()
-        m_t = T.vector()
-        ll_m_is_1, ll_m_is_0 = self._compute_log_prob(x_t, self.x_train, \
-                                                      mask=m_t)
-        outputs = [ll_m_is_1, ll_m_is_0]
-        theano_func = theano.function(inputs=[x_t, m_t], outputs=outputs)
-        def nll_func(x_test, m_test):
-            test_count = x_test.shape[0]
-            nll_match_on_known = np.zeros((x_test.shape[0],))
-            nll_match_on_unknown = np.zeros((x_test.shape[0],))
-            print("Template matching for {} test examples:".format(test_count))
-            for i in range(test_count):
-                ll_m_is_1, ll_m_is_0 = theano_func(x_test[i], m_test[i])
-                match_idx = np.argmax(ll_m_is_1)
-                nll_match_on_known[i] = -1.0 * ll_m_is_0[match_idx]
-                match_idx = np.argmax(ll_m_is_0)
-                nll_match_on_unknown[i] = -1.0 * ll_m_is_0[match_idx]
-                if ((i % (test_count/50)) == 0):
-                    print("-- processed {} examples, nll_mok: {}, nll_mou: {}".format(i, \
-                            np.mean(nll_match_on_known[:(i+1)]), \
-                            np.mean(nll_match_on_unknown[:(i+1)])))
-            return [nll_match_on_known, nll_match_on_unknown]
-        def img_func(x_test, m_test):
-            x_tr = self.x_train.get_value(borrow=False)
-            test_count = x_test.shape[0]
-            img_match_on_known = np.zeros(x_test.shape)
-            img_match_on_unknown = np.zeros(x_test.shape)
-            print("Template matching for {} test examples:".format(test_count))
-            for i in range(test_count):
-                xt_i = x_test[i]
-                mt_i = m_test[i]
-                ll_m_is_1, ll_m_is_0 = theano_func(xt_i, mt_i)
-                match_idx = np.argmax(ll_m_is_1)
-                img_match_on_known[i] = (mt_i * xt_i) + \
-                                        ((1.0 - mt_i) * x_tr[match_idx])
-                match_idx = np.argmax(ll_m_is_0)
-                img_match_on_unknown[i] = (mt_i * xt_i) + \
-                                          ((1.0 - mt_i) * x_tr[match_idx])
-            return [img_match_on_known, img_match_on_unknown]
-        return nll_func, img_func
-
 
 
 if __name__=="__main__":

@@ -728,7 +728,7 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
         self.joint_params = VariableFilter(roles=[PARAMETER])(self.cg.variables)
 
         # apply some l2 regularization to the model parameters
-        self.reg_term = (1e-4 * sum([tensor.sum(p**2.0) for p in self.joint_params]))
+        self.reg_term = (4e-5 * sum([tensor.sum(p**2.0) for p in self.joint_params]))
         self.reg_term.name = "reg_term"
 
         # compute the full cost w.r.t. which we will optimize
