@@ -17,7 +17,7 @@ from NetLayers import relu_actfun, softplus_actfun, tanh_actfun
 from InfNet import InfNet
 from HydraNet import HydraNet
 from GPSImputerNEW import GPSImputer, load_gpsimputer_from_file
-from load_data import load_udm, load_tfd, load_svhn_gray
+from load_data import load_udm, load_tfd, load_svhn_gray, load_binarized_mnist
 from HelperFuncs import construct_masked_data, shift_and_scale_into_01, \
                         row_shuffle, to_fX
 
@@ -39,22 +39,34 @@ def test_mnist(step_type='add',
     dp_int = int(100.0 * drop_prob)
     result_tag = "{}BBB_GPSI_OD{}_DP{}_IS{}_{}_NA".format(RESULT_PATH, occ_dim, dp_int, imp_steps, step_type)
 
+
     ##########################
     # Get some training data #
     ##########################
     rng = np.random.RandomState(1234)
-    dataset = 'data/mnist.pkl.gz'
-    datasets = load_udm(dataset, as_shared=False, zero_mean=False)
-    Xtr = datasets[0][0]
-    Xva = datasets[1][0]
-    Xte = datasets[2][0]
-    # Merge validation set and training set, and test on test set.
-    #Xtr = np.concatenate((Xtr, Xva), axis=0)
-    #Xva = Xte
-    Xtr = to_fX(shift_and_scale_into_01(Xtr))
-    Xva = to_fX(shift_and_scale_into_01(Xva))
+    Xtr, Xva, Xte = load_binarized_mnist(data_path='./data/')
+    Xtr = np.vstack((Xtr, Xva))
+    Xva = Xte
+    #del Xte
     tr_samples = Xtr.shape[0]
     va_samples = Xva.shape[0]
+
+    ##########################
+    # Get some training data #
+    ##########################
+    # rng = np.random.RandomState(1234)
+    # dataset = 'data/mnist.pkl.gz'
+    # datasets = load_udm(dataset, as_shared=False, zero_mean=False)
+    # Xtr = datasets[0][0]
+    # Xva = datasets[1][0]
+    # Xte = datasets[2][0]
+    # # Merge validation set and training set, and test on test set.
+    # #Xtr = np.concatenate((Xtr, Xva), axis=0)
+    # #Xva = Xte
+    # Xtr = to_fX(shift_and_scale_into_01(Xtr))
+    # Xva = to_fX(shift_and_scale_into_01(Xva))
+    # tr_samples = Xtr.shape[0]
+    # va_samples = Xva.shape[0]
     batch_size = 200
     batch_reps = 1
     all_pix_mean = np.mean(np.mean(Xtr, axis=1))
@@ -77,7 +89,7 @@ def test_mnist(step_type='add',
     # p_zi_given_xi #
     #################
     params = {}
-    shared_config = [(x_dim + x_dim + x_dim), 400, 400]
+    shared_config = [(x_dim + x_dim), 400, 400]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
@@ -132,7 +144,7 @@ def test_mnist(step_type='add',
     # q_zi_given_xi #
     #################
     params = {}
-    shared_config = [(x_dim + x_dim + x_dim), 400, 400]
+    shared_config = [(x_dim + x_dim), 400, 400]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
@@ -285,20 +297,35 @@ def test_mnist_results(step_type='add',
     # Format the result tag more thoroughly #
     #########################################
     dp_int = int(100.0 * drop_prob)
-    result_tag = "{}GPSI_OD{}_DP{}_IS{}_{}_NA".format(RESULT_PATH, occ_dim, dp_int, imp_steps, step_type)
+    result_tag = "{}BBB_GPSI_OD{}_DP{}_IS{}_{}_NA".format(RESULT_PATH, occ_dim, dp_int, imp_steps, step_type)
 
     ##########################
     # Get some training data #
     ##########################
     rng = np.random.RandomState(1234)
-    dataset = 'data/mnist.pkl.gz'
-    datasets = load_udm(dataset, as_shared=False, zero_mean=False)
-    Xtr = datasets[0][0]
-    Xva = datasets[1][0]
-    Xtr = to_fX(shift_and_scale_into_01(Xtr))
-    Xva = to_fX(shift_and_scale_into_01(Xva))
+    Xtr, Xva, Xte = load_binarized_mnist(data_path='./data/')
+    Xtr = np.vstack((Xtr, Xva))
+    Xva = Xte
+    #del Xte
     tr_samples = Xtr.shape[0]
     va_samples = Xva.shape[0]
+
+    ##########################
+    # Get some training data #
+    ##########################
+    # rng = np.random.RandomState(1234)
+    # dataset = 'data/mnist.pkl.gz'
+    # datasets = load_udm(dataset, as_shared=False, zero_mean=False)
+    # Xtr = datasets[0][0]
+    # Xva = datasets[1][0]
+    # Xte = datasets[2][0]
+    # # Merge validation set and training set, and test on test set.
+    # #Xtr = np.concatenate((Xtr, Xva), axis=0)
+    # #Xva = Xte
+    # Xtr = to_fX(shift_and_scale_into_01(Xtr))
+    # Xva = to_fX(shift_and_scale_into_01(Xva))
+    # tr_samples = Xtr.shape[0]
+    # va_samples = Xva.shape[0]
     batch_size = 250
     batch_reps = 1
     all_pix_mean = np.mean(np.mean(Xtr, axis=1))

@@ -135,12 +135,12 @@ class GPSImputer(object):
             grad_masked = self.x_mask * grad_unmasked
             # get samples of next zi, according to the global policy
             zi_p_mean, zi_p_logvar = self.p_zi_given_xi.apply( \
-                    T.horizontal_stack(xi_masked, grad_masked, self.x_mask), \
+                    T.horizontal_stack(xi_masked, grad_masked), \
                     do_samples=False)
             zi_p = zi_p_mean + (T.exp(0.5 * zi_p_logvar) * zi_zmuv)
             # get samples of next zi, according to the guide policy
             zi_q_mean, zi_q_logvar = self.q_zi_given_xi.apply( \
-                    T.horizontal_stack(xi_masked, grad_unmasked, self.ones_mask), \
+                    T.horizontal_stack(xi_masked, grad_unmasked), \
                     do_samples=False)
             zi_q = zi_q_mean + (T.exp(0.5 * zi_q_logvar) * zi_zmuv)
 
@@ -159,18 +159,15 @@ class GPSImputer(object):
             hydra_out = self.p_sip1_given_zi.apply(zi)
             si_step = hydra_out[0]
             if (self.step_type == 'jump'):
-                # jump steps always do a full swap (like standard VAE)
+                # jump steps always completely overwrite the current guesses
                 sip1 = si_step
             else:
-                # additive steps adjust the current guesses incrementally
+                # additive steps update the current guesses like an LSTM
                 write_gate = T.nnet.sigmoid(2.0 + hydra_out[1])
                 erase_gate = T.nnet.sigmoid(2.0 + hydra_out[2])
-                # LSTM-style update
                 sip1 = (erase_gate * si) + (write_gate * si_step)
-                # normal update (this was used in workshop papers)
-                #sip1 = si + si_step
             # compute NLL for the current imputation
-            nlli = self._construct_nll_costs(sip1, self.x_out, 0.0*self.x_mask)
+            nlli = self._construct_nll_costs(sip1, self.x_out, self.x_mask)
             return sip1, nlli, kldi_q2p, kldi_p2q, kldi_p2g
 
         # apply scan op for the sequential imputation loop

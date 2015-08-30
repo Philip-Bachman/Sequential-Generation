@@ -30,16 +30,11 @@ RESULT_PATH = "SRRM_RESULTS/"
 ###############################
 
 def test_mnist(step_type='add', \
-               init_steps=1, \
-               reveal_steps=5, \
-               refine_steps=2, \
-               reveal_rate=0.25):
+               rev_sched=None):
     #########################################
     # Format the result tag more thoroughly #
     #########################################
-    rev_rate_int = int(reveal_rate * 100.0)
-    result_tag = "{}SRRM_IN{}_RV{}_RF{}_RT{}_ST{}".format(RESULT_PATH, \
-            init_steps, reveal_steps, refine_steps, rev_rate_int, step_type)
+    result_tag = "{}SRRM_ST{}".format(RESULT_PATH, step_type)
 
     ##########################
     # Get some training data #
@@ -51,7 +46,7 @@ def test_mnist(step_type='add', \
     #del Xte
     tr_samples = Xtr.shape[0]
     va_samples = Xva.shape[0]
-    batch_size = 250
+    batch_size = 200
 
     ############################################################
     # Setup some parameters for the Iterative Refinement Model #
@@ -139,6 +134,12 @@ def test_mnist(step_type='add', \
             params=params, shared_param_dicts=None)
     q_zi_given_xi.init_biases(0.2)
 
+    #################################################
+    # Setup a revelation schedule if none was given #
+    #################################################
+    if rev_sched is None:
+        rev_sched = [(2, 0.2), (2, 0.2), (2, 0.2), (2, 0.2), (2, 1.0)]
+
     #########################################################
     # Define parameters for the SRRModel, and initialize it #
     #########################################################
@@ -148,14 +149,11 @@ def test_mnist(step_type='add', \
     srrm_params['z_dim'] = z_dim
     srrm_params['s_dim'] = s_dim
     srrm_params['use_p_x_given_si'] = False
-    srrm_params['init_steps'] = init_steps
-    srrm_params['reveal_steps'] = reveal_steps
-    srrm_params['refine_steps'] = refine_steps
-    srrm_params['reveal_rate'] = reveal_rate
+    srrm_params['rev_sched'] = rev_sched
     srrm_params['step_type'] = step_type
     srrm_params['x_type'] = 'bernoulli'
     srrm_params['obs_transform'] = 'sigmoid'
-    SRRM = SRRModel(rng=rng, 
+    SRRM = SRRModel(rng=rng,
             x_out=x_out_sym, \
             p_zi_given_xi=p_zi_given_xi, \
             p_sip1_given_zi=p_sip1_given_zi, \
@@ -170,7 +168,7 @@ def test_mnist(step_type='add', \
     log_name = "{}_RESULTS.txt".format(result_tag)
     out_file = open(log_name, 'wb')
     costs = [0. for i in range(10)]
-    learn_rate = 0.0001
+    learn_rate = 0.0002
     momentum = 0.5
     batch_idx = np.arange(batch_size) + tr_samples
     for i in range(250000):
