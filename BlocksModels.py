@@ -1346,12 +1346,16 @@ class IMoCLDrawModels(BaseRecurrent, Initializable, Random):
         return
 
 
+
+
+
+
 ##########################################################
 # LSTM-based sequential revelation and refinement model  #
 ##########################################################
 
 class SRR_LSTM(BaseRecurrent, Initializable, Random):
-    def __init__(self, n_iter, step_type,
+    def __init__(self, rev_masks, step_type,
                     mix_enc_mlp, mix_dec_mlp, mix_var_mlp,
                     reader_mlp, writer_mlp,
                     enc_mlp_in, enc_rnn, enc_mlp_out,
@@ -1362,7 +1366,13 @@ class SRR_LSTM(BaseRecurrent, Initializable, Random):
         if not ((step_type == 'add') or (step_type == 'jump')):
             raise ValueError('step_type must be jump or add')
         # record the desired step count
-        self.n_iter = n_iter
+        self.rev_masks = rev_masks
+        # Deal with revelation scheduling
+        rmp = self.rev_masks[0].astype(theano.config.floatX)
+        rmq = self.rev_masks[1].astype(theano.config.floatX)
+        self.rev_masks_p = theano.shared(value=rmp, name='srrm_rev_masks_p')
+        self.rev_masks_q = theano.shared(value=rmq, name='srrm_rev_masks_q')
+        self.n_iter = self.rev_masks[0].shape[0]
         self.step_type = step_type
         # grab handles for mixture stuff
         self.mix_enc_mlp = mix_enc_mlp

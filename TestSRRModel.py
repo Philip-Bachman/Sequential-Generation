@@ -34,7 +34,7 @@ def test_mnist(step_type='add', \
     #########################################
     # Format the result tag more thoroughly #
     #########################################
-    result_tag = "{}SRRM_ST{}".format(RESULT_PATH, step_type)
+    result_tag = "{}AAA_SRRM_ST{}".format(RESULT_PATH, step_type)
 
     ##########################
     # Get some training data #
@@ -55,7 +55,7 @@ def test_mnist(step_type='add', \
     s_dim = x_dim
     #s_dim = 300
     z_dim = 100
-    init_scale = 1.0
+    init_scale = 0.75
 
     x_out_sym = T.matrix('x_out_sym')
 
@@ -138,7 +138,14 @@ def test_mnist(step_type='add', \
     # Setup a revelation schedule if none was given #
     #################################################
     if rev_sched is None:
-        rev_sched = [(2, 0.2), (2, 0.2), (2, 0.2), (2, 0.2), (2, 1.0)]
+       rev_sched = [(5, 1.0)]
+    rev_masks = None
+    # p_masks = npr.uniform(size=(11,x_dim)) < 0.05
+    # p_masks[0] = np.zeros((1,x_dim))
+    # p_masks[-1] = np.ones((1,x_dim))
+    # p_masks = p_masks.astype(theano.config.floatX)
+    # q_masks = np.ones(p_masks.shape).astype(theano.config.floatX)
+    # rev_masks = [p_masks, q_masks]
 
     #########################################################
     # Define parameters for the SRRModel, and initialize it #
@@ -150,6 +157,7 @@ def test_mnist(step_type='add', \
     srrm_params['s_dim'] = s_dim
     srrm_params['use_p_x_given_si'] = False
     srrm_params['rev_sched'] = rev_sched
+    srrm_params['rev_masks'] = rev_masks
     srrm_params['step_type'] = step_type
     srrm_params['x_type'] = 'bernoulli'
     srrm_params['obs_transform'] = 'sigmoid'
@@ -168,7 +176,7 @@ def test_mnist(step_type='add', \
     log_name = "{}_RESULTS.txt".format(result_tag)
     out_file = open(log_name, 'wb')
     costs = [0. for i in range(10)]
-    learn_rate = 0.0002
+    learn_rate = 0.0001
     momentum = 0.5
     batch_idx = np.arange(batch_size) + tr_samples
     for i in range(250000):
@@ -177,9 +185,9 @@ def test_mnist(step_type='add', \
         if (((i + 1) % 15000) == 0):
             learn_rate = learn_rate * 0.93
         if (i > 10000):
-            momentum = 0.90
+            momentum = 0.95
         else:
-            momentum = 0.50
+            momentum = 0.80
         # get the indices of training samples for this batch update
         batch_idx += batch_size
         if (np.max(batch_idx) >= tr_samples):
@@ -190,7 +198,7 @@ def test_mnist(step_type='add', \
         SRRM.set_sgd_params(lr=scale*learn_rate, \
                             mom_1=scale*momentum, mom_2=0.98)
         SRRM.set_train_switch(1.0)
-        SRRM.set_lam_kld(lam_kld_p=0.05, lam_kld_q=0.95, lam_kld_g=(0.0 * lam_scale))
+        SRRM.set_lam_kld(lam_kld_p=0.00, lam_kld_q=1.00, lam_kld_g=(0.0 * lam_scale))
         SRRM.set_lam_l2w(1e-4)
         # perform a minibatch update and record the cost for this batch
         xb = to_fX( Xtr.take(batch_idx, axis=0) )

@@ -46,6 +46,10 @@ class SRRModel(object):
                 rev_sched: list of "revelation" blocks. each block is described
                            by the number of steps prior to revelation, and the
                            percentage of remaining pixels to reveal.
+                rev_masks: matrix of revelation masks. the row i provides the
+                           mask for iteration i of the srr loop. when this
+                           argument is passed, rev_sched is ignored and the
+                           revelation schedule is determined by rev_masks.
                 step_type: either "add" or "jump"
                 x_type: can be "bernoulli" or "gaussian"
                 obs_transform: can be 'none' or 'sigmoid'
@@ -67,16 +71,8 @@ class SRRModel(object):
         self.z_dim = self.params['z_dim']
         self.s_dim = self.params['s_dim']
         self.use_p_x_given_si = self.params['use_p_x_given_si']
-        self.rev_sched = self.params['rev_sched']
         self.step_type = self.params['step_type']
         self.x_type = self.params['x_type']
-        nice_nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
-        # "validate" the set of revelation block descriptions
-        for rev_block in self.rev_sched:
-            assert(rev_block[0] in nice_nums)
-            assert((rev_block[1] >= 0.0) and (rev_block[1] <= 1.01))
-        assert((self.x_type == 'bernoulli') or (self.x_type == 'gaussian'))
-        assert((self.step_type == 'add') or (self.step_type == 'jump'))
         if self.use_p_x_given_si:
             print("Constructing hypotheses indirectly in s-space...")
         else:
@@ -94,6 +90,27 @@ class SRRModel(object):
         if self.x_type == 'bernoulli':
             self.obs_transform = lambda x: T.nnet.sigmoid(x)
         self.shared_param_dicts = shared_param_dicts
+        # Deal with revelation scheduling
+        if ('rev_masks' in self.params) and (self.params['rev_masks'] is not None):
+            rmp = self.params['rev_masks'][0].astype(theano.config.floatX)
+            rmq = self.params['rev_masks'][1].astype(theano.config.floatX)
+            self.rev_masks_p = theano.shared(value=rmp, name='srrm_rev_masks_p')
+            self.rev_masks_q = theano.shared(value=rmq, name='srrm_rev_masks_q')
+            self.rev_sched = None
+            self.use_rev_masks = True
+        else:
+            self.rev_sched = self.params['rev_sched']
+            self.rev_masks_p = None
+            self.rev_masks_q = None
+            self.use_rev_masks = False
+            nice_nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+            # "validate" the set of revelation block descriptions
+            for rev_block in self.rev_sched:
+                assert(rev_block[0] in nice_nums)
+                assert((rev_block[1] >= 0.0) and (rev_block[1] <= 1.01))
+            assert((self.x_type == 'bernoulli') or (self.x_type == 'gaussian'))
+            assert((self.step_type == 'add') or (self.step_type == 'jump'))
+
 
         # grab handles to the relevant networks
         self.p_zi_given_xi = p_zi_given_xi
@@ -107,7 +124,10 @@ class SRRModel(object):
         self.zi_zmuv = T.tensor3()   # ZMUV gauss noise for policy wobble
         self.p_masks = T.tensor3()   # revelation masks for primary policy
         self.q_masks = T.tensor3()   # revelation masks for guide policy
-        self.total_steps = sum([rb[0] for rb in self.rev_sched])
+        if self.use_rev_masks:
+            self.total_steps = self.params['rev_masks'][0].shape[0]
+        else:
+            self.total_steps = sum([rb[0] for rb in self.rev_sched])
 
         # setup switching variable for changing between sampling/training
         zero_ary = to_fX( np.zeros((1,)) )
@@ -404,42 +424,47 @@ class SRRModel(object):
         Compute the sequential revelation masks for the input batch in xo.
         -- We need to construct mask sequences for both p and q.
         """
-        pm_list = []
-        qm_list = []
-        # make a zero mask that does nothing
-        zero_mask = T.alloc(0.0, 1, xo.shape[0], xo.shape[1])
-        # generate independently sampled masks for each revelation block
-        for rb in self.rev_sched:
-            # make a random binary mask with ones at rate rb[1]
-            rand_vals = self.rng.uniform( \
-                    size=(1, xo.shape[0], xo.shape[1]), \
-                    low=0.0, high=1.0, dtype=theano.config.floatX)
-            rand_mask = rand_vals < rb[1]
-            # append the masks for this revleation block to the mask lists
-            #
-            # the guide policy (in q) gets to peek at the values that will be
-            # revealed to the primary policy (in p) for the entire block. The
-            # primary policy only gets to see these values at end of the final
-            # step of the block. Within a given step, values are revealed to q
-            # at the beginning of the step, and to p at the end.
-            #
-            # e.g. in a revelation block with only a single step, the guide
-            # policy sees the values at the beginning of the step, which allows
-            # it to guide the step. the primary policy only gets to see the
-            # values at the end of the step.
-            #
-            # i.e. a standard variational auto-encoder is equivalent to a
-            # sequential revelation and refinement model with only one
-            # revelation block, which has one step and a reveal rate of 1.0.
-            #
-            for refine_step in range(rb[0]-1):
-                pm_list.append(zero_mask)
+        if self.use_rev_masks:
+            # make batch copies of self.rev_masks_p and self.rev_masks_q
+            pmasks = self.rev_masks_p.dimshuffle(0,'x',1).repeat(xo.shape[0], axis=1)
+            qmasks = self.rev_masks_q.dimshuffle(0,'x',1).repeat(xo.shape[0], axis=1)
+        else:
+            pm_list = []
+            qm_list = []
+            # make a zero mask that does nothing
+            zero_mask = T.alloc(0.0, 1, xo.shape[0], xo.shape[1])
+            # generate independently sampled masks for each revelation block
+            for rb in self.rev_sched:
+                # make a random binary mask with ones at rate rb[1]
+                rand_vals = self.rng.uniform( \
+                        size=(1, xo.shape[0], xo.shape[1]), \
+                        low=0.0, high=1.0, dtype=theano.config.floatX)
+                rand_mask = rand_vals < rb[1]
+                # append the masks for this revleation block to the mask lists
+                #
+                # the guide policy (in q) gets to peek at the values that will be
+                # revealed to the primary policy (in p) for the entire block. The
+                # primary policy only gets to see these values at end of the final
+                # step of the block. Within a given step, values are revealed to q
+                # at the beginning of the step, and to p at the end.
+                #
+                # e.g. in a revelation block with only a single step, the guide
+                # policy sees the values at the beginning of the step, which allows
+                # it to guide the step. the primary policy only gets to see the
+                # values at the end of the step.
+                #
+                # i.e. a standard variational auto-encoder is equivalent to a
+                # sequential revelation and refinement model with only one
+                # revelation block, which has one step and a reveal rate of 1.0.
+                #
+                for refine_step in range(rb[0]-1):
+                    pm_list.append(zero_mask)
+                    qm_list.append(rand_mask)
+                pm_list.append(rand_mask)
                 qm_list.append(rand_mask)
-            pm_list.append(rand_mask)
-            qm_list.append(rand_mask)
-        # concatenate each mask list into a 3-tensor
-        pmasks = T.cast(T.concatenate(pm_list, axis=0), 'floatX')
-        qmasks = T.cast(T.concatenate(qm_list, axis=0), 'floatX')
+            # concatenate each mask list into a 3-tensor
+            pmasks = T.cast(T.concatenate(pm_list, axis=0), 'floatX')
+            qmasks = T.cast(T.concatenate(qm_list, axis=0), 'floatX')
         return [pmasks, qmasks]
 
     def _construct_nll_costs(self, si, xo, nll_mask):
