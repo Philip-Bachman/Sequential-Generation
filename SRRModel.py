@@ -137,21 +137,28 @@ class SRRModel(object):
         if self.shared_param_dicts is None:
             # initialize the parameters "owned" by this model
             s0_init = to_fX( np.zeros((self.s_dim,)) )
+            ss_init = to_fX( 0.5 * np.ones((self.total_steps,)) )
             self.s0 = theano.shared(value=s0_init, name='srrm_s0')
             self.obs_logvar = theano.shared(value=zero_ary, name='srrm_obs_logvar')
             self.bounded_logvar = 8.0 * T.tanh((1.0/8.0) * self.obs_logvar[0])
+            self.step_scales = theano.shared(value=ss_init, name='srrm_step_scales')
             self.shared_param_dicts = {}
             self.shared_param_dicts['s0'] = self.s0
             self.shared_param_dicts['obs_logvar'] = self.obs_logvar
+            self.shared_param_dicts['step_scales'] = self.step_scales
         else:
             # grab the parameters required by this model from a given dict
             self.s0 = self.shared_param_dicts['s0']
             self.obs_logvar = self.shared_param_dicts['obs_logvar']
             self.bounded_logvar = 8.0 * T.tanh((1.0/8.0) * self.obs_logvar[0])
+            self.step_scales = self.shared_param_dicts['step_scales']
 
         ##################################################################
         # Setup the sequential revelation and refinement loop using scan #
         ##################################################################
+        # ss: This is a sequence of scalars that will be used to rescale the
+        #     "gradient" input to the primary and guide policies.
+        #
         # zi_zmuv: This is a sequence of ZMUV gaussian samples that will be
         #          reparametrized to sample actions from the policies.
         #
@@ -179,10 +186,10 @@ class SRRModel(object):
         #
         # mi_q: This is the current revelation mask for the guide policy.
         #
-        def srr_step_func(zi_zmuv, p_masks, q_masks, si, mi_p, mi_q):
+        def srr_step_func(ss, zi_zmuv, p_masks, q_masks, si, mi_p, mi_q):
             # transform the current belief state into an observation
             si_as_x = self._from_si_to_x(si)
-            full_grad = self.x_out - si_as_x
+            full_grad = T.log(1.0 + T.exp(ss)) * (self.x_out - si_as_x)
 
             # get the masked belief state and gradient for primary policy
             xi_for_p = (mi_p * self.x_out) + ((1.0 - mi_p) * si_as_x)
@@ -251,7 +258,7 @@ class SRRModel(object):
         # setup initial values to pass to scan op
         outputs_init = [self.s0_full, self.m0_full, self.m0_full, \
                         None, None, None, None]
-        sequences_init = [self.zi_zmuv, self.p_masks, self.q_masks]
+        sequences_init = [self.step_scales, self.zi_zmuv, self.p_masks, self.q_masks]
         # apply scan op for the sequential imputation loop
         self.scan_results, self.scan_updates = theano.scan(srr_step_func, \
                     outputs_info=outputs_init, \
@@ -282,13 +289,14 @@ class SRRModel(object):
         self.lam_kld_p = theano.shared(value=zero_ary, name='srr_lam_kld_p')
         self.lam_kld_q = theano.shared(value=zero_ary, name='srr_lam_kld_q')
         self.lam_kld_g = theano.shared(value=zero_ary, name='srr_lam_kld_g')
-        self.set_lam_kld(lam_kld_p=0.05, lam_kld_q=0.95, lam_kld_g=0.0)
+        self.lam_kld_s = theano.shared(value=zero_ary, name='srr_lam_kld_s')
+        self.set_lam_kld(lam_kld_p=0.0, lam_kld_q=1.0, lam_kld_g=0.0, lam_kld_s=0.0)
         # init shared var for controlling l2 regularization on params
         self.lam_l2w = theano.shared(value=zero_ary, name='srr_lam_l2w')
         self.set_lam_l2w(1e-5)
 
         # grab all of the "optimizable" parameters from the base networks
-        self.joint_params = [self.s0, self.obs_logvar]
+        self.joint_params = [self.s0, self.obs_logvar, self.step_scales]
         self.joint_params.extend(self.p_zi_given_xi.mlp_params)
         self.joint_params.extend(self.p_sip1_given_zi.mlp_params)
         self.joint_params.extend(self.p_x_given_si.mlp_params)
@@ -297,10 +305,11 @@ class SRRModel(object):
         #################################
         # CONSTRUCT THE KLD-BASED COSTS #
         #################################
-        self.kld_p, self.kld_q, self.kld_g = self._construct_kld_costs(p=1.0)
+        self.kld_p, self.kld_q, self.kld_g, self.kld_s = self._construct_kld_costs(p=1.0)
         self.kld_costs = (self.lam_kld_p[0] * self.kld_p) + \
                          (self.lam_kld_q[0] * self.kld_q) + \
-                         (self.lam_kld_g[0] * self.kld_g)
+                         (self.lam_kld_g[0] * self.kld_g) + \
+                         (self.lam_kld_s[0] * self.kld_s)
         self.kld_cost = T.mean(self.kld_costs)
         #################################
         # CONSTRUCT THE NLL-BASED COSTS #
@@ -374,7 +383,7 @@ class SRRModel(object):
         self.mom_2.set_value(to_fX(new_mom_2))
         return
 
-    def set_lam_kld(self, lam_kld_p=0.0, lam_kld_q=1.0, lam_kld_g=0.0):
+    def set_lam_kld(self, lam_kld_p=0.0, lam_kld_q=1.0, lam_kld_g=0.0, lam_kld_s=0.0):
         """
         Set the relative weight of prior KL-divergence vs. data likelihood.
         """
@@ -385,6 +394,8 @@ class SRRModel(object):
         self.lam_kld_q.set_value(to_fX(new_lam))
         new_lam = zero_ary + lam_kld_g
         self.lam_kld_g.set_value(to_fX(new_lam))
+        new_lam = zero_ary + lam_kld_s
+        self.lam_kld_s.set_value(to_fX(new_lam))
         return
 
     def set_lam_l2w(self, lam_l2w=1e-3):
@@ -481,6 +492,17 @@ class SRRModel(object):
         nll_costs = -ll_costs.flatten()
         return nll_costs
 
+    def _construct_kld_s(self, s_i, s_j):
+        """
+        Compute KL(s_i || s_j) -- assuming bernoullish outputs
+        """
+        x_i = self._from_si_to_x( s_i )
+        x_j = self._from_si_to_x( s_j )
+        kld_s = (x_i * (T.log(x_i)  - T.log(x_j))) + \
+                ((1.0 - x_i) * (T.log(1.0-x_i) - T.log(1.0-x_j)))
+        sum_kld = T.sum(kld_s, axis=1)
+        return sum_kld
+
     def _construct_kld_costs(self, p=1.0):
         """
         Construct the policy KL-divergence part of cost to minimize.
@@ -488,15 +510,22 @@ class SRRModel(object):
         kld_pis = []
         kld_qis = []
         kld_gis = []
+        kld_sis = []
+        s0 = 0.0*self.si[0] + self.s0
         for i in range(self.total_steps):
             kld_pis.append(T.sum(self.kldi_p2q[i]**p, axis=1))
             kld_qis.append(T.sum(self.kldi_q2p[i]**p, axis=1))
             kld_gis.append(T.sum(self.kldi_p2g[i]**p, axis=1))
+            if i == 0:
+                kld_sis.append(self._construct_kld_s(self.si[i], s0))
+            else:
+                kld_sis.append(self._construct_kld_s(self.si[i], self.si[i-1]))
         # compute the batch-wise costs
         kld_pi = sum(kld_pis)
         kld_qi = sum(kld_qis)
         kld_gi = sum(kld_gis)
-        return [kld_pi, kld_qi, kld_gi]
+        kld_si = sum(kld_sis)
+        return [kld_pi, kld_qi, kld_gi, kld_si]
 
     def _construct_reg_costs(self):
         """

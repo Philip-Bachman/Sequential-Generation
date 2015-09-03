@@ -34,7 +34,7 @@ def test_mnist(step_type='add', \
     #########################################
     # Format the result tag more thoroughly #
     #########################################
-    result_tag = "{}AAA_SRRM_ST{}".format(RESULT_PATH, step_type)
+    result_tag = "{}DDD_SRRM_ST{}".format(RESULT_PATH, step_type)
 
     ##########################
     # Get some training data #
@@ -55,7 +55,7 @@ def test_mnist(step_type='add', \
     s_dim = x_dim
     #s_dim = 300
     z_dim = 100
-    init_scale = 0.75
+    init_scale = 0.66
 
     x_out_sym = T.matrix('x_out_sym')
 
@@ -68,7 +68,7 @@ def test_mnist(step_type='add', \
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
-    params['activation'] = relu_actfun
+    params['activation'] = tanh_actfun
     params['init_scale'] = init_scale
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
@@ -86,7 +86,7 @@ def test_mnist(step_type='add', \
     output_config = [s_dim, s_dim, s_dim]
     params['shared_config'] = shared_config
     params['output_config'] = output_config
-    params['activation'] = relu_actfun
+    params['activation'] = tanh_actfun
     params['init_scale'] = init_scale
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
@@ -104,7 +104,7 @@ def test_mnist(step_type='add', \
     output_config = [x_dim, x_dim]
     params['shared_config'] = shared_config
     params['output_config'] = output_config
-    params['activation'] = relu_actfun
+    params['activation'] = tanh_actfun
     params['init_scale'] = init_scale
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
@@ -123,7 +123,7 @@ def test_mnist(step_type='add', \
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
-    params['activation'] = relu_actfun
+    params['activation'] = tanh_actfun
     params['init_scale'] = init_scale
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
@@ -138,10 +138,10 @@ def test_mnist(step_type='add', \
     # Setup a revelation schedule if none was given #
     #################################################
     if rev_sched is None:
-       rev_sched = [(5, 1.0)]
+       rev_sched = [(10, 1.0)]
     rev_masks = None
-    # p_masks = npr.uniform(size=(11,x_dim)) < 0.05
-    # p_masks[0] = np.zeros((1,x_dim))
+    # p_masks = np.zeros((10,x_dim))
+    # p_masks[4] = npr.uniform(size=(1,x_dim)) < 0.25
     # p_masks[-1] = np.ones((1,x_dim))
     # p_masks = p_masks.astype(theano.config.floatX)
     # q_masks = np.ones(p_masks.shape).astype(theano.config.floatX)
@@ -176,7 +176,7 @@ def test_mnist(step_type='add', \
     log_name = "{}_RESULTS.txt".format(result_tag)
     out_file = open(log_name, 'wb')
     costs = [0. for i in range(10)]
-    learn_rate = 0.0001
+    learn_rate = 0.00015
     momentum = 0.5
     batch_idx = np.arange(batch_size) + tr_samples
     for i in range(250000):
@@ -198,8 +198,9 @@ def test_mnist(step_type='add', \
         SRRM.set_sgd_params(lr=scale*learn_rate, \
                             mom_1=scale*momentum, mom_2=0.98)
         SRRM.set_train_switch(1.0)
-        SRRM.set_lam_kld(lam_kld_p=0.00, lam_kld_q=1.00, lam_kld_g=(0.0 * lam_scale))
-        SRRM.set_lam_l2w(1e-4)
+        SRRM.set_lam_kld(lam_kld_p=0.0, lam_kld_q=1.0, \
+                         lam_kld_g=0.0, lam_kld_s=0.0)
+        SRRM.set_lam_l2w(1e-5)
         # perform a minibatch update and record the cost for this batch
         xb = to_fX( Xtr.take(batch_idx, axis=0) )
         result = SRRM.train_joint(xb)
