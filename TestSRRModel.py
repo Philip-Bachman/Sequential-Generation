@@ -34,7 +34,7 @@ def test_mnist(step_type='add', \
     #########################################
     # Format the result tag more thoroughly #
     #########################################
-    result_tag = "{}DDD_SRRM_ST{}".format(RESULT_PATH, step_type)
+    result_tag = "{}AAA_SRRM_ST{}".format(RESULT_PATH, step_type)
 
     ##########################
     # Get some training data #
@@ -137,15 +137,15 @@ def test_mnist(step_type='add', \
     #################################################
     # Setup a revelation schedule if none was given #
     #################################################
-    if rev_sched is None:
-       rev_sched = [(10, 1.0)]
-    rev_masks = None
-    # p_masks = np.zeros((10,x_dim))
-    # p_masks[4] = npr.uniform(size=(1,x_dim)) < 0.25
-    # p_masks[-1] = np.ones((1,x_dim))
-    # p_masks = p_masks.astype(theano.config.floatX)
-    # q_masks = np.ones(p_masks.shape).astype(theano.config.floatX)
-    # rev_masks = [p_masks, q_masks]
+    # if rev_sched is None:
+    #    rev_sched = [(10, 1.0)]
+    # rev_masks = None
+    p_masks = np.zeros((16,x_dim))
+    p_masks[7] = npr.uniform(size=(1,x_dim)) < 0.25
+    p_masks[-1] = np.ones((1,x_dim))
+    p_masks = p_masks.astype(theano.config.floatX)
+    q_masks = np.ones(p_masks.shape).astype(theano.config.floatX)
+    rev_masks = [p_masks, q_masks]
 
     #########################################################
     # Define parameters for the SRRModel, and initialize it #
