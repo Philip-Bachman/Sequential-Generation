@@ -77,7 +77,7 @@ def test_mnist(step_type='add', \
     params['build_theano_funcs'] = False
     p_zi_given_xi = InfNet(rng=rng, Xd=x_out_sym, \
             params=params, shared_param_dicts=None)
-    p_zi_given_xi.init_biases(0.2)
+    p_zi_given_xi.init_biases(0.0)
     ###################
     # p_sip1_given_zi #
     ###################
@@ -95,7 +95,7 @@ def test_mnist(step_type='add', \
     params['build_theano_funcs'] = False
     p_sip1_given_zi = HydraNet(rng=rng, Xd=x_out_sym, \
             params=params, shared_param_dicts=None)
-    p_sip1_given_zi.init_biases(0.2)
+    p_sip1_given_zi.init_biases(0.0)
     ################
     # p_x_given_si #
     ################
@@ -113,7 +113,7 @@ def test_mnist(step_type='add', \
     params['build_theano_funcs'] = False
     p_x_given_si = HydraNet(rng=rng, Xd=x_out_sym, \
             params=params, shared_param_dicts=None)
-    p_x_given_si.init_biases(0.2)
+    p_x_given_si.init_biases(0.0)
     ###################
     # q_zi_given_xi #
     ###################
@@ -132,7 +132,7 @@ def test_mnist(step_type='add', \
     params['build_theano_funcs'] = False
     q_zi_given_xi = InfNet(rng=rng, Xd=x_out_sym, \
             params=params, shared_param_dicts=None)
-    q_zi_given_xi.init_biases(0.2)
+    q_zi_given_xi.init_biases(0.0)
 
     #################################################
     # Setup a revelation schedule if none was given #
