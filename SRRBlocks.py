@@ -800,7 +800,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         """
         # some symbolic vars to represent various inputs/outputs
         self.x_sym = tensor.matrix('x_sym')
-        self.y_sym = tensor.matrix('m_sym')
+        self.y_sym = tensor.matrix('y_sym')
 
         # collect estimates of y given x produced by this model
         nlls, kl_q2ps, kl_p2qs = self.process_inputs(self.x_sym, self.y_sym)
@@ -854,13 +854,16 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         # collect the outputs to return from this function
         outputs = [self.joint_cost, self.nll_bound, self.nll_term, \
                    self.kld_q2p_term, self.kld_p2q_term, self.reg_term]
+        # collect the required inputs
+        inputs = [self.x_sym, self.y_sym]
 
-        # compile the theano function
+        # compile the theano functions for computing stuff, like for real
         print("Compiling model training/update function...")
-        self.train_joint = theano.function(inputs=[self.x_in], \
-                                outputs=outputs, updates=self.joint_updates)
+        self.train_joint = theano.function(inputs=inputs, \
+                                           outputs=outputs, \
+                                           updates=self.joint_updates)
         print("Compiling NLL bound estimator function...")
-        self.compute_nll_bound = theano.function(inputs=[self.x_in], \
+        self.compute_nll_bound = theano.function(inputs=inputs, \
                                                  outputs=outputs)
         return
 
