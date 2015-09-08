@@ -403,7 +403,7 @@ def test_seq_cond_gen(step_type='add', attention=False):
 
         # perform a minibatch update and record the cost for this batch
         Xb = to_fX(Xtr.take(batch_idx, axis=0))
-        result = SCG.train_joint(Xb)
+        result = SCG.train_joint(Xb, Xb)
 
         costs = [(costs[j] + result[j]) for j in range(len(result))]
         if ((i % 100) == 0):
@@ -424,8 +424,8 @@ def test_seq_cond_gen(step_type='add', attention=False):
             SCG.save_model_params("SCG_params.pkl")
             # compute a small-sample estimate of NLL bound on validation set
             Xva = row_shuffle(Xva)
-            Xb = to_fX(Xva[:5000])
-            va_costs = SCG.compute_nll_bound(Xb)
+            Xb = to_fX(Xva[:1000])
+            va_costs = SCG.compute_nll_bound(Xb, Xb)
             str1 = "    va_nll_bound : {}".format(va_costs[1])
             str2 = "    va_nll_term  : {}".format(va_costs[2])
             str3 = "    va_kld_q2p   : {}".format(va_costs[3])
