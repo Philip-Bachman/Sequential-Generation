@@ -69,7 +69,7 @@ def img_grid(arr, global_scale=True):
 
         offset_y, offset_x = r*height, c*width
         I[offset_y:(offset_y+height), offset_x:(offset_x+width)] = this
-    
+
     I = (255*I).astype(np.uint8)
     return Image.fromarray(I)
 
@@ -106,7 +106,7 @@ def test_imoold_generation(step_type='add', attention=False):
         n_iter = 64
     else:
         n_iter = 16
-    
+
     rnninits = {
         'weights_init': IsotropicGaussian(0.01),
         'biases_init': Constant(0.),
@@ -120,7 +120,7 @@ def test_imoold_generation(step_type='add', attention=False):
     if attention:
         read_N, write_N = (2, 5) # resolution of reader and writer
         read_dim = 2*read_N**2   # total number of "pixels" read by reader
-        reader_mlp = AttentionReader(x_dim=x_dim, dec_dim=dec_dim,
+        reader_mlp = AttentionReader2d(x_dim=x_dim, dec_dim=dec_dim,
                                  width=28, height=28,
                                  N=read_N, **inits)
         writer_mlp = AttentionWriter(input_dim=dec_dim, output_dim=x_dim,
@@ -133,7 +133,7 @@ def test_imoold_generation(step_type='add', attention=False):
         writer_mlp = MLP([None, None], [dec_dim, write_dim, x_dim], \
                          name="writer_mlp", **inits)
         att_tag = "NA"
-    
+
     # setup the infinite mixture initialization model
     mix_enc_mlp = CondNet([Tanh()], [x_dim, 250, mix_dim], \
                           name="mix_enc_mlp", **inits)
@@ -273,7 +273,7 @@ def test_imoold_generation_ft(step_type='add', attention=False):
         n_iter = 50
     else:
         n_iter = 16
-    
+
     rnninits = {
         'weights_init': IsotropicGaussian(0.01),
         'biases_init': Constant(0.),
@@ -287,7 +287,7 @@ def test_imoold_generation_ft(step_type='add', attention=False):
     if attention:
         read_N, write_N = (2, 5) # resolution of reader and writer
         read_dim = 2*read_N**2   # total number of "pixels" read by reader
-        reader_mlp = AttentionReader(x_dim=x_dim, dec_dim=dec_dim,
+        reader_mlp = AttentionReader2d(x_dim=x_dim, dec_dim=dec_dim,
                                  width=28, height=28,
                                  N=read_N, **inits)
         writer_mlp = AttentionWriter(input_dim=dec_dim, output_dim=x_dim,
@@ -300,7 +300,7 @@ def test_imoold_generation_ft(step_type='add', attention=False):
         writer_mlp = MLP([None, None], [dec_dim, write_dim, x_dim], \
                          name="writer_mlp", **inits)
         att_tag = "NA"
-    
+
     # setup the infinite mixture initialization model
     mix_enc_mlp = CondNet([Tanh()], [x_dim, 250, mix_dim], \
                           name="mix_enc_mlp", **inits)

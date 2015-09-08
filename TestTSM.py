@@ -36,15 +36,15 @@ def test_two_stage_model1():
     #del Xte
     tr_samples = Xtr.shape[0]
     va_samples = Xva.shape[0]
-    batch_size = 50
+    batch_size = 2500
     batch_reps = 1
 
     ###############################################
     # Setup some parameters for the TwoStageModel #
     ###############################################
     x_dim = Xtr.shape[1]
-    z_dim = 32
-    h_dim = 64
+    z_dim = 50
+    h_dim = 100
     x_type = 'bernoulli'
 
     # some InfNet instances to build the TwoStageModel from
@@ -55,13 +55,13 @@ def test_two_stage_model1():
     # p_h_given_z #
     ###############
     params = {}
-    shared_config = [z_dim, 250, 250]
+    shared_config = [z_dim, 100, 100]
     top_config = [shared_config[-1], h_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
     params['activation'] = tanh_actfun
-    params['init_scale'] = 1.0
+    params['init_scale'] = 'xg'
     params['lam_l2a'] = 0.0
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
@@ -75,13 +75,13 @@ def test_two_stage_model1():
     # p_x_given_h #
     ###############
     params = {}
-    shared_config = [h_dim, 250, 250]
+    shared_config = [h_dim, 200, 200]
     top_config = [shared_config[-1], x_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
     params['activation'] = tanh_actfun
-    params['init_scale'] = 1.0
+    params['init_scale'] = 'xg'
     params['lam_l2a'] = 0.0
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
@@ -95,13 +95,13 @@ def test_two_stage_model1():
     # q_z_given_x #
     ###############
     params = {}
-    shared_config = [x_dim, 250, 250]
+    shared_config = [x_dim, 200, 200]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
     params['activation'] = tanh_actfun
-    params['init_scale'] = 1.0
+    params['init_scale'] = 'xg'
     params['lam_l2a'] = 0.0
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
@@ -115,13 +115,13 @@ def test_two_stage_model1():
     # q_h_given_z_x #
     #################
     params = {}
-    shared_config = [(z_dim + x_dim), 250, 250]
+    shared_config = [(2*h_dim + x_dim), 200, 200]
     top_config = [shared_config[-1], h_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
     params['activation'] = tanh_actfun
-    params['init_scale'] = 1.0
+    params['init_scale'] = 'xg'
     params['lam_l2a'] = 0.0
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
@@ -150,14 +150,14 @@ def test_two_stage_model1():
     ################################################################
     # Apply some updates, to check that they aren't totally broken #
     ################################################################
-    log_name = "{}_RESULTS.txt".format("TSM50_TEST")
+    log_name = "{}_RESULTS.txt".format("TSM1_TEST")
     out_file = open(log_name, 'wb')
     costs = [0. for i in range(10)]
     learn_rate = 0.00015
     momentum = 0.9
     batch_idx = np.arange(batch_size) + tr_samples
-    for i in range(300000):
-        scale = min(1.0, ((i+1) / 10000.0))
+    for i in range(500000):
+        scale = min(0.5, ((i+1) / 10000.0))
         if (((i + 1) % 10000) == 0):
             learn_rate = learn_rate * 0.95
         # get the indices of training samples for this batch update
@@ -185,16 +185,19 @@ def test_two_stage_model1():
             str3 = "    nll_cost  : {0:.4f}".format(costs[1])
             str4 = "    kld_cost  : {0:.4f}".format(costs[2])
             str5 = "    reg_cost  : {0:.4f}".format(costs[3])
-            joint_str = "\n".join([str1, str2, str3, str4, str5])
+            str6 = "    nll       : {0:.4f}".format(np.mean(costs[4]))
+            str7 = "    kld_z     : {0:.4f}".format(np.mean(costs[5]))
+            str8 = "    kld_h     : {0:.4f}".format(np.mean(costs[6]))
+            joint_str = "\n".join([str1, str2, str3, str4, str5, str6, str7, str8])
             print(joint_str)
             out_file.write(joint_str+"\n")
             out_file.flush()
             costs = [0.0 for v in costs]
-        if (((i % 2000) == 0) or ((i < 10000) and ((i % 1000) == 0))):
+        if (((i % 5000) == 0) or ((i < 10000) and ((i % 1000) == 0))):
             # draw some independent random samples from the model
             samp_count = 300
             model_samps = TSM.sample_from_prior(samp_count)
-            file_name = "TSM50_SAMPLES_b{0:d}.png".format(i)
+            file_name = "TSM1_SAMPLES_b{0:d}.png".format(i)
             utils.visualize_samples(model_samps, file_name, num_rows=15)
             # compute free energy estimate for validation samples
             Xva = row_shuffle(Xva)
@@ -223,15 +226,15 @@ def test_two_stage_model2():
     #del Xte
     tr_samples = Xtr.shape[0]
     va_samples = Xva.shape[0]
-    batch_size = 50
+    batch_size = 100
     batch_reps = 1
 
     ###############################################
     # Setup some parameters for the TwoStageModel #
     ###############################################
     x_dim = Xtr.shape[1]
-    z_dim = 32
-    h_dim = 64
+    z_dim = 50
+    h_dim = 100
     x_type = 'bernoulli'
 
     # some InfNet instances to build the TwoStageModel from
@@ -242,13 +245,13 @@ def test_two_stage_model2():
     # p_h_given_z #
     ###############
     params = {}
-    shared_config = [z_dim, 250, 250]
+    shared_config = [z_dim, 100, 100]
     top_config = [shared_config[-1], h_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
     params['activation'] = tanh_actfun
-    params['init_scale'] = 1.0
+    params['init_scale'] = 'xg'
     params['lam_l2a'] = 0.0
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
@@ -262,13 +265,13 @@ def test_two_stage_model2():
     # p_x_given_h #
     ###############
     params = {}
-    shared_config = [h_dim, 250, 250]
+    shared_config = [h_dim, 200, 200]
     top_config = [shared_config[-1], x_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
     params['activation'] = tanh_actfun
-    params['init_scale'] = 1.0
+    params['init_scale'] = 'xg'
     params['lam_l2a'] = 0.0
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
@@ -282,13 +285,13 @@ def test_two_stage_model2():
     # q_h_given_x #
     ###############
     params = {}
-    shared_config = [x_dim, 250, 250]
+    shared_config = [x_dim, 200, 200]
     top_config = [shared_config[-1], h_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
     params['activation'] = tanh_actfun
-    params['init_scale'] = 1.0
+    params['init_scale'] = 'xg'
     params['lam_l2a'] = 0.0
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
@@ -302,13 +305,13 @@ def test_two_stage_model2():
     # q_z_given_h #
     ###############
     params = {}
-    shared_config = [h_dim, 250, 250]
+    shared_config = [h_dim, 100, 100]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
     params['activation'] = tanh_actfun
-    params['init_scale'] = 1.0
+    params['init_scale'] = 'xg'
     params['lam_l2a'] = 0.0
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
@@ -343,7 +346,7 @@ def test_two_stage_model2():
     learn_rate = 0.00015
     momentum = 0.9
     batch_idx = np.arange(batch_size) + tr_samples
-    for i in range(300000):
+    for i in range(500000):
         scale = min(1.0, ((i+1) / 10000.0))
         if (((i + 1) % 10000) == 0):
             learn_rate = learn_rate * 0.95
@@ -372,12 +375,15 @@ def test_two_stage_model2():
             str3 = "    nll_cost  : {0:.4f}".format(costs[1])
             str4 = "    kld_cost  : {0:.4f}".format(costs[2])
             str5 = "    reg_cost  : {0:.4f}".format(costs[3])
-            joint_str = "\n".join([str1, str2, str3, str4, str5])
+            str6 = "    nll       : {0:.4f}".format(np.mean(costs[4]))
+            str7 = "    kld_z     : {0:.4f}".format(np.mean(costs[5]))
+            str8 = "    kld_h     : {0:.4f}".format(np.mean(costs[6]))
+            joint_str = "\n".join([str1, str2, str3, str4, str5, str6, str7, str8])
             print(joint_str)
             out_file.write(joint_str+"\n")
             out_file.flush()
             costs = [0.0 for v in costs]
-        if (((i % 2000) == 0) or ((i < 10000) and ((i % 1000) == 0))):
+        if (((i % 5000) == 0) or ((i < 10000) and ((i % 1000) == 0))):
             # draw some independent random samples from the model
             samp_count = 300
             model_samps = TSM.sample_from_prior(samp_count)
@@ -395,5 +401,5 @@ def test_two_stage_model2():
 
 
 if __name__=="__main__":
-    #test_two_stage_model1()
-    test_two_stage_model2()
+    test_two_stage_model1()
+    #test_two_stage_model2()

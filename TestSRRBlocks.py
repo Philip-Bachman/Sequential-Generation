@@ -28,19 +28,19 @@ from blocks.bricks.recurrent import SimpleRecurrent, LSTM
 # phil's sweetness
 import utils
 from BlocksModels import *
-from SRRBlocks import SRR_LSTM
+from SRRBlocks import ImgScan
 from DKCode import get_adam_updates, get_adadelta_updates
 from load_data import load_udm, load_tfd, load_svhn_gray, load_binarized_mnist
 from HelperFuncs import construct_masked_data, shift_and_scale_into_01, \
                         row_shuffle, to_fX
 
-###########################
-###########################
-## TEST MNIST IMPUTATION ##
-###########################
-###########################
+################################
+################################
+## TEST COLUMN-WISE GENERATOR ##
+################################
+################################
 
-def test_srr_blocks():
+def test_img_scan(attention=False):
     ##########################
     # Get some training data #
     ##########################
@@ -62,14 +62,14 @@ def test_srr_blocks():
     ############################################################
     # Setup some parameters for the Iterative Refinement Model #
     ############################################################
-    x_dim = Xtr.shape[1]
-    write_dim = 300
-    enc_dim = 300
-    dec_dim = 300
-    mix_dim = 20
-    z_dim = 100
-    n_iter = 20
-    
+    x_dim = 28
+    im_shape = (28,28)
+    inner_steps = 5
+    rnn_dim = 128
+    write_dim = 64
+    mlp_dim = 128
+    z_dim = 50
+
     rnninits = {
         'weights_init': IsotropicGaussian(0.01),
         'biases_init': Constant(0.),
@@ -79,81 +79,107 @@ def test_srr_blocks():
         'biases_init': Constant(0.),
     }
 
+    # setup the reader and writer
+    if attention:
+        read_N, write_N = (2, 5) # resolution of reader and writer
+        read_dim = 2*read_N**2   # total number of "pixels" read by reader
+        reader_mlp = AttentionReader(x_dim=x_dim, dec_dim=dec_dim,
+                                 width=28, height=28,
+                                 N=read_N, **inits)
+        writer_mlp = AttentionWriter(input_dim=dec_dim, output_dim=x_dim,
+                                 width=28, height=28,
+                                 N=write_N, **inits)
+        att_tag = "YA"
+    else:
+        read_dim = 2*x_dim
+        reader_mlp = Reader(x_dim=x_dim, dec_dim=dec_dim, **inits)
+        writer_mlp = MLP([None, None], [dec_dim, write_dim, x_dim], \
+                         name="writer_mlp", **inits)
+        att_tag = "NA"
+
     # setup the reader and writer (shared by primary and guide policies)
     read_dim = 2*x_dim # dimension of output from reader_mlp
-    reader_mlp = Reader(x_dim=x_dim, dec_dim=dec_dim, **inits)
-    writer_mlp = MLP([None, None], [dec_dim, write_dim, x_dim], \
+    reader_mlp = Reader(x_dim=x_dim, dec_dim=rnn_dim, **inits)
+    writer_mlp = MLP([None, None], [rnn_dim, write_dim, x_dim], \
                      name="writer_mlp", **inits)
-    
-    # mlps for setting conditionals over z_mix
-    mix_var_mlp = CondNet([Tanh()], [x_dim, 250, mix_dim], \
-                          name="mix_var_mlp", **inits)
-    mix_enc_mlp = CondNet([Tanh()], [x_dim, 250, mix_dim], \
-                          name="mix_enc_mlp", **inits)
-    # mlp for decoding z_mix into a distribution over initial LSTM states
-    mix_dec_mlp = MLP([Tanh(), Tanh()], \
-                      [mix_dim, 250, (2*enc_dim + 2*dec_dim + 2*enc_dim)], \
-                      name="mix_dec_mlp", **inits)
+
     # mlps for processing inputs to LSTMs
-    var_mlp_in = MLP([Identity()], [(read_dim + dec_dim), 4*enc_dim], \
+    con_mlp_in = MLP([Identity()], [                       z_dim, 4*rnn_dim], \
+                     name="con_mlp_in", **inits)
+    var_mlp_in = MLP([Identity()], [(x_dim + read_dim + rnn_dim), 4*rnn_dim], \
                      name="var_mlp_in", **inits)
-    enc_mlp_in = MLP([Identity()], [(read_dim + dec_dim), 4*enc_dim], \
-                     name="enc_mlp_in", **inits)
-    dec_mlp_in = MLP([Identity()], [               z_dim, 4*dec_dim], \
-                     name="dec_mlp_in", **inits)
+    gen_mlp_in = MLP([Identity()], [(x_dim + read_dim + rnn_dim), 4*rnn_dim], \
+                     name="gen_mlp_in", **inits)
+
     # mlps for turning LSTM outputs into conditionals over z_gen
-    var_mlp_out = CondNet([], [enc_dim, z_dim], name="var_mlp_out", **inits)
-    enc_mlp_out = CondNet([], [enc_dim, z_dim], name="enc_mlp_out", **inits)
+    gen_mlp_out = CondNet([], [rnn_dim, z_dim], name="gen_mlp_out", **inits)
+    var_mlp_out = CondNet([], [rnn_dim, z_dim], name="var_mlp_out", **inits)
     # LSTMs for the actual LSTMs (obviously, perhaps)
-    var_rnn = BiasedLSTM(dim=enc_dim, ig_bias=2.0, fg_bias=2.0, \
+    con_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
+                         name="con_rnn", **rnninits)
+    gen_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
+                         name="gen_rnn", **rnninits)
+    var_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
                          name="var_rnn", **rnninits)
-    enc_rnn = BiasedLSTM(dim=enc_dim, ig_bias=2.0, fg_bias=2.0, \
-                         name="enc_rnn", **rnninits)
-    dec_rnn = BiasedLSTM(dim=dec_dim, ig_bias=2.0, fg_bias=2.0, \
-                         name="dec_rnn", **rnninits)
 
-    # Construct some revelation masks
-    p_masks = np.zeros((20,x_dim))
-    p_masks[10] = npr.uniform(size=(1,x_dim)) < 0.25
-    p_masks[-1] = np.ones((1,x_dim))
-    p_masks = p_masks.astype(theano.config.floatX)
-    q_masks = np.ones(p_masks.shape).astype(theano.config.floatX)
-    rev_masks = [p_masks, q_masks]
+    ImgScan_doc_str = \
+    """
+    ImgScan -- a model for predicting image columns, given previous columns.
 
-    SRRM = SRR_LSTM(
-                rev_masks=rev_masks,
+    For each column in an image, this model sequentially constructs a prediction
+    for the next column. Each of these predictions conditions directly on the
+    previous column, and indirectly on even earlier columns. Conditioning on the
+    current column is either "fully informed" or "attention based". Conditioning
+    on even earlier columns is through state that is carried across predictions
+    using, e.g., an LSTM.
+
+    Parameters:
+        im_shape: [#rows, #cols] shape tuple for input images.
+        inner_steps: #steps when constructing each next column's prediction
+        reader_mlp: used for reading from the current column
+        writer_mlp: used for writing to prediction for the next column
+        con_mlp_in: preprocesses input to the "controller" LSTM
+        con_rnn: the "controller" LSTM
+        gen_mlp_in: preprocesses input to the "generator" LSTM
+        gen_rnn: the "generator" LSTM
+        gen_mlp_out: CondNet for distribution over z given gen_rnn
+        var_mlp_in: preprocesses input to the "variational" LSTM
+        var_rnn: the "variational" LSTM
+        var_mlp_out: CondNet for distribution over z given gen_rnn
+    """
+
+    IMS = ImgScan(
+                im_shape=im_shape,
+                inner_steps=inner_steps,
                 reader_mlp=reader_mlp,
                 writer_mlp=writer_mlp,
-                mix_enc_mlp=mix_enc_mlp,
-                mix_dec_mlp=mix_dec_mlp,
-                mix_var_mlp=mix_var_mlp,
-                enc_mlp_in=enc_mlp_in,
-                enc_mlp_out=enc_mlp_out,
-                enc_rnn=enc_rnn,
-                dec_mlp_in=dec_mlp_in,
-                dec_rnn=dec_rnn,
+                con_mlp_in=con_mlp_in,
+                con_rnn=con_rnn,
+                gen_mlp_in=gen_mlp_in,
+                gen_mlp_out=gen_mlp_out,
+                gen_rnn=gen_rnn,
                 var_mlp_in=var_mlp_in,
                 var_mlp_out=var_mlp_out,
                 var_rnn=var_rnn)
-    SRRM.initialize()
+    IMS.initialize()
 
     # build the cost gradients, training function, samplers, etc.
-    SRRM.build_model_funcs()
+    IMS.build_model_funcs()
 
-    #SRRM.load_model_params(f_name="SRRM_params.pkl")
+    #IMS.load_model_params(f_name="SRRM_params.pkl")
 
     ################################################################
     # Apply some updates, to check that they aren't totally broken #
     ################################################################
     print("Beginning to train the model...")
-    out_file = open("SRRM_results.txt", 'wb')
+    out_file = open("IMS_results.txt", 'wb')
     out_file.flush()
     costs = [0. for i in range(10)]
     learn_rate = 0.0002
     momentum = 0.75
     batch_idx = np.arange(batch_size) + tr_samples
     for i in range(250000):
-        scale = min(1.0, ((i+1) / 1000.0))
+        scale = min(1.0, ((i+1) / 2500.0))
         if (((i + 1) % 10000) == 0):
             learn_rate = learn_rate * 0.95
         if (i > 10000):
@@ -168,17 +194,17 @@ def test_srr_blocks():
             batch_idx = np.arange(batch_size)
         # set sgd and objective function hyperparams for this update
         zero_ary = np.zeros((1,))
-        SRRM.lr.set_value(to_fX(zero_ary + learn_rate))
-        SRRM.mom_1.set_value(to_fX(zero_ary + momentum))
-        SRRM.mom_2.set_value(to_fX(zero_ary + 0.99))
+        IMS.lr.set_value(to_fX(zero_ary + learn_rate))
+        IMS.mom_1.set_value(to_fX(zero_ary + momentum))
+        IMS.mom_2.set_value(to_fX(zero_ary + 0.99))
 
         # perform a minibatch update and record the cost for this batch
         Xb = to_fX(Xtr.take(batch_idx, axis=0))
-        result = SRRM.train_joint(Xb)
+        result = IMS.train_joint(Xb)
 
         costs = [(costs[j] + result[j]) for j in range(len(result))]
-        if ((i % 200) == 0):
-            costs = [(v / 200.0) for v in costs]
+        if ((i % 100) == 0):
+            costs = [(v / 100.0) for v in costs]
             str1 = "-- batch {0:d} --".format(i)
             str2 = "    total_cost: {0:.4f}".format(costs[0])
             str3 = "    nll_bound : {0:.4f}".format(costs[1])
@@ -192,11 +218,11 @@ def test_srr_blocks():
             out_file.flush()
             costs = [0.0 for v in costs]
         if ((i % 1000) == 0):
-            SRRM.save_model_params("SRRM_params.pkl")
+            IMS.save_model_params("IMS_params.pkl")
             # compute a small-sample estimate of NLL bound on validation set
             Xva = row_shuffle(Xva)
             Xb = to_fX(Xva[:5000])
-            va_costs = SRRM.compute_nll_bound(Xb)
+            va_costs = IMS.compute_nll_bound(Xb)
             str1 = "    va_nll_bound : {}".format(va_costs[1])
             str2 = "    va_nll_term  : {}".format(va_costs[2])
             str3 = "    va_kld_q2p   : {}".format(va_costs[3])
@@ -206,4 +232,4 @@ def test_srr_blocks():
             out_file.flush()
 
 if __name__=="__main__":
-    test_srr_blocks()
+    test_img_scan()

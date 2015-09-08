@@ -170,6 +170,18 @@ def ortho_matrix(shape=None, gain=1.0):
     W = gain * q[:shape[0], :shape[1]]
     return W
 
+# Xavier Glorot initialization
+def glorot_matrix(shape):
+    """
+    Xavier Glorot initialization -- from the AISTATS 2010 paper:
+        "Understanding the Difficulty of Training Deep Feedforward Networks"
+    """
+    if not (len(shape) == 2):
+        raise RuntimeError("Only shapes of length are supported.")
+    w_scale = np.sqrt(6.0) / np.sqrt(shape[0] + shape[1])
+    W = npr.uniform(low=-w_scale, high=w_scale, size=shape)
+    return W
+
 ######################################
 # BASIC FULLY-CONNECTED HIDDEN LAYER #
 ######################################
@@ -184,7 +196,7 @@ class HiddenLayer(object):
         # Setup a shared random generator for this layer
         self.rng = RandStream(rng.randint(1000000))
 
-        # setup parameters for controlling 
+        # setup parameters for controlling
         zero_ary = np.zeros((1,)).astype(theano.config.floatX)
         self.input_noise = theano.shared(value=(zero_ary+input_noise), \
                 name="{0:s}_input_noise".format(name))
@@ -226,11 +238,12 @@ class HiddenLayer(object):
         if W is None:
             # Generate initial filters using orthogonal random trick
             W_shape = (self.in_dim, self.filt_count)
-            #W_scale = W_scale * (1.0 / np.sqrt(self.in_dim))
-            #W_init = W_scale * npr.normal(0.0, 1.0, W_shape)
-            W_init = ortho_matrix(shape=(self.in_dim, self.filt_count), \
-                    gain=W_scale)
-            #W_init = 0.01 * npr.normal(0.0, 1.0, W_shape)
+            if W_scale == 'xg':
+                W_init = glorot_matrix(W_shape)
+            else:
+                #W_init = (W_scale * (1.0 / np.sqrt(self.in_dim))) * \
+                #          npr.normal(0.0, 1.0, W_shape)
+                W_init = ortho_matrix(shape=W_shape, gain=W_scale)
             W_init = W_init.astype(theano.config.floatX)
             W = theano.shared(value=W_init, name="{0:s}_W".format(name))
         if b is None:

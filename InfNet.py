@@ -64,7 +64,7 @@ class InfNet(object):
             Xd=None, \
             params=None, \
             shared_param_dicts=None):
-        # Setup a shared random generator for this network 
+        # Setup a shared random generator for this network
         self.rng = RandStream(rng.randint(1000000))
         # Grab the symbolic input matrix
         self.Xd = Xd
@@ -284,8 +284,8 @@ class InfNet(object):
             # set in-bound weights to have norm self.init_scale
             i_scale = self.init_scale
             if last_layer:
-                # set in-bound weights for logvar predictions to 0
-                i_scale = 0.0 * i_scale
+                # set in-bound weights for logvar predictions to small values
+                i_scale = 0.1
             if not self.is_clone:
                 ##########################################
                 # Initialize a layer with new parameters #

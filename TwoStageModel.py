@@ -98,15 +98,15 @@ class TwoStageModel1(object):
 
         # setup switching variable for changing between sampling/training
         zero_ary = to_fX( np.zeros((1,)) )
-        self.train_switch = theano.shared(value=zero_ary, name='msm_train_switch')
+        self.train_switch = theano.shared(value=zero_ary, name='tsm_train_switch')
         self.set_train_switch(1.0)
 
         if self.shared_param_dicts is None:
             # initialize "optimizable" parameters specific to this MSM
             init_vec = to_fX( np.zeros((1,self.z_dim)) )
-            self.p_z_mean = theano.shared(value=init_vec, name='msm_p_z_mean')
-            self.p_z_logvar = theano.shared(value=init_vec, name='msm_p_z_logvar')
-            self.obs_logvar = theano.shared(value=zero_ary, name='msm_obs_logvar')
+            self.p_z_mean = theano.shared(value=init_vec, name='tsm_p_z_mean')
+            self.p_z_logvar = theano.shared(value=init_vec, name='tsm_p_z_logvar')
+            self.obs_logvar = theano.shared(value=zero_ary, name='tsm_obs_logvar')
             self.bounded_logvar = 8.0 * T.tanh((1.0/8.0) * self.obs_logvar)
             self.shared_param_dicts = {}
             self.shared_param_dicts['p_z_mean'] = self.p_z_mean
@@ -127,7 +127,7 @@ class TwoStageModel1(object):
                 self.q_z_given_x.apply(self.x_in, do_samples=True)
         z_p_mean = self.p_z_mean.repeat(z_q.shape[0], axis=0)
         z_p_logvar = self.p_z_logvar.repeat(z_q.shape[0], axis=0)
-        zmuv = self.rng.normal(size=z_q.shape, avg=0.0, std=0.0, \
+        zmuv = self.rng.normal(size=z_q.shape, avg=0.0, std=1.0, \
                                dtype=theano.config.floatX)
         z_p = (T.exp(0.5*z_p_logvar) * zmuv) + z_p_mean
         self.z = (self.train_switch[0] * z_q) + \
@@ -138,9 +138,9 @@ class TwoStageModel1(object):
         self.kld_z_p2q = gaussian_kld(z_p_mean, z_p_logvar, \
                                       z_q_mean, z_q_logvar)
         # samples of "hidden" latent state (from both p and q)
-        h_q_mean, h_q_logvar, h_q = self.q_h_given_z_x.apply( \
-                T.horizontal_stack(self.z, self.x_out))
         h_p_mean, h_p_logvar, h_p = self.p_h_given_z.apply(self.z)
+        h_q_mean, h_q_logvar, h_q = self.q_h_given_z_x.apply( \
+                T.horizontal_stack(h_p_mean, h_p_logvar, self.x_out))
         self.h = (self.train_switch[0] * h_q) + \
                  ((1.0 - self.train_switch[0]) * h_p)
         # compute relevant KLds for this step
@@ -159,25 +159,25 @@ class TwoStageModel1(object):
 
         # shared var learning rate for generator and inferencer
         zero_ary = to_fX( np.zeros((1,)) )
-        self.lr = theano.shared(value=zero_ary, name='msm_lr')
+        self.lr = theano.shared(value=zero_ary, name='tsm_lr')
         # shared var momentum parameters for generator and inferencer
-        self.mom_1 = theano.shared(value=zero_ary, name='msm_mom_1')
-        self.mom_2 = theano.shared(value=zero_ary, name='msm_mom_2')
+        self.mom_1 = theano.shared(value=zero_ary, name='tsm_mom_1')
+        self.mom_2 = theano.shared(value=zero_ary, name='tsm_mom_2')
         # init parameters for controlling learning dynamics
         self.set_sgd_params()
         # init shared var for weighting nll of data given posterior sample
-        self.lam_nll = theano.shared(value=zero_ary, name='msm_lam_nll')
+        self.lam_nll = theano.shared(value=zero_ary, name='tsm_lam_nll')
         self.set_lam_nll(lam_nll=1.0)
         # init shared var for weighting prior kld against reconstruction
-        self.lam_kld_q2p = theano.shared(value=zero_ary, name='msm_lam_kld_q2p')
-        self.lam_kld_p2q = theano.shared(value=zero_ary, name='msm_lam_kld_p2q')
+        self.lam_kld_q2p = theano.shared(value=zero_ary, name='tsm_lam_kld_q2p')
+        self.lam_kld_p2q = theano.shared(value=zero_ary, name='tsm_lam_kld_p2q')
         self.set_lam_kld(lam_kld_q2p=1.0, lam_kld_p2q=0.0)
         # init shared var for controlling l2 regularization on params
-        self.lam_l2w = theano.shared(value=zero_ary, name='msm_lam_l2w')
+        self.lam_l2w = theano.shared(value=zero_ary, name='tsm_lam_l2w')
         self.set_lam_l2w(1e-5)
 
         # get optimizable parameters belonging to the TwoStageModel
-        self_params = [self.p_z_mean, self.p_z_logvar, self.obs_logvar]
+        self_params = [self.obs_logvar] #+ [self.p_z_mean, self.p_z_logvar]
         # get optimizable parameters belonging to the underlying networks
         child_params = []
         child_params.extend(self.q_z_given_x.mlp_params)
@@ -225,7 +225,7 @@ class TwoStageModel1(object):
         all_updates = get_adam_updates(params=self.joint_params, \
                 grads=self.joint_grads, alpha=self.lr, \
                 beta1=self.mom_1, beta2=self.mom_2, \
-                mom2_init=1e-3, smoothing=1e-6, max_grad_norm=10.0)
+                mom2_init=1e-3, smoothing=1e-4, max_grad_norm=5.0)
         self.joint_updates = OrderedDict()
         for k in all_updates:
             self.joint_updates[k] = all_updates[k]
@@ -336,9 +336,12 @@ class TwoStageModel1(object):
         xi = T.matrix()
         xo = T.matrix()
         br = T.lscalar()
+        nll = self.nll_costs
+        kld_z = T.sum(self.kld_z_q2p, axis=1)
+        kld_h = T.sum(self.kld_h_q2p, axis=1)
         # collect the outputs to return from this function
         outputs = [self.joint_cost, self.nll_cost, self.kld_cost, \
-                   self.reg_cost, self.obs_costs]
+                   self.reg_cost, nll, kld_z, kld_h]
         # compile the theano function
         func = theano.function(inputs=[ xi, xo, br ], \
                 outputs=outputs, \
@@ -371,7 +374,9 @@ class TwoStageModel1(object):
                 kld_h_sum += np.sum(result[2], axis=1).ravel()
             mean_nll = nll_sum / float(sample_count)
             mean_kld = (kld_z_sum + kld_h_sum) / float(sample_count)
-            return [mean_nll, mean_kld]
+            mean_kld_z = kld_z_sum / float(sample_count)
+            mean_kld_h = kld_h_sum / float(sample_count)
+            return [mean_nll, mean_kld, mean_kld_z, mean_kld_h]
         return fe_term_estimator
 
     def _construct_sample_from_prior(self):
@@ -470,15 +475,15 @@ class TwoStageModel2(object):
 
         # setup switching variable for changing between sampling/training
         zero_ary = to_fX( np.zeros((1,)) )
-        self.train_switch = theano.shared(value=zero_ary, name='msm_train_switch')
+        self.train_switch = theano.shared(value=zero_ary, name='tsm_train_switch')
         self.set_train_switch(1.0)
 
         if self.shared_param_dicts is None:
-            # initialize "optimizable" parameters specific to this MSM
+            # initialize "optimizable" parameters specific to this TSM
             init_vec = to_fX( np.zeros((1,self.z_dim)) )
-            self.p_z_mean = theano.shared(value=init_vec, name='msm_p_z_mean')
-            self.p_z_logvar = theano.shared(value=init_vec, name='msm_p_z_logvar')
-            self.obs_logvar = theano.shared(value=zero_ary, name='msm_obs_logvar')
+            self.p_z_mean = theano.shared(value=init_vec, name='tsm_p_z_mean')
+            self.p_z_logvar = theano.shared(value=init_vec, name='tsm_p_z_logvar')
+            self.obs_logvar = theano.shared(value=zero_ary, name='tsm_obs_logvar')
             self.bounded_logvar = 8.0 * T.tanh((1.0/8.0) * self.obs_logvar)
             self.shared_param_dicts = {}
             self.shared_param_dicts['p_z_mean'] = self.p_z_mean
@@ -503,7 +508,7 @@ class TwoStageModel2(object):
         # samples of "prior" latent state (from p)
         z_p_mean = self.p_z_mean.repeat(z_q.shape[0], axis=0)
         z_p_logvar = self.p_z_logvar.repeat(z_q.shape[0], axis=0)
-        zmuv = self.rng.normal(size=z_q.shape, avg=0.0, std=0.0, \
+        zmuv = self.rng.normal(size=z_q.shape, avg=0.0, std=1.0, \
                                dtype=theano.config.floatX)
         z_p = (T.exp(0.5*z_p_logvar) * zmuv) + z_p_mean
         # samples from z -- switched between q/p
@@ -536,25 +541,25 @@ class TwoStageModel2(object):
 
         # shared var learning rate for generator and inferencer
         zero_ary = to_fX( np.zeros((1,)) )
-        self.lr = theano.shared(value=zero_ary, name='msm_lr')
+        self.lr = theano.shared(value=zero_ary, name='tsm_lr')
         # shared var momentum parameters for generator and inferencer
-        self.mom_1 = theano.shared(value=zero_ary, name='msm_mom_1')
-        self.mom_2 = theano.shared(value=zero_ary, name='msm_mom_2')
+        self.mom_1 = theano.shared(value=zero_ary, name='tsm_mom_1')
+        self.mom_2 = theano.shared(value=zero_ary, name='tsm_mom_2')
         # init parameters for controlling learning dynamics
         self.set_sgd_params()
         # init shared var for weighting nll of data given posterior sample
-        self.lam_nll = theano.shared(value=zero_ary, name='msm_lam_nll')
+        self.lam_nll = theano.shared(value=zero_ary, name='tsm_lam_nll')
         self.set_lam_nll(lam_nll=1.0)
         # init shared var for weighting prior kld against reconstruction
-        self.lam_kld_q2p = theano.shared(value=zero_ary, name='msm_lam_kld_q2p')
-        self.lam_kld_p2q = theano.shared(value=zero_ary, name='msm_lam_kld_p2q')
+        self.lam_kld_q2p = theano.shared(value=zero_ary, name='tsm_lam_kld_q2p')
+        self.lam_kld_p2q = theano.shared(value=zero_ary, name='tsm_lam_kld_p2q')
         self.set_lam_kld(lam_kld_q2p=1.0, lam_kld_p2q=0.0)
         # init shared var for controlling l2 regularization on params
-        self.lam_l2w = theano.shared(value=zero_ary, name='msm_lam_l2w')
+        self.lam_l2w = theano.shared(value=zero_ary, name='tsm_lam_l2w')
         self.set_lam_l2w(1e-5)
 
         # get optimizable parameters belonging to the TwoStageModel
-        self_params = [self.p_z_mean, self.p_z_logvar, self.obs_logvar]
+        self_params = [self.obs_logvar] #+ [self.p_z_mean, self.p_z_logvar]
         # get optimizable parameters belonging to the underlying networks
         child_params = []
         child_params.extend(self.q_h_given_x.mlp_params)
@@ -603,7 +608,7 @@ class TwoStageModel2(object):
         all_updates = get_adam_updates(params=self.joint_params, \
                 grads=self.joint_grads, alpha=self.lr, \
                 beta1=self.mom_1, beta2=self.mom_2, \
-                mom2_init=1e-3, smoothing=1e-6, max_grad_norm=10.0)
+                mom2_init=1e-3, smoothing=1e-4, max_grad_norm=5.0)
         self.joint_updates = OrderedDict()
         for k in all_updates:
             self.joint_updates[k] = all_updates[k]

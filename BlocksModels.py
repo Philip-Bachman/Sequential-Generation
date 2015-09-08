@@ -35,7 +35,7 @@ class Softplus(Activation):
 
 class BiasedLSTM(BaseRecurrent, Initializable):
     @lazy(allocation=['dim'])
-    def __init__(self, dim, ig_bias=0.0, fg_bias=0.0, og_bias=0.0, 
+    def __init__(self, dim, ig_bias=0.0, fg_bias=0.0, og_bias=0.0,
                  activation=None, **kwargs):
         super(BiasedLSTM, self).__init__(**kwargs)
         self.dim = dim
@@ -111,7 +111,7 @@ class BiasedLSTM(BaseRecurrent, Initializable):
 
         activation = tensor.dot(states, self.W_state) + inputs
         in_gate = tensor.nnet.sigmoid(slice_last(activation, 0) +
-                                      (cells * self.W_cell_to_in) + 
+                                      (cells * self.W_cell_to_in) +
                                       self.ig_bias)
         forget_gate = tensor.nnet.sigmoid(slice_last(activation, 1) +
                                           (cells * self.W_cell_to_forget) +
@@ -119,7 +119,7 @@ class BiasedLSTM(BaseRecurrent, Initializable):
         next_cells = (forget_gate * cells +
                       in_gate * nonlinearity(slice_last(activation, 2)))
         out_gate = tensor.nnet.sigmoid(slice_last(activation, 3) +
-                                       (next_cells * self.W_cell_to_out) + 
+                                       (next_cells * self.W_cell_to_out) +
                                        self.og_bias)
         next_states = out_gate * nonlinearity(next_cells)
 
@@ -161,7 +161,7 @@ class CondNet(Initializable, Feedforward):
         if not (len(dims) == (len(activations) + 2)):
             raise ValueError("len(dims) != len(activations) + 2.")
         super(CondNet, self).__init__(**kwargs)
-        
+
         self.dims = dims
         self.shared_acts = activations
 
@@ -232,9 +232,9 @@ class Reader(Initializable):
     def apply(self, x, x_hat, h_dec):
         return tensor.concatenate([x, x_hat], axis=1)
 
-class AttentionReader(Initializable):
+class AttentionReader2d(Initializable):
     def __init__(self, x_dim, dec_dim, height, width, N, **kwargs):
-        super(AttentionReader, self).__init__(name="reader", **kwargs)
+        super(AttentionReader2d, self).__init__(name="reader", **kwargs)
 
         self.img_height = height
         self.img_width = width
@@ -245,14 +245,14 @@ class AttentionReader(Initializable):
 
         self.pre_trafo = Linear(
                 name=self.name+'_pretrafo',
-                input_dim=dec_dim, output_dim=dec_dim, 
+                input_dim=dec_dim, output_dim=dec_dim,
                 weights_init=self.weights_init, biases_init=self.biases_init,
                 use_bias=True)
-
         self.zoomer = ZoomableAttentionWindow(height, width, N)
         self.readout = MLP(activations=[Identity()], dims=[dec_dim, 5], **kwargs)
 
         self.children = [self.pre_trafo, self.readout]
+        return
 
     def get_dim(self, name):
         if name == 'input':
@@ -263,7 +263,7 @@ class AttentionReader(Initializable):
             return self.output_dim
         else:
             raise ValueError
-            
+
     @application(inputs=['x', 'x_hat', 'h_dec'], outputs=['r'])
     def apply(self, x, x_hat, h_dec):
         p = self.pre_trafo.apply(h_dec)
@@ -273,7 +273,7 @@ class AttentionReader(Initializable):
 
         w     = gamma * self.zoomer.read(x    , center_y, center_x, delta, sigma)
         w_hat = gamma * self.zoomer.read(x_hat, center_y, center_x, delta, sigma)
-        
+
         return tensor.concatenate([w, w_hat], axis=1)
 
 #-----------------------------------------------------------------------------
@@ -287,7 +287,7 @@ class Writer(Initializable):
 
         self.transform = Linear(
                 name=self.name+'_transform',
-                input_dim=input_dim, output_dim=output_dim, 
+                input_dim=input_dim, output_dim=output_dim,
                 weights_init=self.weights_init, biases_init=self.biases_init,
                 use_bias=True)
 
@@ -313,13 +313,13 @@ class AttentionWriter(Initializable):
 
         self.z_trafo = Linear(
                 name=self.name+'_ztrafo',
-                input_dim=input_dim, output_dim=5, 
+                input_dim=input_dim, output_dim=5,
                 weights_init=self.weights_init, biases_init=self.biases_init,
                 use_bias=True)
 
         self.w_trafo = Linear(
                 name=self.name+'_wtrafo',
-                input_dim=input_dim, output_dim=N*N, 
+                input_dim=input_dim, output_dim=N*N,
                 weights_init=self.weights_init, biases_init=self.biases_init,
                 use_bias=True)
 
@@ -364,19 +364,19 @@ class AttentionWriter2(Initializable):
 
         self.pre_trafo = Linear(
                 name=self.name+'_pretrafo',
-                input_dim=input_dim, output_dim=input_dim, 
+                input_dim=input_dim, output_dim=input_dim,
                 weights_init=self.weights_init, biases_init=self.biases_init,
-                use_bias=True)  
+                use_bias=True)
 
         self.z_trafo = Linear(
                 name=self.name+'_ztrafo',
-                input_dim=input_dim, output_dim=5, 
+                input_dim=input_dim, output_dim=5,
                 weights_init=self.weights_init, biases_init=self.biases_init,
                 use_bias=True)
 
         self.w_trafo = Linear(
                 name=self.name+'_wtrafo',
-                input_dim=input_dim, output_dim=N*N, 
+                input_dim=input_dim, output_dim=N*N,
                 weights_init=self.weights_init, biases_init=self.biases_init,
                 use_bias=True)
 
@@ -465,7 +465,7 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
             p_zeros = numpy.zeros(p_nan.shape)
             p.set_value(p_zeros.astype(theano.config.floatX))
         return
- 
+
     def get_dim(self, name):
         if name == 'c':
             return self.reader_mlp.get_dim('x_dim')
@@ -563,7 +563,7 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
 
     #------------------------------------------------------------------------
 
-    @application(inputs=['x_in', 'x_out'], 
+    @application(inputs=['x_in', 'x_out'],
                  outputs=['recons', 'nll', 'kl_q2p', 'kl_p2q'])
     def reconstruct(self, x_in, x_out):
         # get important size and shape information
@@ -625,7 +625,7 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
     def sample(self, n_samples):
         """Sample from model.
 
-        Returns 
+        Returns
         -------
 
         samples : tensor3 (n_samples, n_iter, x_dim)
@@ -704,7 +704,7 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
         grad_list = tensor.grad(self.joint_cost, self.joint_params)
         for i, p in enumerate(self.joint_params):
             self.joint_grads[p] = grad_list[i]
-        
+
         # shared var learning rate for generator and inferencer
         zero_ary = to_fX( numpy.zeros((1,)) )
         self.lr = theano.shared(value=zero_ary, name='tbm_lr')
@@ -886,7 +886,7 @@ class IMoCLDrawModels(BaseRecurrent, Initializable, Random):
             p_zeros = numpy.zeros(p_nan.shape)
             p.set_value(p_zeros.astype(theano.config.floatX))
         return
- 
+
     def get_dim(self, name):
         if name == 'c':
             return self.reader_mlp.get_dim('x_dim')
@@ -1010,7 +1010,7 @@ class IMoCLDrawModels(BaseRecurrent, Initializable, Random):
 
     #------------------------------------------------------------------------
 
-    @application(inputs=['x', 'm'], 
+    @application(inputs=['x', 'm'],
                  outputs=['recons', 'nll', 'kl_q2p', 'kl_p2q'])
     def reconstruct(self, x, m):
         # get important size and shape information
@@ -1088,7 +1088,7 @@ class IMoCLDrawModels(BaseRecurrent, Initializable, Random):
         Sample from model. Sampling can be performed either with or
         without partial control (i.e. conditioning for imputation).
 
-        Returns 
+        Returns
         -------
 
         samples : tensor3 (n_samples, n_iter, x_dim)
@@ -1182,7 +1182,7 @@ class IMoCLDrawModels(BaseRecurrent, Initializable, Random):
         grad_list = tensor.grad(self.joint_cost, self.joint_params)
         for i, p in enumerate(self.joint_params):
             self.joint_grads[p] = grad_list[i]
-        
+
         # shared var learning rate for generator and inferencer
         zero_ary = to_fX( numpy.zeros((1,)) )
         self.lr = theano.shared(value=zero_ary, name='tbm_lr')
