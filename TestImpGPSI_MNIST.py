@@ -17,7 +17,7 @@ from NetLayers import relu_actfun, softplus_actfun, tanh_actfun
 from InfNet import InfNet
 from HydraNet import HydraNet
 from GPSImputer import GPSImputer, load_gpsimputer_from_file
-from load_data import load_udm, load_tfd, load_svhn_gray
+from load_data import load_udm, load_tfd, load_svhn_gray, load_binarized_mnist
 from HelperFuncs import construct_masked_data, shift_and_scale_into_01, \
                         row_shuffle, to_fX
 
@@ -37,24 +37,36 @@ def test_mnist(step_type='add',
     # Format the result tag more thoroughly #
     #########################################
     dp_int = int(100.0 * drop_prob)
-    result_tag = "{}GPSI_OD{}_DP{}_IS{}_{}_NA".format(RESULT_PATH, occ_dim, dp_int, imp_steps, step_type)
+    result_tag = "{}RELU_GPSI_OD{}_DP{}_IS{}_{}_NA".format(RESULT_PATH, occ_dim, dp_int, imp_steps, step_type)
+
 
     ##########################
     # Get some training data #
     ##########################
     rng = np.random.RandomState(1234)
-    dataset = 'data/mnist.pkl.gz'
-    datasets = load_udm(dataset, as_shared=False, zero_mean=False)
-    Xtr = datasets[0][0]
-    Xva = datasets[1][0]
-    Xte = datasets[2][0]
-    # Merge validation set and training set, and test on test set.
-    #Xtr = np.concatenate((Xtr, Xva), axis=0)
-    #Xva = Xte
-    Xtr = to_fX(shift_and_scale_into_01(Xtr))
-    Xva = to_fX(shift_and_scale_into_01(Xva))
+    Xtr, Xva, Xte = load_binarized_mnist(data_path='./data/')
+    Xtr = np.vstack((Xtr, Xva))
+    Xva = Xte
+    #del Xte
     tr_samples = Xtr.shape[0]
     va_samples = Xva.shape[0]
+
+    ##########################
+    # Get some training data #
+    ##########################
+    # rng = np.random.RandomState(1234)
+    # dataset = 'data/mnist.pkl.gz'
+    # datasets = load_udm(dataset, as_shared=False, zero_mean=False)
+    # Xtr = datasets[0][0]
+    # Xva = datasets[1][0]
+    # Xte = datasets[2][0]
+    # # Merge validation set and training set, and test on test set.
+    # #Xtr = np.concatenate((Xtr, Xva), axis=0)
+    # #Xva = Xte
+    # Xtr = to_fX(shift_and_scale_into_01(Xtr))
+    # Xva = to_fX(shift_and_scale_into_01(Xva))
+    # tr_samples = Xtr.shape[0]
+    # va_samples = Xva.shape[0]
     batch_size = 200
     batch_reps = 1
     all_pix_mean = np.mean(np.mean(Xtr, axis=1))
@@ -67,7 +79,7 @@ def test_mnist(step_type='add',
     s_dim = x_dim
     #s_dim = 300
     z_dim = 100
-    init_scale = 1.0
+    init_scale = 0.6
 
     x_in_sym = T.matrix('x_in_sym')
     x_out_sym = T.matrix('x_out_sym')
@@ -77,7 +89,7 @@ def test_mnist(step_type='add',
     # p_zi_given_xi #
     #################
     params = {}
-    shared_config = [x_dim, 400, 400]
+    shared_config = [(x_dim + x_dim), 500, 500]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
@@ -91,12 +103,12 @@ def test_mnist(step_type='add',
     params['build_theano_funcs'] = False
     p_zi_given_xi = InfNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
-    p_zi_given_xi.init_biases(0.2)
+    p_zi_given_xi.init_biases(0.0)
     ###################
     # p_sip1_given_zi #
     ###################
     params = {}
-    shared_config = [z_dim, 400, 400]
+    shared_config = [z_dim, 500, 500]
     output_config = [s_dim, s_dim, s_dim]
     params['shared_config'] = shared_config
     params['output_config'] = output_config
@@ -109,7 +121,7 @@ def test_mnist(step_type='add',
     params['build_theano_funcs'] = False
     p_sip1_given_zi = HydraNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
-    p_sip1_given_zi.init_biases(0.2)
+    p_sip1_given_zi.init_biases(0.0)
     ################
     # p_x_given_si #
     ################
@@ -127,12 +139,12 @@ def test_mnist(step_type='add',
     params['build_theano_funcs'] = False
     p_x_given_si = HydraNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
-    p_x_given_si.init_biases(0.2)
-    ###################
+    p_x_given_si.init_biases(0.0)
+    #################
     # q_zi_given_xi #
-    ###################
+    #################
     params = {}
-    shared_config = [(x_dim + x_dim), 400, 400]
+    shared_config = [(x_dim + x_dim), 500, 500]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
@@ -146,7 +158,7 @@ def test_mnist(step_type='add',
     params['build_theano_funcs'] = False
     q_zi_given_xi = InfNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
-    q_zi_given_xi.init_biases(0.2)
+    q_zi_given_xi.init_biases(0.0)
 
     ###########################################################
     # Define parameters for the GPSImputer, and initialize it #
@@ -162,7 +174,7 @@ def test_mnist(step_type='add',
     gpsi_params['step_type'] = step_type
     gpsi_params['x_type'] = 'bernoulli'
     gpsi_params['obs_transform'] = 'sigmoid'
-    GPSI = GPSImputer(rng=rng, 
+    GPSI = GPSImputer(rng=rng,
             x_in=x_in_sym, x_out=x_out_sym, x_mask=x_mask_sym, \
             p_zi_given_xi=p_zi_given_xi, \
             p_sip1_given_zi=p_sip1_given_zi, \
@@ -188,7 +200,7 @@ def test_mnist(step_type='add',
         if (i > 10000):
             momentum = 0.90
         else:
-            momentum = 0.50
+            momentum = 0.75
         # get the indices of training samples for this batch update
         batch_idx += batch_size
         if (np.max(batch_idx) >= tr_samples):
@@ -200,8 +212,8 @@ def test_mnist(step_type='add',
                             mom_1=scale*momentum, mom_2=0.98)
         GPSI.set_train_switch(1.0)
         GPSI.set_lam_nll(lam_nll=1.0)
-        GPSI.set_lam_kld(lam_kld_p=0.05, lam_kld_q=0.95, lam_kld_g=(0.25 * lam_scale))
-        GPSI.set_lam_l2w(1e-4)
+        GPSI.set_lam_kld(lam_kld_p=0.05, lam_kld_q=0.95, lam_kld_g=(0.1 * lam_scale))
+        GPSI.set_lam_l2w(1e-5)
         # perform a minibatch update and record the cost for this batch
         xb = to_fX( Xtr.take(batch_idx, axis=0) )
         xi, xo, xm = construct_masked_data(xb, drop_prob=drop_prob, \
@@ -236,7 +248,7 @@ def test_mnist(step_type='add',
             print(joint_str)
             out_file.write(joint_str+"\n")
             out_file.flush()
-        if ((i % 5000) == 0):
+        if ((i % 2000) == 0):
             GPSI.save_to_file("{}_PARAMS.pkl".format(result_tag))
             # Get some validation samples for evaluating model performance
             xb = to_fX( Xva[0:100] )
@@ -291,14 +303,29 @@ def test_mnist_results(step_type='add',
     # Get some training data #
     ##########################
     rng = np.random.RandomState(1234)
-    dataset = 'data/mnist.pkl.gz'
-    datasets = load_udm(dataset, as_shared=False, zero_mean=False)
-    Xtr = datasets[0][0]
-    Xva = datasets[1][0]
-    Xtr = to_fX(shift_and_scale_into_01(Xtr))
-    Xva = to_fX(shift_and_scale_into_01(Xva))
+    Xtr, Xva, Xte = load_binarized_mnist(data_path='./data/')
+    Xtr = np.vstack((Xtr, Xva))
+    Xva = Xte
+    #del Xte
     tr_samples = Xtr.shape[0]
     va_samples = Xva.shape[0]
+
+    ##########################
+    # Get some training data #
+    ##########################
+    # rng = np.random.RandomState(1234)
+    # dataset = 'data/mnist.pkl.gz'
+    # datasets = load_udm(dataset, as_shared=False, zero_mean=False)
+    # Xtr = datasets[0][0]
+    # Xva = datasets[1][0]
+    # Xte = datasets[2][0]
+    # # Merge validation set and training set, and test on test set.
+    # #Xtr = np.concatenate((Xtr, Xva), axis=0)
+    # #Xva = Xte
+    # Xtr = to_fX(shift_and_scale_into_01(Xtr))
+    # Xva = to_fX(shift_and_scale_into_01(Xva))
+    # tr_samples = Xtr.shape[0]
+    # va_samples = Xva.shape[0]
     batch_size = 250
     batch_reps = 1
     all_pix_mean = np.mean(np.mean(Xtr, axis=1))
@@ -371,11 +398,11 @@ if __name__=="__main__":
     #test_mnist(step_type='jump', occ_dim=16, drop_prob=0.0)
     #test_mnist(step_type='jump', occ_dim=0, drop_prob=0.6)
     #test_mnist(step_type='jump', occ_dim=0, drop_prob=0.8)
-    test_mnist(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
-    test_mnist(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
+    #test_mnist(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
+    #test_mnist(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
     test_mnist(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
-    test_mnist(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
-    test_mnist(step_type='add', imp_steps=15, occ_dim=0, drop_prob=0.9)
+    #test_mnist(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
+    #test_mnist(step_type='add', imp_steps=15, occ_dim=0, drop_prob=0.9)
 
     # RESULTS
     # test_mnist_results(step_type='add', occ_dim=14, drop_prob=0.0)
@@ -390,8 +417,8 @@ if __name__=="__main__":
     # test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.7)
     # test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.8)
     # test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.9)
-    test_mnist_results(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
-    test_mnist_results(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
+    #test_mnist_results(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
+    #test_mnist_results(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
     test_mnist_results(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
-    test_mnist_results(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
-    test_mnist_results(step_type='add', imp_steps=15, occ_dim=0, drop_prob=0.9)
+    #test_mnist_results(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
+    #test_mnist_results(step_type='add', imp_steps=15, occ_dim=0, drop_prob=0.9)

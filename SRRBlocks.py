@@ -31,51 +31,60 @@ from LogPDFs import log_prob_bernoulli, gaussian_kld
 ###################################################
 
 class SimpleAttentionReader2d(Initializable):
+    """
+    This class manages a moveable, foveated 2d attention window.
+
+    Parameters:
+        x_dim: dimension of "vectorized" inputs
+        con_dim: dimension of the controller providing attention params
+        height: #rows after reshaping inputs to 2d
+        width: #cols after reshaping inputs to 2d
+        N: this will be an N x N reader -- N x N at two scales!
+    """
     def __init__(self, x_dim, con_dim, height, width, N, **kwargs):
         super(SimpleAttentionReader2d, self).__init__(name="reader", **kwargs)
 
         self.img_height = height
         self.img_width = width
         self.N = N
-        self.x_dim = x_dim
-        self.con_dim = con_dim
-        self.output_dim = 2*N*N
+        self.x_dim = x_dim      # dimension of vectorized image input
+        self.con_dim = con_dim  # dimension of controller input
+        self.read_dim = 2*N*N   # dimension of reader output
+        self.grid_dim = N*N
+        # add and initialize a parameter for controlling sigma scale
+        init_ary = 0.5 * numpy.ones((1,)).astype(theano.config.floatX)
+        self.sigma_scale = shared_floatx_nans((1,), name='sigma_scale')
+        self.sigma_scale.set_value(init_ary)
+        add_role(self.sigma_scale, PARAMETER)
 
+        # get a localized reader mechanism and a controller decoder
         self.zoomer = ZoomableAttentionWindow(height, width, N)
         self.readout = MLP(activations=[Identity()], dims=[con_dim, 5], **kwargs)
 
+        # make list of child models (for Blocks stuff)
         self.children = [ self.readout ]
+        self.params = [ self.sigma_scale ]
         return
 
     def get_dim(self, name):
+        # Blocks stuff -- not clear when and how this gets used
         if name in ['input', 'h_con']:
             return self.con_dim
         elif name in ['x_dim', 'x1', 'x2']:
             return self.x_dim
-        elif name == 'output':
-            return self.output_dim
+        elif name in ['output', 'r']:
+            return self.read_dim
         else:
             raise ValueError
         return
 
-    def _allocate(self):
-        self.sigma_scale = shared_floatx_nans((1,), name='sigma_scale')
-        add_role(self.sigma_scale, PARAMETER)
-        self.params = [ self.sigma_scale ]
-        return
-
-    def _initialize(self):
-        init_ary = 2.0 * numpy.ones((1,)).astype(theano.config.floatX)
-        self.sigma_scale.set_value(init_ary)
-        return
-
     @application(inputs=['x1', 'x2', 'h_con'], outputs=['r'])
     def apply(self, x1, x2, h_con):
-        # read-out attention parameters from the controller
+        # decode attention parameters from the controller
         l = self.readout.apply(h_con)
 
         # get base attention parameters
-        center_y, center_x, delta1, sigma, gamma = self.zoomer.nn2att(l)
+        center_y, center_x, delta1, gamma1, gamma2 = self.zoomer.nn2att(l)
         # second read-out is at 2x the scale of first read-out
         delta2 = 2.0 * delta1
         # compute filter bandwidth as linearly proportional to grid scale
@@ -83,9 +92,44 @@ class SimpleAttentionReader2d(Initializable):
         sigma2 = self.sigma_scale[0] * delta2
 
         # perform local read from x1 at two different scales
-        r1 = gamma * self.zoomer.read(x1, center_y, center_x, delta1, sigma1)
-        r2 = gamma * self.zoomer.read(x1, center_y, center_x, delta2, sigma2)
+        r1 = gamma1 * self.zoomer.read(x1, center_y, center_x, delta1, sigma1)
+        r2 = gamma2 * self.zoomer.read(x1, center_y, center_x, delta2, sigma2)
         return tensor.concatenate([r1, r2], axis=1)
+
+    @application(inputs=['im','center_y','center_x','delta','gamma1','gamma2'], \
+                 outputs=['r'])
+    def direct_read(self, im, center_y, center_x, \
+                    delta, gamma1, gamma2):
+        # second read-out is at 2x the scale of first read-out
+        delta1 = 1.0 * delta
+        delta2 = 2.0 * delta
+        # compute filter bandwidth as linearly proportional to grid scale
+        sigma1 = self.sigma_scale[0] * delta1
+        sigma2 = self.sigma_scale[0] * delta2
+
+        # perform local read from x1 at two different scales
+        r1 = gamma1 * self.zoomer.read(im, center_y, center_x, delta1, sigma1)
+        r2 = gamma2 * self.zoomer.read(im, center_y, center_x, delta2, sigma2)
+        return tensor.concatenate([r1, r2], axis=1)
+
+    @application(inputs=['windows','center_y','center_x','delta'], \
+                 outputs=['i'])
+    def direct_write(self, windows, center_y, center_x, delta):
+        # second write-out is at 2x the scale of first write-out
+        delta1 = 1.0 * delta
+        delta2 = 2.0 * delta
+        # compute filter bandwidth as linearly proportional to grid scale
+        sigma1 = self.sigma_scale[0] * delta1
+        sigma2 = self.sigma_scale[0] * delta2
+
+        # assume windows are taken from a read operation by this object
+        w1 = windows[:,:self.grid_dim]
+        w2 = windows[:,self.grid_dim:]
+
+        # perform local write operation at two different scales
+        i1 = self.zoomer.write(w1, center_y, center_x, delta1, sigma1)
+        i2 = self.zoomer.write(w2, center_y, center_x, delta2, sigma2)
+        return tensor.concatenate([i1, i2], axis=1)
 
 
 ##############################################################

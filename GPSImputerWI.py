@@ -24,21 +24,30 @@ from HelperFuncs import to_fX
 # IMPLEMENT THE THING THAT DOES STUFF #
 #######################################
 
-class GPSImputer(object):
+class GPSImputerWI(object):
     """
     Controller for training a multi-step imputater via guided policy search.
+
+    This model adds an "initialization" step, prior to iterative refinement.
+    The init step requires three additional networks: action selectors for both
+    the primary and guide policies, and an action->state transformer.
+
 
     Parameters:
         rng: numpy.random.RandomState (for reproducibility)
         x_in: the initial state for imputation
         x_out: the goal state for imputation
         x_mask: mask for state dims to keep fixed during imputation
-        p_zi_given_xi: InfNet for stochastic part of step
-        p_sip1_given_zi: HydraNet for deterministic part of step
+        p_h_given_x: InfNet for stochastic part of init step
+        p_s0_given_h: HydraNet for deterministic part of init step
+        p_zi_given_xi: InfNet for stochastic part of refinement steps
+        p_sip1_given_zi: HydraNet for deterministic part of refinement steps
         p_x_given_si: HydraNet for transform from s-space to x-space
-        q_zi_given_xi: InfNet for the guide policy
+        q_h_given_x: InfNet for the guide policy (init step)
+        q_zi_given_xi: InfNet for the guide policy (refinement steps)
         params: REQUIRED PARAMS SHOWN BELOW
                 x_dim: dimension of inputs to reconstruct
+                h_dim: dimension of latent space for init step
                 z_dim: dimension of latent space for policy wobble
                 s_dim: dimension of space for hypothesis construction
                 use_p_x_given_si: boolean for whether to use ----
@@ -47,11 +56,14 @@ class GPSImputer(object):
                 x_type: can be "bernoulli" or "gaussian"
                 obs_transform: can be 'none' or 'sigmoid'
     """
-    def __init__(self, rng=None, 
+    def __init__(self, rng=None,
             x_in=None, x_mask=None, x_out=None, \
+            p_h_given_x=None, \
+            p_s0_given_h=None, \
             p_zi_given_xi=None, \
             p_sip1_given_zi=None, \
             p_x_given_si=None, \
+            q_h_given_x=None, \
             q_zi_given_xi=None, \
             params=None, \
             shared_param_dicts=None):
@@ -61,6 +73,7 @@ class GPSImputer(object):
         # grab the user-provided parameters
         self.params = params
         self.x_dim = self.params['x_dim']
+        self.h_dim = self.params['h_dim']
         self.z_dim = self.params['z_dim']
         self.s_dim = self.params['s_dim']
         self.use_p_x_given_si = self.params['use_p_x_given_si']
@@ -85,13 +98,16 @@ class GPSImputer(object):
         if self.x_type == 'bernoulli':
             self.obs_transform = lambda x: T.nnet.sigmoid(x)
         self.shared_param_dicts = shared_param_dicts
-        
+
         assert((self.step_type == 'add') or (self.step_type == 'jump'))
 
         # grab handles to the relevant InfNets
+        self.p_h_given_x = p_h_given_x
+        self.p_s0_given_h = p_s0_given_h
         self.p_zi_given_xi = p_zi_given_xi
         self.p_sip1_given_zi = p_sip1_given_zi
         self.p_x_given_si = p_x_given_si
+        self.q_h_given_x = q_h_given_x
         self.q_zi_given_xi = q_zi_given_xi
 
         # record the symbolic variables that will provide inputs to the
@@ -100,27 +116,55 @@ class GPSImputer(object):
         self.x_out = x_out
         self.x_mask = x_mask
         self.zi_zmuv = T.tensor3()
-        
 
         # setup switching variable for changing between sampling/training
         zero_ary = to_fX( np.zeros((1,)) )
-        self.train_switch = theano.shared(value=zero_ary, name='msm_train_switch')
+        self.train_switch = theano.shared(value=zero_ary, name='gpsi_train_switch')
         self.set_train_switch(1.0)
 
         if self.shared_param_dicts is None:
             # initialize parameters "owned" by this model
-            s0_init = to_fX( np.zeros((self.s_dim,)) )
-            self.s0 = theano.shared(value=s0_init, name='msm_s0')
-            self.obs_logvar = theano.shared(value=zero_ary, name='msm_obs_logvar')
+            init_ary = to_fX( np.zeros((self.x_dim,)) )
+            self.x_null = theano.shared(value=init_ary, name='gpis_xn')
+            self.grad_null = theano.shared(value=init_ary, name='gpsi_gn')
+            self.obs_logvar = theano.shared(value=zero_ary, name='gpsi_obs_logvar')
             self.bounded_logvar = 8.0 * T.tanh((1.0/8.0) * self.obs_logvar[0])
             self.shared_param_dicts = {}
-            self.shared_param_dicts['s0'] = self.s0
+            self.shared_param_dicts['x_null'] = self.x_null
+            self.shared_param_dicts['grad_null'] = self.grad_null
             self.shared_param_dicts['obs_logvar'] = self.obs_logvar
         else:
             # grab the parameters required by this model from a given dict
-            self.s0 = self.shared_param_dicts['s0']
+            self.x_null = self.shared_param_dicts['x_null']
+            self.grad_null = self.shared_param_dicts['grad_null']
             self.obs_logvar = self.shared_param_dicts['obs_logvar']
             self.bounded_logvar = 8.0 * T.tanh((1.0/8.0) * self.obs_logvar[0])
+
+        ##############################################
+        # Compute results of the initialization step #
+        ##############################################
+        self.x_init = (self.x_mask * self.x_in) + \
+                      ((1.0 - self.x_mask) * self.x_null)
+        # sample from primary and guide conditionals over h
+        h_p_mean, h_p_logvar, h_p = \
+                self.p_h_given_x.apply(self.x_init, do_samples=True)
+        h_q_mean, h_q_logvar, h_q = \
+                self.q_h_given_x.apply(self.x_in, do_samples=True)
+        # make h samples that can be switched between h_p and h_q
+        self.h = ((self.train_switch[0] * h_q) + \
+                 ((1.0 - self.train_switch[0]) * h_p))
+        # get the emitted initial state s0 (sampled via either p or q)
+        hydra_out = self.p_s0_given_h.apply(self.h)
+        self.s0 = hydra_out[0]
+        # compute NLL reconstruction cost for the initialization step
+        self.nll0 = self._construct_nll_costs(self.s0, self.x_out, self.x_mask)
+        # compute KLds for the initialization step
+        self.kldh_q2p = gaussian_kld(h_q_mean, h_q_logvar, \
+                                     h_p_mean, h_p_logvar) # KL(q || p)
+        self.kldh_p2q = gaussian_kld(h_p_mean, h_p_logvar, \
+                                     h_q_mean, h_q_logvar) # KL(p || q)
+        self.kldh_p2g = gaussian_kld(h_p_mean, h_p_logvar, \
+                                     0.0, 0.0) # KL(p || global prior)
 
         ##################################################
         # Setup the iterative imputation loop using scan #
@@ -132,7 +176,8 @@ class GPSImputer(object):
             xi_masked = (self.x_mask * xi_unmasked) + \
                         ((1.0 - self.x_mask) * si_as_x)
             grad_unmasked = self.x_out - si_as_x
-            grad_masked = self.x_mask * grad_unmasked
+            grad_masked = (self.x_mask * grad_unmasked) + \
+                          ((1.0 - self.x_mask) * self.grad_null)
             # get samples of next zi, according to the global policy
             zi_p_mean, zi_p_logvar = self.p_zi_given_xi.apply( \
                     T.horizontal_stack(xi_masked, grad_masked), \
@@ -171,8 +216,7 @@ class GPSImputer(object):
             return sip1, nlli, kldi_q2p, kldi_p2q, kldi_p2g
 
         # apply scan op for the sequential imputation loop
-        self.s0_full = T.alloc(0.0, self.x_in.shape[0], self.s_dim) + self.s0
-        init_vals = [self.s0_full, None, None, None, None]
+        init_vals = [self.s0, None, None, None, None]
         self.scan_results, self.scan_updates = theano.scan(imp_step_func, \
                     outputs_info=init_vals, sequences=self.zi_zmuv)
 
@@ -181,10 +225,6 @@ class GPSImputer(object):
         self.kldi_q2p = self.scan_results[2]
         self.kldi_p2q = self.scan_results[3]
         self.kldi_p2g = self.scan_results[4]
-
-        # get the initial imputation state
-        self.x0 = (self.x_mask * self.x_in) + \
-                  ((1.0 - self.x_mask) * self._from_si_to_x(self.s0_full))
 
         ######################################################################
         # ALL SYMBOLIC VARS NEEDED FOR THE OBJECTIVE SHOULD NOW BE AVAILABLE #
@@ -210,8 +250,8 @@ class GPSImputer(object):
         self.lam_l2w = theano.shared(value=zero_ary, name='msm_lam_l2w')
         self.set_lam_l2w(1e-5)
 
-        # Grab all of the "optimizable" parameters in "group 1"
-        self.joint_params = [self.s0, self.obs_logvar]
+        # Grab all of the "optimizable" parameters in the model
+        self.joint_params = [self.x_null, self.grad_null, self.obs_logvar]
         self.joint_params.extend(self.p_zi_given_xi.mlp_params)
         self.joint_params.extend(self.p_sip1_given_zi.mlp_params)
         self.joint_params.extend(self.p_x_given_si.mlp_params)
@@ -372,18 +412,23 @@ class GPSImputer(object):
         """
         Construct the policy KL-divergence part of cost to minimize.
         """
-        kld_pis = []
-        kld_qis = []
-        kld_gis = []
+        kld_ps = []
+        kld_qs = []
+        kld_gs = []
+        # compute KLds for initialization step
+        kld_ps.append(T.sum(self.kldh_p2q**p, axis=1))
+        kld_qs.append(T.sum(self.kldh_q2p**p, axis=1))
+        kld_gs.append(T.sum(self.kldh_p2g**p, axis=1))
+        # compute KLds for refinement steps
         for i in range(self.imp_steps):
-            kld_pis.append(T.sum(self.kldi_p2q[i]**p, axis=1))
-            kld_qis.append(T.sum(self.kldi_q2p[i]**p, axis=1))
-            kld_gis.append(T.sum(self.kldi_p2g[i]**p, axis=1))
-        # compute the batch-wise costs
-        kld_pi = sum(kld_pis)
-        kld_qi = sum(kld_qis)
-        kld_gi = sum(kld_gis)
-        return [kld_pi, kld_qi, kld_gi]
+            kld_ps.append(T.sum(self.kldi_p2q[i]**p, axis=1))
+            kld_qs.append(T.sum(self.kldi_q2p[i]**p, axis=1))
+            kld_gs.append(T.sum(self.kldi_p2g[i]**p, axis=1))
+        # compute the batch-wise costs accumulated over all steps
+        kld_p_sum = sum(kld_ps)
+        kld_q_sum = sum(kld_qs)
+        kld_g_sum = sum(kld_gs)
+        return [kld_p_sum, kld_q_sum, kld_g_sum]
 
     def _construct_reg_costs(self):
         """
@@ -424,7 +469,7 @@ class GPSImputer(object):
             else:
                 # take samples from model's imputation policy
                 self.set_train_switch(switch_val=0.0)
-            # compute a multi-sample estimate of variational free-energy                
+            # compute a multi-sample estimate of variational free-energy
             nll_sum = np.zeros((XI.shape[0],))
             kld_sum = np.zeros((XI.shape[0],))
             for i in range(sample_count):
@@ -441,6 +486,9 @@ class GPSImputer(object):
             return [mean_nll, mean_kld]
         return fe_term_estimator
 
+    #
+    # TODO: Fix this to work with the new initialization step
+    #
     def _construct_raw_costs(self):
         """
         Construct all the raw, i.e. not weighted by any lambdas, costs.
@@ -451,7 +499,9 @@ class GPSImputer(object):
         xm = T.matrix()
         zizmuv = self._construct_zi_zmuv(xi, 1)
         # compile theano function for computing the costs
-        all_step_costs = [self.nlli, self.kldi_q2p, self.kldi_p2q, self.kldi_p2g]
+        all_step_costs = [self.nll0, self.kldh_q2p, self.kldh_p2q, \
+                          self.kldh_p2g, self.nlli, self.kldi_q2p, \
+                          self.kldi_p2q, self.kldi_p2g]
         cost_func = theano.function(inputs=[xi, xo, xm], \
                     outputs=all_step_costs, \
                     givens={ self.x_in: xi, \
@@ -463,17 +513,20 @@ class GPSImputer(object):
         # make a function for computing multi-sample estimates of cost
         def raw_cost_computer(XI, XO, XM):
             _all_costs = cost_func(to_fX(XI), to_fX(XO), to_fX(XM))
-            _kld_q2p = np.sum(np.mean(_all_costs[1], axis=1, keepdims=True), axis=0)
-            _kld_p2q = np.sum(np.mean(_all_costs[2], axis=1, keepdims=True), axis=0)
-            _kld_p2g = np.sum(np.mean(_all_costs[3], axis=1, keepdims=True), axis=0)
-            _step_klds = np.mean(np.sum(_all_costs[1], axis=2, keepdims=True), axis=1)
+            _kld_q2p = np.sum(np.mean(_all_costs[5], axis=1, keepdims=True), axis=0)
+            _kld_p2q = np.sum(np.mean(_all_costs[6], axis=1, keepdims=True), axis=0)
+            _kld_p2g = np.sum(np.mean(_all_costs[7], axis=1, keepdims=True), axis=0)
+            _step_klds = np.mean(np.sum(_all_costs[5], axis=2, keepdims=True), axis=1)
             _step_klds = to_fX( np.asarray([k for k in _step_klds]) )
-            _step_nlls = np.mean(_all_costs[0], axis=1)
+            _step_nlls = np.mean(_all_costs[4], axis=1)
             _step_nlls = to_fX( np.asarray([k for k in _step_nlls]) )
             results = [_step_nlls, _step_klds, _kld_q2p, _kld_p2q, _kld_p2g]
             return results
         return raw_cost_computer
 
+    #
+    # TODO: Fix this to work with the new initialization step
+    #
     def _construct_compute_per_step_cost(self):
         """
         Construct a theano function for computing the best possible cost
@@ -544,7 +597,8 @@ class GPSImputer(object):
         xo = T.matrix()
         xm = T.matrix()
         zizmuv = self._construct_zi_zmuv(xi, 1)
-        oputs = [self.x0] + [self._from_si_to_x(self.si[i]) for i in range(self.imp_steps)]
+        oputs = [self.x_init, self._from_si_to_x(self.s0)] + \
+                [self._from_si_to_x(self.si[i]) for i in range(self.imp_steps)]
         sample_func = theano.function(inputs=[xi, xo, xm], outputs=oputs, \
                 givens={self.x_in: xi, \
                         self.x_out: xo, \
@@ -595,9 +649,12 @@ class GPSImputer(object):
         cPickle.dump(numpy_param_dicts, f_handle, protocol=-1)
         # get numpy dicts for each of the "child" models that we must save
         child_model_dicts = {}
+        child_model_dicts['p_h_given_x'] = self.p_h_given_x.save_to_dict()
+        child_model_dicts['p_s0_given_h'] = self.p_s0_given_h.save_to_dict()
         child_model_dicts['p_zi_given_xi'] = self.p_zi_given_xi.save_to_dict()
         child_model_dicts['p_sip1_given_zi'] = self.p_sip1_given_zi.save_to_dict()
         child_model_dicts['p_x_given_si'] = self.p_x_given_si.save_to_dict()
+        child_model_dicts['q_h_given_x'] = self.q_h_given_x.save_to_dict()
         child_model_dicts['q_zi_given_xi'] = self.q_zi_given_xi.save_to_dict()
         # dump the numpy child model dicts to the pickle file
         cPickle.dump(child_model_dicts, f_handle, protocol=-1)
@@ -623,29 +680,38 @@ def load_gpsimputer_from_file(f_name=None, rng=None):
     # reload the child models
     child_model_dicts = cPickle.load(pickle_file)
     xd = T.matrix()
+    p_h_given_x = load_infnet_from_dict( \
+            child_model_dicts['p_h_given_x'], rng=rng, Xd=xd)
+    p_s0_given_h = load_hydranet_from_dict( \
+            child_model_dicts['p_s0_given_h'], rng=rng, Xd=xd)
     p_zi_given_xi = load_infnet_from_dict( \
             child_model_dicts['p_zi_given_xi'], rng=rng, Xd=xd)
     p_sip1_given_zi = load_hydranet_from_dict( \
             child_model_dicts['p_sip1_given_zi'], rng=rng, Xd=xd)
     p_x_given_si = load_hydranet_from_dict( \
             child_model_dicts['p_x_given_si'], rng=rng, Xd=xd)
+    q_h_given_x = load_infnet_from_dict( \
+            child_model_dicts['q_h_given_x'], rng=rng, Xd=xd)
     q_zi_given_xi = load_infnet_from_dict( \
             child_model_dicts['q_zi_given_xi'], rng=rng, Xd=xd)
-    # now, create a new GPSImputer based on the loaded data
+    # now, create a new GPSImputerWI based on the loaded data
     xi = T.matrix()
     xm = T.matrix()
     xo = T.matrix()
-    clone_net = GPSImputer(rng=rng, \
-                           x_in=xi, x_mask=xm, x_out=xo, \
-                           p_zi_given_xi=p_zi_given_xi, \
-                           p_sip1_given_zi=p_sip1_given_zi, \
-                           p_x_given_si=p_x_given_si, \
-                           q_zi_given_xi=q_zi_given_xi, \
-                           params=self_dot_params, \
-                           shared_param_dicts=self_dot_shared_param_dicts)
+    clone_net = GPSImputerWI(rng=rng, \
+                             x_in=xi, x_mask=xm, x_out=xo, \
+                             p_h_given_x=p_h_given_x, \
+                             p_s0_given_h=p_s0_given_h, \
+                             p_zi_given_xi=p_zi_given_xi, \
+                             p_sip1_given_zi=p_sip1_given_zi, \
+                             p_x_given_si=p_x_given_si, \
+                             q_h_given_x=q_h_given_x, \
+                             q_zi_given_xi=q_zi_given_xi, \
+                             params=self_dot_params, \
+                             shared_param_dicts=self_dot_shared_param_dicts)
     # helpful output
     print("==================================================")
-    print("LOADED GPSImputer WITH PARAMS:")
+    print("LOADED GPSImputerWI WITH PARAMS:")
     for k in self_dot_params:
         print("    {0:s}: {1:s}".format(str(k), str(self_dot_params[k])))
     print("==================================================")
