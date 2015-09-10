@@ -125,20 +125,22 @@ class GPSImputerWI(object):
         if self.shared_param_dicts is None:
             # initialize parameters "owned" by this model
             init_ary = to_fX( np.zeros((self.x_dim,)) )
-            self.x_null = theano.shared(value=init_ary, name='gpis_xn')
+            self.s_null = theano.shared(value=init_ary, name='gpis_sn')
             self.grad_null = theano.shared(value=init_ary, name='gpsi_gn')
             self.obs_logvar = theano.shared(value=zero_ary, name='gpsi_obs_logvar')
             self.bounded_logvar = 8.0 * T.tanh((1.0/8.0) * self.obs_logvar[0])
             self.shared_param_dicts = {}
-            self.shared_param_dicts['x_null'] = self.x_null
+            self.shared_param_dicts['s_null'] = self.s_null
             self.shared_param_dicts['grad_null'] = self.grad_null
             self.shared_param_dicts['obs_logvar'] = self.obs_logvar
+            self.x_null = self._from_si_to_x(self.s_null)
         else:
             # grab the parameters required by this model from a given dict
-            self.x_null = self.shared_param_dicts['x_null']
+            self.s_null = self.shared_param_dicts['s_null']
             self.grad_null = self.shared_param_dicts['grad_null']
             self.obs_logvar = self.shared_param_dicts['obs_logvar']
             self.bounded_logvar = 8.0 * T.tanh((1.0/8.0) * self.obs_logvar[0])
+            self.x_null = self._from_si_to_x(self.s_null)
 
         ##############################################
         # Compute results of the initialization step #
@@ -208,8 +210,8 @@ class GPSImputerWI(object):
                 sip1 = si_step
             else:
                 # additive steps update the current guesses like an LSTM
-                write_gate = T.nnet.sigmoid(2.0 + hydra_out[1])
-                erase_gate = T.nnet.sigmoid(2.0 + hydra_out[2])
+                write_gate = T.nnet.sigmoid(3.0 + hydra_out[1])
+                erase_gate = T.nnet.sigmoid(3.0 + hydra_out[2])
                 sip1 = (erase_gate * si) + (write_gate * si_step)
             # compute NLL for the current imputation
             nlli = self._construct_nll_costs(sip1, self.x_out, self.x_mask)
@@ -245,13 +247,14 @@ class GPSImputerWI(object):
         self.lam_kld_p = theano.shared(value=zero_ary, name='gpsi_lam_kld_p')
         self.lam_kld_q = theano.shared(value=zero_ary, name='gpsi_lam_kld_q')
         self.lam_kld_g = theano.shared(value=zero_ary, name='gpsi_lam_kld_g')
-        self.set_lam_kld(lam_kld_p=0.05, lam_kld_q=0.95, lam_kld_g=0.1)
+        self.lam_kld_s = theano.shared(value=zero_ary, name='gpsi_lam_kld_s')
+        self.set_lam_kld(lam_kld_p=0.0, lam_kld_q=1.0, lam_kld_g=0.0, lam_kld_s=0.0)
         # init shared var for controlling l2 regularization on params
         self.lam_l2w = theano.shared(value=zero_ary, name='msm_lam_l2w')
         self.set_lam_l2w(1e-5)
 
         # Grab all of the "optimizable" parameters in the model
-        self.joint_params = [self.x_null, self.grad_null, self.obs_logvar]
+        self.joint_params = [self.s_null, self.grad_null, self.obs_logvar]
         self.joint_params.extend(self.p_zi_given_xi.mlp_params)
         self.joint_params.extend(self.p_sip1_given_zi.mlp_params)
         self.joint_params.extend(self.p_x_given_si.mlp_params)
@@ -260,10 +263,12 @@ class GPSImputerWI(object):
         #################################
         # CONSTRUCT THE KLD-BASED COSTS #
         #################################
-        self.kld_p, self.kld_q, self.kld_g = self._construct_kld_costs(p=1.0)
+        self.kld_p, self.kld_q, self.kld_g, self.kld_s = \
+                self._construct_kld_costs(p=1.0)
         self.kld_costs = (self.lam_kld_p[0] * self.kld_p) + \
                          (self.lam_kld_q[0] * self.kld_q) + \
-                         (self.lam_kld_g[0] * self.kld_g)
+                         (self.lam_kld_g[0] * self.kld_g) + \
+                         (self.lam_kld_s[0] * self.kld_s)
         self.kld_cost = T.mean(self.kld_costs)
         #################################
         # CONSTRUCT THE NLL-BASED COSTS #
@@ -299,8 +304,6 @@ class GPSImputerWI(object):
             self.joint_updates[k] = v
 
         # Construct a function for jointly training the generator/inferencer
-        print("Compiling cost computer...")
-        self.compute_raw_costs = self._construct_raw_costs()
         print("Compiling training function...")
         self.train_joint = self._construct_train_joint()
         print("Compiling free-energy sampler...")
@@ -348,7 +351,7 @@ class GPSImputerWI(object):
         self.lam_nll.set_value(to_fX(new_lam))
         return
 
-    def set_lam_kld(self, lam_kld_p=0.0, lam_kld_q=1.0, lam_kld_g=0.0):
+    def set_lam_kld(self, lam_kld_p=0.0, lam_kld_q=1.0, lam_kld_g=0.0, lam_kld_s=0.0):
         """
         Set the relative weight of prior KL-divergence vs. data likelihood.
         """
@@ -359,6 +362,8 @@ class GPSImputerWI(object):
         self.lam_kld_q.set_value(to_fX(new_lam))
         new_lam = zero_ary + lam_kld_g
         self.lam_kld_g.set_value(to_fX(new_lam))
+        new_lam = zero_ary + lam_kld_s
+        self.lam_kld_s.set_value(to_fX(new_lam))
         return
 
     def set_lam_l2w(self, lam_l2w=1e-3):
@@ -408,27 +413,39 @@ class GPSImputerWI(object):
         nll_costs = -ll_costs.flatten()
         return nll_costs
 
+    def _construct_kld_s(self, s_i, s_j):
+        """
+        Compute KL(s_i || s_j) -- assuming bernoullish outputs
+        """
+        x_i = self._from_si_to_x( s_i )
+        x_j = self._from_si_to_x( s_j )
+        kld_s = (x_i * (T.log(x_i)  - T.log(x_j))) + \
+                ((1.0 - x_i) * (T.log(1.0-x_i) - T.log(1.0-x_j)))
+        sum_kld = T.sum(kld_s, axis=1)
+        return sum_kld
+
     def _construct_kld_costs(self, p=1.0):
         """
         Construct the policy KL-divergence part of cost to minimize.
         """
-        kld_ps = []
-        kld_qs = []
-        kld_gs = []
-        # compute KLds for initialization step
-        kld_ps.append(T.sum(self.kldh_p2q**p, axis=1))
-        kld_qs.append(T.sum(self.kldh_q2p**p, axis=1))
-        kld_gs.append(T.sum(self.kldh_p2g**p, axis=1))
-        # compute KLds for refinement steps
+        kld_pis = []
+        kld_qis = []
+        kld_gis = []
+        kld_sis = [self._construct_kld_s(self.s0, self.s_null)]
         for i in range(self.imp_steps):
-            kld_ps.append(T.sum(self.kldi_p2q[i]**p, axis=1))
-            kld_qs.append(T.sum(self.kldi_q2p[i]**p, axis=1))
-            kld_gs.append(T.sum(self.kldi_p2g[i]**p, axis=1))
-        # compute the batch-wise costs accumulated over all steps
-        kld_p_sum = sum(kld_ps)
-        kld_q_sum = sum(kld_qs)
-        kld_g_sum = sum(kld_gs)
-        return [kld_p_sum, kld_q_sum, kld_g_sum]
+            kld_pis.append(T.sum(self.kldi_p2q[i]**p, axis=1))
+            kld_qis.append(T.sum(self.kldi_q2p[i]**p, axis=1))
+            kld_gis.append(T.sum(self.kldi_p2g[i]**p, axis=1))
+            if i == 0:
+                kld_sis.append(self._construct_kld_s(self.si[i], self.s0))
+            else:
+                kld_sis.append(self._construct_kld_s(self.si[i], self.si[i-1]))
+        # compute the batch-wise costs
+        kld_pi = sum(kld_pis)
+        kld_qi = sum(kld_qis)
+        kld_gi = sum(kld_gis)
+        kld_si = sum(kld_sis)
+        return [kld_pi, kld_qi, kld_gi, kld_si]
 
     def _construct_reg_costs(self):
         """
@@ -486,47 +503,6 @@ class GPSImputerWI(object):
             return [mean_nll, mean_kld]
         return fe_term_estimator
 
-    #
-    # TODO: Fix this to work with the new initialization step
-    #
-    def _construct_raw_costs(self):
-        """
-        Construct all the raw, i.e. not weighted by any lambdas, costs.
-        """
-        # setup some symbolic variables for theano to deal with
-        xi = T.matrix()
-        xo = T.matrix()
-        xm = T.matrix()
-        zizmuv = self._construct_zi_zmuv(xi, 1)
-        # compile theano function for computing the costs
-        all_step_costs = [self.nll0, self.kldh_q2p, self.kldh_p2q, \
-                          self.kldh_p2g, self.nlli, self.kldi_q2p, \
-                          self.kldi_p2q, self.kldi_p2g]
-        cost_func = theano.function(inputs=[xi, xo, xm], \
-                    outputs=all_step_costs, \
-                    givens={ self.x_in: xi, \
-                             self.x_out: xo, \
-                             self.x_mask: xm, \
-                             self.zi_zmuv: zizmuv }, \
-                    updates=self.scan_updates, \
-                    on_unused_input='ignore')
-        # make a function for computing multi-sample estimates of cost
-        def raw_cost_computer(XI, XO, XM):
-            _all_costs = cost_func(to_fX(XI), to_fX(XO), to_fX(XM))
-            _kld_q2p = np.sum(np.mean(_all_costs[5], axis=1, keepdims=True), axis=0)
-            _kld_p2q = np.sum(np.mean(_all_costs[6], axis=1, keepdims=True), axis=0)
-            _kld_p2g = np.sum(np.mean(_all_costs[7], axis=1, keepdims=True), axis=0)
-            _step_klds = np.mean(np.sum(_all_costs[5], axis=2, keepdims=True), axis=1)
-            _step_klds = to_fX( np.asarray([k for k in _step_klds]) )
-            _step_nlls = np.mean(_all_costs[4], axis=1)
-            _step_nlls = to_fX( np.asarray([k for k in _step_nlls]) )
-            results = [_step_nlls, _step_klds, _kld_q2p, _kld_p2q, _kld_p2g]
-            return results
-        return raw_cost_computer
-
-    #
-    # TODO: Fix this to work with the new initialization step
-    #
     def _construct_compute_per_step_cost(self):
         """
         Construct a theano function for computing the best possible cost
@@ -538,31 +514,33 @@ class GPSImputerWI(object):
         xm = T.matrix()
         zizmuv = self._construct_zi_zmuv(xi, 1)
         # construct symbolic variables for the step-wise cost
-        step_mean_nll = T.mean(self.nlli, axis=1).flatten()
-        step_lone_kld = T.sum(self.kldi_q2p, axis=2)
-        step_cumu_kld = T.extra_ops.cumsum(step_lone_kld, axis=0)
-        step_mean_kld = T.mean(step_cumu_kld, axis=1).flatten()
+        init_nll = T.mean(self.nll0)
+        init_kld = T.mean(T.sum(self.kldh_q2p, axis=1))
+        step_nll = T.mean(self.nlli, axis=1).flatten()
+        step_kld = T.mean(T.sum(self.kldi_q2p, axis=2), axis=1).flatten()
         # compile theano function for computing the step-wise cost
         step_cost_func = theano.function(inputs=[xi, xo, xm], \
-                    outputs=[step_mean_nll, step_mean_kld], \
+                    outputs=[init_nll, step_nll, init_kld, step_kld], \
                     givens={ self.x_in: xi, \
                              self.x_out: xo, \
                              self.x_mask: xm, \
                              self.zi_zmuv: zizmuv }, \
                     updates=self.scan_updates, \
                     on_unused_input='ignore')
-        def best_cost_computer(XI, XO, XM, sample_count=20):
+        def step_cost_computer(XI, XO, XM, sample_count=20):
             # compute a multi-sample estimate of variational free-energy
-            step_nll_sum = np.zeros((self.imp_steps,))
-            step_kld_sum = np.zeros((self.imp_steps,))
+            step_nll_sum = np.zeros((1+self.imp_steps,))
+            step_kld_sum = np.zeros((1+self.imp_steps,))
             for i in range(sample_count):
                 result = step_cost_func(XI, XO, XM)
-                step_nll_sum += result[0].ravel()
-                step_kld_sum += result[1].ravel()
+                step_nll_sum[0] += result[0]
+                step_nll_sum[1:] += result[1].ravel()
+                step_kld_sum[0] += result[2]
+                step_kld_sum[1:] += result[3].ravel()
             mean_step_nll = step_nll_sum / float(sample_count)
             mean_step_kld = step_kld_sum / float(sample_count)
             return [mean_step_nll, mean_step_kld]
-        return best_cost_computer
+        return step_cost_computer
 
     def _construct_train_joint(self):
         """

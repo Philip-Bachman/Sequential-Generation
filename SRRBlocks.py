@@ -78,26 +78,98 @@ class SimpleAttentionReader2d(Initializable):
             raise ValueError
         return
 
-    @application(inputs=['x1', 'x2', 'h_con'], outputs=['r'])
+    @application(inputs=['x1', 'x2', 'h_con'], outputs=['r12'])
     def apply(self, x1, x2, h_con):
         # decode attention parameters from the controller
         l = self.readout.apply(h_con)
-
         # get base attention parameters
-        center_y, center_x, delta1, gamma1, gamma2 = self.zoomer.nn2att(l)
+        center_y, center_x, delta, gamma1, gamma2 = self.zoomer.nn2att(l)
+        center_y = tensor.zeros_like(center_y) + 14.0
+        center_x = tensor.zeros_like(center_x) + 14.0
+        delta = tensor.ones_like(delta) * 2.0
+        gamma1 = tensor.ones_like(gamma1)
+        gamma2 = tensor.ones_like(gamma2)
         # second read-out is at 2x the scale of first read-out
-        delta2 = 2.0 * delta1
+        delta1 = 1.0 * delta
+        delta2 = 2.0 * delta
         # compute filter bandwidth as linearly proportional to grid scale
         sigma1 = self.sigma_scale[0] * delta1
         sigma2 = self.sigma_scale[0] * delta2
-
         # perform local read from x1 at two different scales
-        r1 = gamma1 * self.zoomer.read(x1, center_y, center_x, delta1, sigma1)
-        r2 = gamma2 * self.zoomer.read(x1, center_y, center_x, delta2, sigma2)
-        return tensor.concatenate([r1, r2], axis=1)
+        r1 = gamma1.dimshuffle(0,'x') * \
+                self.zoomer.read(x1, center_y, center_x, delta1, sigma1)
+        r2 = gamma2.dimshuffle(0,'x') * \
+                self.zoomer.read(x1, center_y, center_x, delta2, sigma2)
+        r12 = tensor.concatenate([r1, r2], axis=1)
+        return r12
+
+    @application(inputs=['windows','h_con'], \
+                 outputs=['i12'])
+    def write(self, windows, h_con):
+        # decode attention parameters from the controller
+        l = self.readout.apply(h_con)
+        # get base attention parameters
+        center_y, center_x, delta, gamma1, gamma2 = self.zoomer.nn2att(l)
+        center_y = tensor.zeros_like(center_y) + 14.0
+        center_x = tensor.zeros_like(center_x) + 14.0
+        delta = tensor.ones_like(delta) * 2.0
+        gamma1 = tensor.ones_like(gamma1)
+        gamma2 = tensor.ones_like(gamma2)
+        # second write-out is at 2x the scale of first write-out
+        delta1 = 1.0 * delta
+        delta2 = 2.0 * delta
+        # compute filter bandwidth as linearly proportional to grid scale
+        sigma1 = self.sigma_scale[0] * delta1
+        sigma2 = self.sigma_scale[0] * delta2
+        # assume windows are taken from a read operation by this object
+        w1 = windows[:,:self.grid_dim]
+        w2 = windows[:,self.grid_dim:]
+        # perform local write operation at two different scales
+        i1 = self.zoomer.write(w1, center_y, center_x, delta1, sigma1)
+        i2 = self.zoomer.write(w2, center_y, center_x, delta2, sigma2)
+        i12 = tensor.concatenate([i1, i2], axis=1)
+        return i12
+
+    @application(inputs=['h_con'], outputs=['i12', 'i1', 'i2'])
+    def att_map(self, h_con):
+        """
+        Render a "heat map" of the attention region associated with this
+        controller input. Outputs are size (self.img_height, self.img_width).
+
+        Input:
+            h_con: controller vector, to be converted by self.readout.
+        Output:
+            i12: heat map for combined inner/outer foveated regions
+            i1: heat map for inner region
+            i2: heat map for outer region
+        """
+        # decode attention parameters from the controller
+        l = self.readout.apply(h_con)
+        # get base attention parameters
+        center_y, center_x, delta, gamma1, gamma2 = self.zoomer.nn2att(l)
+        center_y = tensor.zeros_like(center_y) + 14.0
+        center_x = tensor.zeros_like(center_x) + 14.0
+        delta = tensor.ones_like(delta) * 2.0
+        gamma1 = tensor.ones_like(gamma1)
+        gamma2 = tensor.ones_like(gamma2)
+        # make a dummy set of "read" responses -- use ones for all pixels
+        ones_window = tensor.alloc(1.0, h_con.shape[0], self.grid_dim)
+        # second write-out is at 2x the scale of first write-out
+        delta1 = 1.0 * delta
+        delta2 = 2.0 * delta
+        # compute filter bandwidth as linearly proportional to grid scale
+        sigma1 = self.sigma_scale[0] * delta1
+        sigma2 = self.sigma_scale[0] * delta2
+        # perform local write operation at two different scales
+        _i1 = self.zoomer.write(ones_window, center_y, center_x, delta1, sigma1)
+        _i2 = self.zoomer.write(ones_window, center_y, center_x, delta2, sigma2)
+        i1 = gamma1.dimshuffle(0,'x') * _i1
+        i2 = gamma2.dimshuffle(0,'x') * _i2
+        i12 = tensor.concatenate([i1, i2], axis=1)
+        return i12, i1, i2
 
     @application(inputs=['im','center_y','center_x','delta','gamma1','gamma2'], \
-                 outputs=['r'])
+                 outputs=['r12'])
     def direct_read(self, im, center_y, center_x, \
                     delta, gamma1, gamma2):
         # second read-out is at 2x the scale of first read-out
@@ -106,14 +178,14 @@ class SimpleAttentionReader2d(Initializable):
         # compute filter bandwidth as linearly proportional to grid scale
         sigma1 = self.sigma_scale[0] * delta1
         sigma2 = self.sigma_scale[0] * delta2
-
         # perform local read from x1 at two different scales
-        r1 = gamma1 * self.zoomer.read(im, center_y, center_x, delta1, sigma1)
-        r2 = gamma2 * self.zoomer.read(im, center_y, center_x, delta2, sigma2)
-        return tensor.concatenate([r1, r2], axis=1)
+        r1 = gamma1.dimshuffle(0,'x') * self.zoomer.read(im, center_y, center_x, delta1, sigma1)
+        r2 = gamma2.dimshuffle(0,'x') * self.zoomer.read(im, center_y, center_x, delta2, sigma2)
+        r12 = tensor.concatenate([r1, r2], axis=1)
+        return r12
 
     @application(inputs=['windows','center_y','center_x','delta'], \
-                 outputs=['i'])
+                 outputs=['i12'])
     def direct_write(self, windows, center_y, center_x, delta):
         # second write-out is at 2x the scale of first write-out
         delta1 = 1.0 * delta
@@ -121,15 +193,50 @@ class SimpleAttentionReader2d(Initializable):
         # compute filter bandwidth as linearly proportional to grid scale
         sigma1 = self.sigma_scale[0] * delta1
         sigma2 = self.sigma_scale[0] * delta2
-
         # assume windows are taken from a read operation by this object
         w1 = windows[:,:self.grid_dim]
         w2 = windows[:,self.grid_dim:]
-
         # perform local write operation at two different scales
         i1 = self.zoomer.write(w1, center_y, center_x, delta1, sigma1)
         i2 = self.zoomer.write(w2, center_y, center_x, delta2, sigma2)
-        return tensor.concatenate([i1, i2], axis=1)
+        i12 = tensor.concatenate([i1, i2], axis=1)
+        return i12
+
+    @application(inputs=['center_y','center_x','delta', 'gamma1', 'gamma2'], \
+                 outputs=['i12', 'i1', 'i2'])
+    def direct_att_map(self, center_y, center_x, delta, gamma1, gamma2):
+        """
+        Render a "heat map" of the attention region associated with this
+        controller input. Outputs are size (self.img_height, self.img_width).
+
+        Input:
+            center_y: y coordinate of foveated attention grids.
+            center_x: x coordinate of foveated attention grids.
+            delta: shared scale for foveated attention grids.
+            gamma1: (non-negative) amplification for the inner grid
+            gamma2: (non-negative) amplification for the outer grid
+        Output:
+            i12: heat map for combined inner/outer foveated regions
+            i1: heat map for inner region
+            i2: heat map for outer region
+        """
+        # make a dummy set of "read" responses -- use ones for all pixels
+        ones_window = tensor.alloc(1.0, center_y.shape[0], self.grid_dim)
+        # second write-out is at 2x the scale of first write-out
+        delta1 = 1.0 * delta
+        delta2 = 2.0 * delta
+        # compute filter bandwidth as linearly proportional to grid scale
+        sigma1 = self.sigma_scale[0] * delta1
+        sigma2 = self.sigma_scale[0] * delta2
+        # perform local write operation at two different scales
+        _i1 = self.zoomer.write(ones_window, center_y, center_x, delta1, sigma1)
+        _i2 = self.zoomer.write(ones_window, center_y, center_x, delta2, sigma2)
+        i1 = gamma1.dimshuffle(0,'x') * _i1
+        i2 = gamma2.dimshuffle(0,'x') * _i2
+        i12 = tensor.concatenate([i1, i2], axis=1)
+        return i12, i1, i2
+
+
 
 
 ##############################################################
@@ -798,7 +905,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
     #------------------------------------------------------------------------
 
     @application(inputs=['x', 'y'],
-                 outputs=['nlls', 'kl_q2ps', 'kl_p2qs'])
+                 outputs=['cs', 'h_cons', 'nlls', 'kl_q2ps', 'kl_p2qs'])
     def process_inputs(self, x, y):
         # get important size and shape information
         batch_size = x.shape[0]
@@ -825,7 +932,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
                     avg=0., std=1.)
 
         # run the multi-stage guided generative process
-        c, _, _, _, _, _, _, nlls, kl_q2ps, kl_p2qs = \
+        cs, h_cons, _, _, _, _, _, nlls, kl_q2ps, kl_p2qs = \
                 self.iterate(u=u, nll_scale=self.nll_scales, c=c0, \
                              h_con=hc0, c_con=cc0, \
                              h_gen=hg0, c_gen=cg0, \
@@ -833,10 +940,12 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
                              x=x, y=y)
 
         # add name tags to the constructed values
+        cs.name = "cs"
+        h_cons.name = "h_cons"
         nlls.name = "nlls"
         kl_q2ps.name = "kl_q2ps"
         kl_p2qs.name = "kl_p2qs"
-        return nlls, kl_q2ps, kl_p2qs
+        return cs, h_cons, nlls, kl_q2ps, kl_p2qs
 
     def build_model_funcs(self):
         """
@@ -847,7 +956,8 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         self.y_sym = tensor.matrix('y_sym')
 
         # collect estimates of y given x produced by this model
-        nlls, kl_q2ps, kl_p2qs = self.process_inputs(self.x_sym, self.y_sym)
+        cs, h_cons, nlls, kl_q2ps, kl_p2qs = \
+                self.process_inputs(self.x_sym, self.y_sym)
 
         # get the expected NLL part of the VFE bound
         self.nll_term = nlls.sum(axis=0).mean()
@@ -909,6 +1019,50 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         print("Compiling NLL bound estimator function...")
         self.compute_nll_bound = theano.function(inputs=inputs, \
                                                  outputs=outputs)
+        print("Compiling trajectory sampler...")
+        self.sample_trajectories = theano.function(inputs=inputs, \
+                                                   outputs=[cs, h_cons])
+        return
+
+    def build_attention_funcs(self):
+        """
+        Build functions for playing with this model, under the assumption
+        that self.reader_mlp is a SimpleAttentionReader2d.
+        """
+        # some symbolic vars to represent various inputs/outputs
+        x_sym = tensor.matrix('x_sym_att_funcs')
+        y_sym = tensor.matrix('y_sym_att_funcs')
+        # collect trajectory information from the model
+        cs, h_cons, _, _, _ = self.process_inputs(x_sym, y_sym)
+        # construct "read-outs" and "heat maps" for the controller trajectories
+        # in h_cons and the inputs in self.x_sym.
+        xs_list = []
+        att_map_list = []
+        read_out_list = []
+        for i in range(self.total_steps):
+            # convert the generated c for this step into x space
+            xs_list.append(tensor.nnet.sigmoid(cs[i]))
+            # get the attention heat map for this step, for all observations
+            # in the input batch
+            att_map_i, _, _ = self.reader_mlp.att_map(h_cons[i])
+            # get the attention read out for this step, for all observations
+            # in the input batch
+            raw_read_i = self.reader_mlp.apply(x_sym, x_sym, h_cons[i])
+            # get the attention read outs, written back into x space.
+            read_out_i = self.reader_mlp.write(raw_read_i, h_cons[i])
+            # add the results to the list of per-step results
+            att_map_list.append(att_map_i)
+            read_out_list.append(read_out_i)
+        # stack the per-step result lists into a symbolic theano tensor
+        xs_stack = tensor.stack(*xs_list)
+        att_map_stack = tensor.stack(*att_map_list)
+        read_out_stack = tensor.stack(*read_out_list)
+        # build the function for computing the attention trajectories
+        print("Compiling attention tracker...")
+        inputs = [x_sym, y_sym]
+        outputs = [xs_stack, att_map_stack, read_out_stack]
+        self.sample_attention = theano.function(inputs=inputs, \
+                                                outputs=outputs)
         return
 
     def get_model_params(self, ary_type='numpy'):

@@ -28,7 +28,7 @@ from blocks.bricks.recurrent import SimpleRecurrent, LSTM
 # phil's sweetness
 import utils
 from BlocksModels import *
-from SRRBlocks import ImgScan, SeqCondGen
+from SRRBlocks import *
 from DKCode import get_adam_updates, get_adadelta_updates
 from load_data import load_udm, load_tfd, load_svhn_gray, load_binarized_mnist
 from HelperFuncs import construct_masked_data, shift_and_scale_into_01, \
@@ -81,11 +81,11 @@ def test_img_scan(attention=False):
 
     # setup the reader and writer
     if attention:
-        # read_N, write_N = (2, 5) # resolution of reader and writer
-        # read_dim = 2*read_N**2   # total number of "pixels" read by reader
-        # reader_mlp = AttentionReader(x_dim=x_dim, dec_dim=rnn_dim,
-        #                          width=28, height=28,
-        #                          N=read_N, **inits)
+        read_N = 5 # inner/outer grid dimension for reader
+        read_dim = 2*read_N**2   # total number of "pixels" read by reader
+        reader_mlp = SimpleAttentionReader2d(x_dim=x_dim, con_dim=rnn_dim,
+                                             width=28, height=28,
+                                             N=read_N, **inits)
         att_tag = "YA"
     else:
         read_dim = 2*x_dim
@@ -111,13 +111,13 @@ def test_img_scan(attention=False):
     mem_mlp_out = MLP([Identity()], [rnn_dim, 2*rnn_dim], \
                       name="mem_mlp_out", **inits)
     # LSTMs for the actual LSTMs (obviously, perhaps)
-    con_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
+    con_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=3.0, fg_bias=3.0, \
                          name="con_rnn", **rnninits)
-    gen_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
+    gen_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=3.0, fg_bias=3.0, \
                          name="gen_rnn", **rnninits)
-    var_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
+    var_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=3.0, fg_bias=3.0, \
                          name="var_rnn", **rnninits)
-    mem_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
+    mem_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=3.0, fg_bias=3.0, \
                          name="mem_rnn", **rnninits)
 
     ImgScan_doc_str = \
@@ -242,6 +242,11 @@ def test_img_scan(attention=False):
 #############################################
 
 def test_seq_cond_gen(step_type='add', attention=False):
+    ##############################
+    # File tag, for output stuff #
+    ##############################
+    result_tag = "SCG"
+
     ##########################
     # Get some training data #
     ##########################
@@ -273,7 +278,6 @@ def test_seq_cond_gen(step_type='add', attention=False):
     write_dim = 200
     mlp_dim = 250
 
-
     rnninits = {
         'weights_init': IsotropicGaussian(0.01),
         'biases_init': Constant(0.),
@@ -283,18 +287,13 @@ def test_seq_cond_gen(step_type='add', attention=False):
         'biases_init': Constant(0.),
     }
 
-    # setup the reader and writer
-    if attention:
-        # read_N, write_N = (2, 5) # resolution of reader and writer
-        # read_dim = 2*read_N**2   # total number of "pixels" read by reader
-        # reader_mlp = AttentionReader(x_dim=x_dim, dec_dim=rnn_dim,
-        #                          width=28, height=28,
-        #                          N=read_N, **inits)
-        att_tag = "YA"
-    else:
-        read_dim = 2*x_dim
-        reader_mlp = Reader(x_dim=x_dim, dec_dim=rnn_dim, **inits)
-        att_tag = "NA"
+    read_N = 5 # inner/outer grid dimension for reader
+    read_dim = 2*read_N**2   # total number of "pixels" read by reader
+    grid_dim = read_N**2     # number of pixels at each read scale
+    reader_mlp = SimpleAttentionReader2d(x_dim=x_dim, con_dim=rnn_dim,
+                                         width=28, height=28,
+                                         N=read_N, **inits)
+
     writer_mlp = MLP([None, None], [rnn_dim, write_dim, y_dim], \
                      name="writer_mlp", **inits)
 
@@ -311,11 +310,11 @@ def test_seq_cond_gen(step_type='add', attention=False):
     var_mlp_out = CondNet([], [rnn_dim, z_dim], name="var_mlp_out", **inits)
 
     # LSTMs for the actual LSTMs (obviously, perhaps)
-    con_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
+    con_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=3.0, fg_bias=3.0, \
                          name="con_rnn", **rnninits)
-    gen_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
+    gen_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=3.0, fg_bias=3.0, \
                          name="gen_rnn", **rnninits)
-    var_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
+    var_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=3.0, fg_bias=3.0, \
                          name="var_rnn", **rnninits)
 
     SeqCondGen_doc_str = \
@@ -366,6 +365,44 @@ def test_seq_cond_gen(step_type='add', attention=False):
                 var_rnn=var_rnn)
     SCG.initialize()
 
+    #########################################
+    # BUILD AND TEST ATTENTION INFO SAMPLER #
+    #########################################
+    SCG.build_attention_funcs()
+    samp_count = 100
+    Xb = to_fX(Xtr[:samp_count,:])
+    result = SCG.sample_attention(Xb, Xb)
+    for i in range(len(result)):
+        print("result[{}].shape: {}".format(i, result[i].shape))
+    seq_len = result[0].shape[0]
+    # get generated predictions
+    seq_samps = np.zeros((seq_len*samp_count, x_dim))
+    idx = 0
+    for s1 in range(samp_count):
+        for s2 in range(seq_len):
+            seq_samps[idx] = result[0][s2,s1,:]
+            idx += 1
+    file_name = "{0:s}_traj_xs_ng_b{1:d}.png".format(result_tag, i)
+    utils.visualize_samples(seq_samps, file_name, num_rows=20)
+    # get sequential attention maps
+    seq_samps = np.zeros((seq_len*samp_count, x_dim))
+    idx = 0
+    for s1 in range(samp_count):
+        for s2 in range(seq_len):
+            seq_samps[idx] = result[1][s2,s1,:x_dim] + result[1][s2,s1,x_dim:]
+            idx += 1
+    file_name = "{0:s}_traj_att_maps_ng_b{1:d}.png".format(result_tag, i)
+    utils.visualize_samples(seq_samps, file_name, num_rows=20)
+    # get sequential attention maps (read out values)
+    seq_samps = np.zeros((seq_len*samp_count, x_dim))
+    idx = 0
+    for s1 in range(samp_count):
+        for s2 in range(seq_len):
+            seq_samps[idx] = result[2][s2,s1,:x_dim] + result[2][s2,s1,x_dim:]
+            idx += 1
+    file_name = "{0:s}_traj_read_outs_ng_b{1:d}.png".format(result_tag, i)
+    utils.visualize_samples(seq_samps, file_name, num_rows=20)
+
     # build the cost gradients, training function, samplers, etc.
     SCG.build_model_funcs()
 
@@ -375,7 +412,7 @@ def test_seq_cond_gen(step_type='add', attention=False):
     # Apply some updates, to check that they aren't totally broken #
     ################################################################
     print("Beginning to train the model...")
-    out_file = open("SCG_results.txt", 'wb')
+    out_file = open("{}_results.txt".format(result_tag), 'wb')
     out_file.flush()
     costs = [0. for i in range(10)]
     learn_rate = 0.0001
@@ -421,7 +458,7 @@ def test_seq_cond_gen(step_type='add', attention=False):
             out_file.flush()
             costs = [0.0 for v in costs]
         if ((i % 1000) == 0):
-            SCG.save_model_params("SCG_params.pkl")
+            SCG.save_model_params("{}_params.pkl".format(result_tag))
             # compute a small-sample estimate of NLL bound on validation set
             Xva = row_shuffle(Xva)
             Xb = to_fX(Xva[:1000])
@@ -436,4 +473,4 @@ def test_seq_cond_gen(step_type='add', attention=False):
 
 if __name__=="__main__":
     #test_img_scan(attention=False)
-    test_seq_cond_gen(step_type='add', attention=False)
+    test_seq_cond_gen(step_type='add')

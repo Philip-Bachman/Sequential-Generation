@@ -78,7 +78,7 @@ def test_mnist(step_type='add',
     s_dim = x_dim
     h_dim = 50
     z_dim = 100
-    init_scale = 1.0
+    init_scale = 0.6
 
     x_in_sym = T.matrix('x_in_sym')
     x_out_sym = T.matrix('x_out_sym')
@@ -94,7 +94,7 @@ def test_mnist(step_type='add',
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
     params['activation'] = tanh_actfun #relu_actfun
-    params['init_scale'] = 'xg' #init_scale
+    params['init_scale'] = init_scale
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
     params['bias_noise'] = 0.0
@@ -112,7 +112,7 @@ def test_mnist(step_type='add',
     params['shared_config'] = shared_config
     params['output_config'] = output_config
     params['activation'] = tanh_actfun #relu_actfun
-    params['init_scale'] = 'xg' #init_scale
+    params['init_scale'] = init_scale
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
     params['bias_noise'] = 0.0
@@ -131,7 +131,7 @@ def test_mnist(step_type='add',
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
     params['activation'] = tanh_actfun #relu_actfun
-    params['init_scale'] = 'xg' #init_scale
+    params['init_scale'] = init_scale
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
     params['bias_noise'] = 0.0
@@ -149,7 +149,7 @@ def test_mnist(step_type='add',
     params['shared_config'] = shared_config
     params['output_config'] = output_config
     params['activation'] = tanh_actfun #relu_actfun
-    params['init_scale'] = 'xg' #init_scale
+    params['init_scale'] = init_scale
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
     params['bias_noise'] = 0.0
@@ -167,7 +167,7 @@ def test_mnist(step_type='add',
     params['shared_config'] = shared_config
     params['output_config'] = output_config
     params['activation'] = tanh_actfun #relu_actfun
-    params['init_scale'] = 'xg' #init_scale
+    params['init_scale'] = init_scale
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
     params['bias_noise'] = 0.0
@@ -186,7 +186,7 @@ def test_mnist(step_type='add',
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
     params['activation'] = tanh_actfun #relu_actfun
-    params['init_scale'] = 'xg' #init_scale
+    params['init_scale'] = init_scale
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
     params['bias_noise'] = 0.0
@@ -205,7 +205,7 @@ def test_mnist(step_type='add',
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
     params['activation'] = tanh_actfun #relu_actfun
-    params['init_scale'] = 'xg' #init_scale
+    params['init_scale'] = init_scale
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
     params['bias_noise'] = 0.0
@@ -271,7 +271,8 @@ def test_mnist(step_type='add',
                             mom_1=scale*momentum, mom_2=0.98)
         GPSI.set_train_switch(1.0)
         GPSI.set_lam_nll(lam_nll=1.0)
-        GPSI.set_lam_kld(lam_kld_p=0.05, lam_kld_q=0.95, lam_kld_g=(0.1 * lam_scale))
+        GPSI.set_lam_kld(lam_kld_p=0.05, lam_kld_q=0.95, \
+                         lam_kld_g=(0.1 * lam_scale), lam_kld_s=(0.1 * lam_scale))
         GPSI.set_lam_l2w(1e-5)
         # perform a minibatch update and record the cost for this batch
         xb = to_fX( Xtr.take(batch_idx, axis=0) )
@@ -328,19 +329,18 @@ def test_mnist(step_type='add',
                     idx += 1
             file_name = "{0:s}_samples_ng_b{1:d}.png".format(result_tag, i)
             utils.visualize_samples(seq_samps, file_name, num_rows=20)
-            # get visualizations of policy parameters
-            # file_name = "{0:s}_gen_step_weights_b{1:d}.png".format(result_tag, i)
-            # W = GPSI.gen_step_weights.get_value(borrow=False)
-            # utils.visualize_samples(W[:,:x_dim], file_name, num_rows=20)
-            # file_name = "{0:s}_gen_write_gate_weights_b{1:d}.png".format(result_tag, i)
-            # W = GPSI.gen_write_gate_weights.get_value(borrow=False)
-            # utils.visualize_samples(W[:,:x_dim], file_name, num_rows=20)
-            # file_name = "{0:s}_gen_erase_gate_weights_b{1:d}.png".format(result_tag, i)
-            # W = GPSI.gen_erase_gate_weights.get_value(borrow=False)
-            # utils.visualize_samples(W[:,:x_dim], file_name, num_rows=20)
-            # file_name = "{0:s}_gen_inf_weights_b{1:d}.png".format(result_tag, i)
-            # W = GPSI.gen_inf_weights.get_value(borrow=False).T
-            # utils.visualize_samples(W[:,:x_dim], file_name, num_rows=20)
+            # show KLds and NLLs on a step-by-step basis
+            xb = to_fX( Xva[0:1000] )
+            xi, xo, xm = construct_masked_data(xb, drop_prob=drop_prob, \
+                                    occ_dim=occ_dim, data_mean=data_mean)
+            step_costs = GPSI.compute_per_step_cost(xi, xo, xm)
+            step_nlls = step_costs[0]
+            step_klds = step_costs[1]
+            step_nums = np.arange(step_nlls.shape[0])
+            file_name = "{0:s}_NLL_b{1:d}.png".format(result_tag, i)
+            utils.plot_stem(step_nums, step_nlls, file_name)
+            file_name = "{0:s}_KLD_b{1:d}.png".format(result_tag, i)
+            utils.plot_stem(step_nums, step_klds, file_name)
 
 #################################
 #################################
@@ -462,6 +462,7 @@ if __name__=="__main__":
     test_mnist(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
     #test_mnist(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
     #test_mnist(step_type='add', imp_steps=15, occ_dim=0, drop_prob=0.9)
+    #test_mnist(step_type='add', imp_steps=10, occ_dim=0, drop_prob=1.0)
 
     # RESULTS
     # test_mnist_results(step_type='add', occ_dim=14, drop_prob=0.0)
@@ -478,6 +479,6 @@ if __name__=="__main__":
     # test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.9)
     #test_mnist_results(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
     #test_mnist_results(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
-    test_mnist_results(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
+    #test_mnist_results(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
     #test_mnist_results(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
     #test_mnist_results(step_type='add', imp_steps=15, occ_dim=0, drop_prob=0.9)
