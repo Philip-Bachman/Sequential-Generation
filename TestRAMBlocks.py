@@ -28,11 +28,13 @@ from blocks.bricks.recurrent import SimpleRecurrent, LSTM
 # phil's sweetness
 import utils
 from BlocksModels import *
-from SRRBlocks import *
+from RAMBlocks import *
 from DKCode import get_adam_updates, get_adadelta_updates
 from load_data import load_udm, load_tfd, load_svhn_gray, load_binarized_mnist
 from HelperFuncs import construct_masked_data, shift_and_scale_into_01, \
                         row_shuffle, to_fX
+
+RESULT_PATH = "RAM_TEST_RESULTS/"
 
 ################################
 ################################
@@ -84,8 +86,8 @@ def test_img_scan(attention=False):
         read_N = 5 # inner/outer grid dimension for reader
         read_dim = 2*read_N**2   # total number of "pixels" read by reader
         reader_mlp = SimpleAttentionReader2d(x_dim=x_dim, con_dim=rnn_dim,
-                                             width=28, height=28,
-                                             N=read_N, **inits)
+                                             width=28, height=28, N=read_N,
+                                             init_scale=2.0, **inits)
         att_tag = "YA"
     else:
         read_dim = 2*x_dim
@@ -241,11 +243,11 @@ def test_img_scan(attention=False):
 #############################################
 #############################################
 
-def test_seq_cond_gen(step_type='add', attention=False):
+def test_seq_cond_gen(step_type='add'):
     ##############################
     # File tag, for output stuff #
     ##############################
-    result_tag = "SCG"
+    result_tag = "{}SCG".format(RESULT_PATH)
 
     ##########################
     # Get some training data #
@@ -269,7 +271,7 @@ def test_seq_cond_gen(step_type='add', attention=False):
     # Setup some parameters for the Iterative Refinement Model #
     ############################################################
     total_steps = 15
-    init_steps = 5
+    init_steps = 4
     exit_rate = 0.2
     x_dim = 784
     y_dim = 784
@@ -287,12 +289,12 @@ def test_seq_cond_gen(step_type='add', attention=False):
         'biases_init': Constant(0.),
     }
 
-    read_N = 5 # inner/outer grid dimension for reader
+    read_N = 3 # inner/outer grid dimension for reader
     read_dim = 2*read_N**2   # total number of "pixels" read by reader
     grid_dim = read_N**2     # number of pixels at each read scale
     reader_mlp = SimpleAttentionReader2d(x_dim=x_dim, con_dim=rnn_dim,
-                                         width=28, height=28,
-                                         N=read_N, **inits)
+                                         width=28, height=28, N=read_N,
+                                         init_scale=2.0, **inits)
 
     writer_mlp = MLP([None, None], [rnn_dim, write_dim, y_dim], \
                      name="writer_mlp", **inits)
@@ -365,24 +367,24 @@ def test_seq_cond_gen(step_type='add', attention=False):
                 var_rnn=var_rnn)
     SCG.initialize()
 
-    #########################################
-    # BUILD AND TEST ATTENTION INFO SAMPLER #
-    #########################################
+    # build the cost gradients, training function, samplers, etc.
     SCG.build_attention_funcs()
+
+    ###########################################
+    # Sample and draw attention trajectories. #
+    ###########################################
     samp_count = 100
-    Xb = to_fX(Xtr[:samp_count,:])
+    Xb = to_fX(Xva[:samp_count,:])
     result = SCG.sample_attention(Xb, Xb)
-    for i in range(len(result)):
-        print("result[{}].shape: {}".format(i, result[i].shape))
     seq_len = result[0].shape[0]
     # get generated predictions
-    seq_samps = np.zeros((seq_len*samp_count, x_dim))
+    seq_samps = np.zeros((seq_len*samp_count, y_dim))
     idx = 0
     for s1 in range(samp_count):
         for s2 in range(seq_len):
             seq_samps[idx] = result[0][s2,s1,:]
             idx += 1
-    file_name = "{0:s}_traj_xs_ng_b{1:d}.png".format(result_tag, i)
+    file_name = "{0:s}_traj_ys.png".format(result_tag)
     utils.visualize_samples(seq_samps, file_name, num_rows=20)
     # get sequential attention maps
     seq_samps = np.zeros((seq_len*samp_count, x_dim))
@@ -391,7 +393,7 @@ def test_seq_cond_gen(step_type='add', attention=False):
         for s2 in range(seq_len):
             seq_samps[idx] = result[1][s2,s1,:x_dim] + result[1][s2,s1,x_dim:]
             idx += 1
-    file_name = "{0:s}_traj_att_maps_ng_b{1:d}.png".format(result_tag, i)
+    file_name = "{0:s}_traj_att_maps.png".format(result_tag)
     utils.visualize_samples(seq_samps, file_name, num_rows=20)
     # get sequential attention maps (read out values)
     seq_samps = np.zeros((seq_len*samp_count, x_dim))
@@ -400,10 +402,9 @@ def test_seq_cond_gen(step_type='add', attention=False):
         for s2 in range(seq_len):
             seq_samps[idx] = result[2][s2,s1,:x_dim] + result[2][s2,s1,x_dim:]
             idx += 1
-    file_name = "{0:s}_traj_read_outs_ng_b{1:d}.png".format(result_tag, i)
+    file_name = "{0:s}_traj_read_outs.png".format(result_tag)
     utils.visualize_samples(seq_samps, file_name, num_rows=20)
 
-    # build the cost gradients, training function, samplers, etc.
     SCG.build_model_funcs()
 
     #SCG.load_model_params(f_name="SCG_params.pkl")
@@ -437,12 +438,12 @@ def test_seq_cond_gen(step_type='add', attention=False):
         SCG.lr.set_value(to_fX(zero_ary + learn_rate))
         SCG.mom_1.set_value(to_fX(zero_ary + momentum))
         SCG.mom_2.set_value(to_fX(zero_ary + 0.99))
-
         # perform a minibatch update and record the cost for this batch
         Xb = to_fX(Xtr.take(batch_idx, axis=0))
         result = SCG.train_joint(Xb, Xb)
-
         costs = [(costs[j] + result[j]) for j in range(len(result))]
+
+        # output diagnostic information and checkpoint parameters, etc.
         if ((i % 100) == 0):
             costs = [(v / 100.0) for v in costs]
             str1 = "-- batch {0:d} --".format(i)
@@ -457,7 +458,7 @@ def test_seq_cond_gen(step_type='add', attention=False):
             out_file.write(joint_str+"\n")
             out_file.flush()
             costs = [0.0 for v in costs]
-        if ((i % 1000) == 0):
+        if ((i % 200) == 0): #((i % 1000) == 0):
             SCG.save_model_params("{}_params.pkl".format(result_tag))
             # compute a small-sample estimate of NLL bound on validation set
             Xva = row_shuffle(Xva)
@@ -470,6 +471,40 @@ def test_seq_cond_gen(step_type='add', attention=False):
             print(joint_str)
             out_file.write(joint_str+"\n")
             out_file.flush()
+            ###########################################
+            # Sample and draw attention trajectories. #
+            ###########################################
+            samp_count = 100
+            Xb = to_fX(Xva[:samp_count,:])
+            result = SCG.sample_attention(Xb, Xb)
+            seq_len = result[0].shape[0]
+            # get generated predictions
+            seq_samps = np.zeros((seq_len*samp_count, y_dim))
+            idx = 0
+            for s1 in range(samp_count):
+                for s2 in range(seq_len):
+                    seq_samps[idx] = result[0][s2,s1,:]
+                    idx += 1
+            file_name = "{0:s}_traj_ys_b{1:d}.png".format(result_tag, i)
+            utils.visualize_samples(seq_samps, file_name, num_rows=20)
+            # get sequential attention maps
+            seq_samps = np.zeros((seq_len*samp_count, x_dim))
+            idx = 0
+            for s1 in range(samp_count):
+                for s2 in range(seq_len):
+                    seq_samps[idx] = result[1][s2,s1,:x_dim] + result[1][s2,s1,x_dim:]
+                    idx += 1
+            file_name = "{0:s}_traj_att_maps_b{1:d}.png".format(result_tag, i)
+            utils.visualize_samples(seq_samps, file_name, num_rows=20)
+            # get sequential attention maps (read out values)
+            seq_samps = np.zeros((seq_len*samp_count, x_dim))
+            idx = 0
+            for s1 in range(samp_count):
+                for s2 in range(seq_len):
+                    seq_samps[idx] = result[2][s2,s1,:x_dim] + result[2][s2,s1,x_dim:]
+                    idx += 1
+            file_name = "{0:s}_traj_read_outs_b{1:d}.png".format(result_tag, i)
+            utils.visualize_samples(seq_samps, file_name, num_rows=20)
 
 if __name__=="__main__":
     #test_img_scan(attention=False)

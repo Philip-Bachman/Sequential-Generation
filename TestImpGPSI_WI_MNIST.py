@@ -94,7 +94,7 @@ def test_mnist(step_type='add',
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
     params['activation'] = tanh_actfun #relu_actfun
-    params['init_scale'] = init_scale
+    params['init_scale'] = 'xg' #init_scale
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
     params['bias_noise'] = 0.0
@@ -112,7 +112,7 @@ def test_mnist(step_type='add',
     params['shared_config'] = shared_config
     params['output_config'] = output_config
     params['activation'] = tanh_actfun #relu_actfun
-    params['init_scale'] = init_scale
+    params['init_scale'] = 'xg' #init_scale
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
     params['bias_noise'] = 0.0
@@ -186,7 +186,7 @@ def test_mnist(step_type='add',
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
     params['activation'] = tanh_actfun #relu_actfun
-    params['init_scale'] = init_scale
+    params['init_scale'] = 'xg' #init_scale
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
     params['bias_noise'] = 0.0
@@ -459,10 +459,10 @@ if __name__=="__main__":
     #test_mnist(step_type='jump', occ_dim=0, drop_prob=0.8)
     #test_mnist(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
     #test_mnist(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
-    test_mnist(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
+    #test_mnist(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
     #test_mnist(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
     #test_mnist(step_type='add', imp_steps=15, occ_dim=0, drop_prob=0.9)
-    #test_mnist(step_type='add', imp_steps=10, occ_dim=0, drop_prob=1.0)
+    test_mnist(step_type='add', imp_steps=10, occ_dim=0, drop_prob=1.0)
 
     # RESULTS
     # test_mnist_results(step_type='add', occ_dim=14, drop_prob=0.0)
