@@ -31,7 +31,7 @@ def my_batched_dot(A, B):
 
 #-----------------------------------------------------------------------------
 
-class ZoomableAttentionWindow(object):
+class ZoomableAttention2d(object):
     def __init__(self, img_height, img_width, N, init_scale=2.0):
         """
         A zoomable attention window for images.
@@ -86,7 +86,7 @@ class ZoomableAttentionWindow(object):
         -------
             FY, FX
         """
-        tol = 1e-4
+        tol = 1e-3
         # construct x and y coordinates for the grid points
         grid_x = center_x.dimshuffle([0, 'x']) + \
                 (delta.dimshuffle([0, 'x']) * self.grid_offsets)
@@ -100,11 +100,11 @@ class ZoomableAttentionWindow(object):
                    (2. * sigma.dimshuffle([0,'x','x'])**2.) )
 
         # normalize the attention weights (1 / (sigma * sqrt(2*pi)))
-        Z = sigma.dimshuffle([0,'x','x'])**(-1.0) * (1.0 / 6.283**0.5)
-        FX = Z * FX
-        FY = Z * FY
-        #FX = FX / (FX.sum(axis=-1).dimshuffle(0, 1, 'x') + tol)
-        #FY = FY / (FY.sum(axis=-1).dimshuffle(0, 1, 'x') + tol)
+        #Z = sigma.dimshuffle([0,'x','x'])**(-1.0) * (1.0 / 6.283**0.5)
+        #FX = Z * FX
+        #FY = Z * FY
+        FX = FX / (FX.sum(axis=-1).dimshuffle(0, 1, 'x') + tol)
+        FY = FY / (FY.sum(axis=-1).dimshuffle(0, 1, 'x') + tol)
         return FY, FX
 
 
@@ -224,7 +224,7 @@ class ZoomableAttentionWindow(object):
 
 #=============================================================================
 
-class ZoomableAttentionWindow1d(object):
+class ZoomableAttention1d(object):
     def __init__(self, input_dim, N, init_scale=2.0):
         """
         A zoomable attention window for 1-dimensional inputs.
@@ -263,7 +263,7 @@ class ZoomableAttentionWindow1d(object):
         Parameters
         ----------
         center_x : T.vector (shape: batch_size)
-            Y and X center coordinates for the attention window
+                   Y and X center coordinates for the attention window
         delta : T.vector (shape: batch_size)
         sigma : T.vector (shape: batch_size)
 
@@ -272,7 +272,7 @@ class ZoomableAttentionWindow1d(object):
             FX : N gaussian blob filters for each input in batch
                  -- shape: (batch_size, N, input_dim)
         """
-        tol = 1e-4
+        tol = 1e-3
         # construct x and y coordinates for the grid points
         #   -- grid_x.shape = (batch_size, N)
         grid_x = center_x.dimshuffle([0, 'x']) + \
@@ -281,9 +281,9 @@ class ZoomableAttentionWindow1d(object):
         FX = T.exp( -(self.x_coords - grid_x.dimshuffle([0,1,'x']))**2. / \
                    (2. * sigma.dimshuffle([0,'x','x'])**2.) )
         # normalize the attention weights (1 / (sigma * sqrt(2*pi)))
-        Z = sigma.dimshuffle([0,'x','x'])**(-1.0) * (1.0 / 6.283**0.5)
-        FX = Z * FX
-        #FX = FX / (FX.sum(axis=-1).dimshuffle(0, 1, 'x') + tol)
+        #Z = sigma.dimshuffle([0,'x','x'])**(-1.0) * (1.0 / 6.283**0.5)
+        #FX = Z * FX
+        FX = FX / (FX.sum(axis=-1).dimshuffle(0, 1, 'x') + tol)
         return FX
 
 
@@ -309,7 +309,7 @@ class ZoomableAttentionWindow1d(object):
         Returns
         -------
         windows : :class:`~tensor.TensorVariable`
-            extracted windows of shape: (batch_size x N)
+                  extracted windows of shape: (batch_size x N)
         """
         N = self.N
         batch_size = inputs.shape[0]
@@ -320,38 +320,41 @@ class ZoomableAttentionWindow1d(object):
         W = _W.sum(axis=-2)
         return W
 
-    # def write(self, windows, center_x, delta, sigma):
-    #     """
-    #     Write a batch of windows into full sized inputs.
-    #
-    #     Parameters
-    #     ----------
-    #     windows : :class:`~tensor.TensorVariable`
-    #         Batch of values to write to empty inputs.
-    #         Expected shape: (batch_size, N)
-    #     center_x : :class:`~tensor.TensorVariable`
-    #         Center coordinates for the attention window.
-    #         Expected shape: (batch_size,)
-    #     delta : :class:`~tensor.TensorVariable`
-    #         Distance between extracted grid points.
-    #         Expected shape: (batch_size,)
-    #     sigma : :class:`~tensor.TensorVariable`
-    #         Std. dev. for Gaussian readout kernel.
-    #         Expected shape: (batch_size,)
-    #
-    #     Returns
-    #     -------
-    #     outputs : :class:`~tensor.TensorVariable`
-    #         extracted windows of shape: (batch_size x input_dim)
-    #     """
-    #     N = self.N
-    #     batch_size = windows.shape[0]
-    #     # Get separable filterbank
-    #     FX = self.filterbank_matrix(center_x, delta, sigma)
-    #     # apply...
-    #     outputs = my_batched_dot(my_batched_dot(FY.transpose([0,2,1]), W), FX)
-    #
-    #     return outputs
+    def write(self, windows, center_x, delta, sigma):
+        """
+        Write a batch of windows into full sized inputs.
+
+        Parameters
+        ----------
+        windows : :class:`~tensor.TensorVariable`
+                  Batch of values to write to empty inputs.
+                  Expected shape: (batch_size, N)
+        center_x : :class:`~tensor.TensorVariable`
+                   Center coordinates for the attention window.
+                   Expected shape: (batch_size,)
+        delta : :class:`~tensor.TensorVariable`
+                Distance between extracted grid points.
+                Expected shape: (batch_size,)
+        sigma : :class:`~tensor.TensorVariable`
+                Std. dev. for Gaussian readout kernel.
+                Expected shape: (batch_size,)
+
+        Returns
+        -------
+        outputs : :class:`~tensor.TensorVariable`
+                  extracted windows of shape: (batch_size x input_dim)
+        """
+        # Get separable filterbank
+        FX = self.filterbank_matrix(center_x, delta, sigma)
+        # compute the output -- we can figure this out with "shape analysis"
+        #   windows.shape = (batch_size, N)
+        #   FX.shape = (batch_size, N, input_dim)
+        #   outputs.shape = (batch_size, input_dim)
+        # so... do dimshuffle on windows, then do elementwise multiply with FX,
+        # and then aggregate over the length-N axis by a sum...
+        _outputs = FX * windows.dimshuffle(0, 1, 'x')
+        outputs = _outputs.sum(axis=-2)
+        return outputs
 
     def nn2att(self, l):
         """
@@ -391,21 +394,37 @@ class ZoomableAttentionWindow1d(object):
 ###############
 
 if __name__ == "__main__":
-    zoom_1d = ZoomableAttentionWindow1d(input_dim=10, N=3, init_scale=2.0)
+    input_dim = 10
+    N = 3
+    zoom_1d = ZoomableAttention1d(input_dim=input_dim, N=N, init_scale=2.0)
     _center_x = T.vector()
     _delta = T.vector()
     _sigma = T.vector()
     _inputs = T.matrix()
+    _windows = T.matrix()
     _F = zoom_1d.filterbank_matrix(_center_x, _delta, _sigma)
     _R = zoom_1d.read(_inputs, _center_x, _delta, _sigma)
+    _W = zoom_1d.write(_windows, _center_x, _delta, _sigma)
     test_filterbank_matrix = theano.function( \
             inputs=[_center_x, _delta, _sigma], outputs=_F)
     test_read = theano.function( \
             inputs=[_inputs, _center_x, _delta, _sigma], outputs=_R)
+    test_write = theano.function( \
+            inputs=[_windows, _center_x, _delta, _sigma], outputs=_W)
 
-    center_x = np.zeros((5,)).astype(theano.config.floatX)
-    delta = np.ones((5,)).astype(theano.config.floatX)
+    batch_size = 5
+    inputs = npr.rand(batch_size, input_dim).astype(theano.config.floatX)
+    windows = npr.rand(batch_size, N).astype(theano.config.floatX)
+    center_x = np.zeros((batch_size,)).astype(theano.config.floatX)
+    delta = np.ones((batch_size,)).astype(theano.config.floatX)
     sigma = 0.25 * delta
+    print("Testing filterbank matrix construction...")
     F = test_filterbank_matrix(center_x, delta, sigma)
-    print("F[0]:")
-    print(str(F[0]))
+    print("F.shape: {}".format(F.shape))
+    print("Testing reading function...")
+    R = test_read(inputs, center_x, delta, sigma)
+    print("R.shape: {}".format(R.shape))
+    print("Testing writing function...")
+    W = test_write(windows, center_x, delta, sigma)
+    print("W.shape: {}".format(W.shape))
+    print("Done.")

@@ -19,7 +19,7 @@ from blocks.bricks.cost import BinaryCrossEntropy
 from blocks.utils import shared_floatx_nans
 from blocks.roles import add_role, WEIGHT, BIAS, PARAMETER, AUXILIARY
 
-from BlocksAttention import ZoomableAttentionWindow
+from BlocksAttention import ZoomableAttention2d
 from DKCode import get_adam_updates
 from HelperFuncs import constFX, to_fX
 from LogPDFs import log_prob_bernoulli, gaussian_kld
@@ -60,9 +60,10 @@ class SimpleAttentionReader2d(Initializable):
         add_role(self.sigma_scale, PARAMETER)
 
         # get a localized reader mechanism and a controller decoder
-        self.zoomer = ZoomableAttentionWindow(height, width, N, init_scale)
+        self.zoomer = ZoomableAttention2d(height, width, N, init_scale)
         # con_decoder converts controller input to (5) attention parameters
-        self.con_decoder = MLP(activations=[Identity()], dims=[con_dim, 5], **kwargs)
+        self.con_decoder = MLP(activations=[Identity()], dims=[con_dim, 5], \
+                               **kwargs)
 
         # make list of child models (for Blocks stuff)
         self.children = [ self.con_decoder ]
@@ -197,6 +198,169 @@ class SimpleAttentionReader2d(Initializable):
         i12 = tensor.concatenate([i1, i2], axis=1)
         return i12
 
+class SimpleAttentionReader1d(Initializable):
+    """
+    This class manages a moveable, foveated 1d attention window.
+
+    Parameters:
+        x_dim: dimension of "vectorized" inputs
+        con_dim: dimension of the controller providing attention params
+        N: this will read N "blob pixels" -- N at each of two scales!
+        init_scale: the scale of input cordinates vs. attention grid
+    """
+    def __init__(self, x_dim, con_dim, N, init_scale, **kwargs):
+        super(SimpleAttentionReader1d, self).__init__(name="reader", **kwargs)
+        self.x_dim = x_dim      # dimension of vectorized image input
+        self.con_dim = con_dim  # dimension of controller input
+        self.N = N              # base attention grid dimension
+        self.read_dim = 2*N     # dimension of reader output
+        self.init_scale = init_scale # initial scale of input vs. grid
+        # add and initialize a parameter for controlling sigma scale
+        init_ary = (1.5 / self.N) * numpy.ones((1,))
+        self.sigma_scale = shared_floatx_nans((1,), name='sigma_scale')
+        self.sigma_scale.set_value(init_ary.astype(theano.config.floatX))
+        add_role(self.sigma_scale, PARAMETER)
+
+        # get a localized reader mechanism and a controller decoder
+        self.zoomer = ZoomableAttention1d(input_dim=x_dim, N=N, \
+                                          init_scale=init_scale)
+        # con_decoder converts controller input to (5) attention parameters
+        self.con_decoder = MLP(activations=[Identity()], dims=[con_dim, 4], \
+                               **kwargs)
+
+        # make list of child models (for Blocks stuff)
+        self.children = [ self.con_decoder ]
+        self.params = [ self.sigma_scale ]
+        return
+
+    def get_dim(self, name):
+        # Blocks stuff -- not clear when and how this gets used
+        if name in ['input', 'h_con']:
+            return self.con_dim
+        elif name in ['x_dim', 'x1', 'x2']:
+            return self.x_dim
+        elif name in ['output', 'r']:
+            return self.read_dim
+        else:
+            raise ValueError
+        return
+
+    def _deltas_and_sigmas(self, delta):
+        """
+        Get the scaled deltas and sigmas for our foveated attention thing.
+        """
+        # outer region is at 2x the scale of inner region
+        delta1 = 1.0 * delta
+        delta2 = 2.0 * delta
+        # compute filter bandwidth as linearly proportional to grid scale
+        sigma1 = self.sigma_scale[0] * delta1
+        sigma2 = self.sigma_scale[0] * delta2
+        return delta1, delta2, sigma1, sigma2
+
+    @application(inputs=['x1', 'x2', 'h_con'], outputs=['r12'])
+    def apply(self, x1, x2, h_con):
+        # decode attention parameters from the controller
+        l = self.con_decoder.apply(h_con)
+        # get base attention parameters
+        center_x, delta, gamma1, gamma2 = self.zoomer.nn2att(l)
+        # get deltas and sigmas for our inner/outer attention regions
+        delta1, delta2, sigma1, sigma2 = self._deltas_and_sigmas(delta)
+        # perform local read from x1 at two different scales
+        r1 = gamma1.dimshuffle(0,'x') * \
+                self.zoomer.read(x1, center_x, delta1, sigma1)
+        r2 = gamma2.dimshuffle(0,'x') * \
+                self.zoomer.read(x1, center_x, delta2, sigma2)
+        r12 = tensor.concatenate([r1, r2], axis=1)
+        return r12
+
+    @application(inputs=['windows','h_con'], \
+                 outputs=['i12'])
+    def write(self, windows, h_con):
+        # decode attention parameters from the controller
+        l = self.con_decoder.apply(h_con)
+        # get base attention parameters
+        center_x, delta, gamma1, gamma2 = self.zoomer.nn2att(l)
+        # get deltas and sigmas for our inner/outer attention regions
+        delta1, delta2, sigma1, sigma2 = self._deltas_and_sigmas(delta)
+        # assume windows are taken from a read operation by this object
+        w1 = windows[:,:self.N]
+        w2 = windows[:,self.N:]
+        # perform local write operation at two different scales
+        i1 = self.zoomer.write(w1, center_x, delta1, sigma1)
+        i2 = self.zoomer.write(w2, center_x, delta2, sigma2)
+        i12 = tensor.concatenate([i1, i2], axis=1)
+        return i12
+
+    @application(inputs=['h_con'], outputs=['i12'])
+    def att_map(self, h_con):
+        """
+        Render a "heat map" of the attention region associated with this
+        controller input. Outputs are size (1, self.x_dim).
+
+        Input:
+            h_con: controller vector, to be converted by self.con_decoder.
+        Output:
+            i12: conjoined heat maps for inner and outer foveated regions
+        """
+        # decode attention parameters from the controller
+        l = self.con_decoder.apply(h_con)
+        # get base attention parameters
+        center_x, delta, gamma1, gamma2 = self.zoomer.nn2att(l)
+        # get deltas and sigmas for our inner/outer attention regions
+        delta1, delta2, sigma1, sigma2 = self._deltas_and_sigmas(delta)
+        # make a dummy set of "read" responses -- use ones for all pixels
+        ones = tensor.alloc(1.0, h_con.shape[0], self.N)
+        # perform local write operation at two different scales
+        i1 = gamma1.dimshuffle(0,'x') * \
+                self.zoomer.write(ones, center_x, delta1, sigma1)
+        i2 = gamma1.dimshuffle(0,'x') * \
+                self.zoomer.write(ones, center_x, delta2, sigma2)
+        i12 = tensor.concatenate([i1, i2], axis=1)
+        return i12
+
+    @application(inputs=['x','center_x','delta','gamma1','gamma2'], \
+                 outputs=['r12'])
+    def direct_read(self, x, center_x, delta, gamma1, gamma2):
+        # get deltas and sigmas for our inner/outer attention regions
+        delta1, delta2, sigma1, sigma2 = self._deltas_and_sigmas(delta)
+        # perform local read from x1 at two different scales
+        r1 = gamma1.dimshuffle(0,'x') * \
+                self.zoomer.read(x, center_x, delta1, sigma1)
+        r2 = gamma2.dimshuffle(0,'x') * \
+                self.zoomer.read(x, center_x, delta2, sigma2)
+        r12 = tensor.concatenate([r1, r2], axis=1)
+        return r12
+
+    @application(inputs=['windows','center_x','delta'], \
+                 outputs=['i12'])
+    def direct_write(self, windows, center_x, delta):
+        # get deltas and sigmas for our inner/outer attention regions
+        delta1, delta2, sigma1, sigma2 = self._deltas_and_sigmas(delta)
+        # assume windows are taken from a read operation by this object
+        w1 = windows[:,:self.N]
+        w2 = windows[:,self.N:]
+        # perform local write operation at two different scales
+        i1 = self.zoomer.write(w1, center_x, delta1, sigma1)
+        i2 = self.zoomer.write(w2, center_x, delta2, sigma2)
+        i12 = tensor.concatenate([i1, i2], axis=1)
+        return i12
+
+    @application(inputs=['center_x','delta','gamma1','gamma2'], \
+                 outputs=['i12'])
+    def direct_att_map(self, center_x, delta, gamma1, gamma2):
+        # get deltas and sigmas for this base delta
+        delta1, delta2, sigma1, sigma2 = self._deltas_and_sigmas(delta)
+        # make a dummy set of "read" responses -- use ones for all pixels
+        ones = tensor.alloc(1.0, center_x.shape[0], self.N)
+        # perform local write operation at two different scales
+        i1 = gamma1.dimshuffle(0,'x') * \
+                self.zoomer.write(ones, center_x, delta1, sigma1)
+        i2 = gamma1.dimshuffle(0,'x') * \
+                self.zoomer.write(ones, center_x, delta2, sigma2)
+        i12 = tensor.concatenate([i1, i2], axis=1)
+        return i12
+
+
 
 
 
@@ -205,6 +369,7 @@ class SimpleAttentionReader2d(Initializable):
 ## Generative model that constructs images column-by-column ##
 ##############################################################
 ##############################################################
+
 
 class ImgScan(BaseRecurrent, Initializable, Random):
     """
@@ -635,13 +800,16 @@ class ImgScan(BaseRecurrent, Initializable, Random):
         pickle_file.close()
         return
 
-##########################################################
-# ATTENTION-BASED PERCEPTION UNDER TIME CONSTRAINTS      #
-##########################################################
+
+############################################################
+############################################################
+## ATTENTION-BASED PERCEPTION UNDER TIME CONSTRAINTS      ##
+############################################################
+############################################################
 
 class SeqCondGen(BaseRecurrent, Initializable, Random):
     """
-    SecCondGen -- constructs a conditional density under time constraints.
+    SeqCondGen -- constructs conditional densities under time constraints.
 
     This model sequentially constructs a conditional density estimate by taking
     repeated glimpses at the input x, and constructing a hypothesis about the
@@ -649,10 +817,20 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
     some training set. We learn a proper generative model, using variational
     inference -- which can be interpreted as a sort of guided policy search.
 
+    The input pairs (x, y) can be either "static" or "sequential". In the
+    static case, the same x and y are used at every step of the hypothesis
+    construction loop. In the sequential case, x and y can change at each step
+    of the loop.
+
     Parameters:
+        x_and_y_are_seqs: boolean telling whether the conditioning information
+                          and prediction targets are sequential.
         total_steps: total number of steps in sequential estimation process
-        init_steps: number of steps we are guaranteed to use
+        init_steps: number of steps prior to first NLL measurement
         exit_rate: probability of exiting following each non "init" step
+                   **^^ THIS IS SET TO 0 WHEN USING SEQUENTIAL INPUT ^^**
+        nll_weight: weight for the prediction NLL term at each step.
+                   **^^ THIS IS IGNORED WHEN USING STATIC INPUT ^^**
         step_type: whether to use "additive" steps or "jump" steps
                    -- jump steps predict directly from the controller LSTM's
                       "hidden" state (a.k.a. its memory cells).
@@ -669,7 +847,8 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         var_rnn: the "variational" LSTM
         var_mlp_out: CondNet for distribution over z given gen_rnn
     """
-    def __init__(self, total_steps, init_steps, exit_rate, \
+    def __init__(self, x_and_y_are_seqs, total_steps, init_steps,
+                    exit_rate, nll_weight,
                     step_type, x_dim, y_dim,
                     reader_mlp, writer_mlp,
                     con_mlp_in, con_rnn,
@@ -680,9 +859,11 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         if not ((step_type == 'add') or (step_type == 'jump')):
             raise ValueError('step_type must be jump or add')
         # record basic structural parameters
+        self.x_and_y_are_seqs = x_and_y_are_seqs
         self.total_steps = total_steps
         self.init_steps = init_steps
         self.exit_rate = exit_rate
+        self.nll_weight = nll_weight
         self.step_type = step_type
         self.x_dim = x_dim
         self.y_dim = y_dim
@@ -719,16 +900,22 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         Construct a sequence of scales for weighting NLL measurements.
         """
         nll_scales = shared_floatx_nans((self.total_steps,), name='nll_scales')
-        np_scales = numpy.zeros((self.total_steps,))
-        prob_to_get_here = 1.0
-        for i in range(self.total_steps):
-            if ((i+1) > self.init_steps):
-                np_scales[i] = prob_to_get_here * self.exit_rate
-                prob_to_get_here = prob_to_get_here * (1.0 - self.exit_rate)
-        # force exit on the last step -- i.e. assign it any missing weight
-        sum_of_scales = numpy.sum(np_scales)
-        missing_weight = 1.0 - sum_of_scales
-        np_scales[-1] = np_scales[-1] + missing_weight
+        if self.x_and_y_are_seqs:
+            # construct NLL scales for each step, when using sequential x/y
+            np_scales = self.nll_weight * numpy.ones((self.total_steps,))
+            np_scales[0:self.init_steps] = 0.0
+        else:
+            # construct NLL scales for each step, when using static x/y
+            np_scales = numpy.zeros((self.total_steps,))
+            prob_to_get_here = 1.0
+            for i in range(self.total_steps):
+                if ((i+1) > self.init_steps):
+                    np_scales[i] = prob_to_get_here * self.exit_rate
+                    prob_to_get_here = prob_to_get_here * (1.0 - self.exit_rate)
+            # force exit on the last step -- i.e. assign it any missing weight
+            sum_of_scales = numpy.sum(np_scales)
+            missing_weight = 1.0 - sum_of_scales
+            np_scales[-1] = np_scales[-1] + missing_weight
         nll_scales.set_value(np_scales.astype(theano.config.floatX))
         return nll_scales
 
@@ -805,10 +992,10 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
 
     #------------------------------------------------------------------------
 
-    @recurrent(sequences=['u', 'nll_scale'], contexts=['x', 'y'],
+    @recurrent(sequences=['x', 'y', 'u', 'nll_scale'], contexts=[],
                states=['c', 'h_con', 'c_con', 'h_gen', 'c_gen', 'h_var', 'c_var', 'nll', 'kl_q2p', 'kl_p2q'],
                outputs=['c', 'h_con', 'c_con', 'h_gen', 'c_gen', 'h_var', 'c_var', 'nll', 'kl_q2p', 'kl_p2q'])
-    def iterate(self, u, nll_scale, c, h_con, c_con, h_gen, c_gen, h_var, c_var, nll, kl_q2p, kl_p2q, x, y):
+    def iterate(self, x, y, u, nll_scale, c, h_con, c_con, h_gen, c_gen, h_var, c_var, nll, kl_q2p, kl_p2q):
         if self.step_type == 'add':
             # additive steps use c as a "direct workspace", which means it's
             # already directly comparable to y.
@@ -880,6 +1067,11 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         hg_dim = self.get_dim('h_gen')
         hv_dim = self.get_dim('h_var')
 
+        if not self.x_and_y_are_seqs:
+            # if we're using "static" inputs, then we need to expand them out
+            # into a proper sequential form
+            x = x.dimshuffle('x',0,1).repeat(self.total_steps, axis=0)
+
         # get initial states for all model components
         c0 = self.c_0.repeat(batch_size, axis=0)
         cc0 = self.cc_0.repeat(batch_size, axis=0)
@@ -896,11 +1088,11 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
 
         # run the multi-stage guided generative process
         cs, h_cons, _, _, _, _, _, nlls, kl_q2ps, kl_p2qs = \
-                self.iterate(u=u, nll_scale=self.nll_scales, c=c0, \
-                             h_con=hc0, c_con=cc0, \
-                             h_gen=hg0, c_gen=cg0, \
-                             h_var=hv0, c_var=cv0, \
-                             x=x, y=y)
+                self.iterate(x=x, y=y, u=u, nll_scale=self.nll_scales,
+                             c=c0,
+                             h_con=hc0, c_con=cc0,
+                             h_gen=hg0, c_gen=cg0,
+                             h_var=hv0, c_var=cv0)
 
         # add name tags to the constructed values
         cs.name = "cs"
@@ -915,12 +1107,12 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         Build the symbolic costs and theano functions relevant to this model.
         """
         # some symbolic vars to represent various inputs/outputs
-        self.x_sym = tensor.matrix('x_sym')
-        self.y_sym = tensor.matrix('y_sym')
+        x_sym = tensor.matrix('x_sym')
+        y_sym = tensor.matrix('y_sym')
 
         # collect estimates of y given x produced by this model
         cs, h_cons, nlls, kl_q2ps, kl_p2qs = \
-                self.process_inputs(self.x_sym, self.y_sym)
+                self.process_inputs(x_sym, y_sym)
 
         # get the expected NLL part of the VFE bound
         self.nll_term = nlls.sum(axis=0).mean()
@@ -972,7 +1164,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         outputs = [self.joint_cost, self.nll_bound, self.nll_term, \
                    self.kld_q2p_term, self.kld_p2q_term, self.reg_term]
         # collect the required inputs
-        inputs = [self.x_sym, self.y_sym]
+        inputs = [x_sym, y_sym]
 
         # compile the theano functions for computing stuff, like for real
         print("Compiling model training/update function...")
@@ -989,8 +1181,8 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
 
     def build_attention_funcs(self):
         """
-        Build functions for playing with this model, under the assumption
-        that self.reader_mlp is a SimpleAttentionReader2d.
+        Build functions for visualizing the behavior of this model, assuming
+        self.reader_mlp is SimpleAttentionReader2d or SimpleAttentionReader1d.
         """
         # some symbolic vars to represent various inputs/outputs
         x_sym = tensor.matrix('x_sym_att_funcs')

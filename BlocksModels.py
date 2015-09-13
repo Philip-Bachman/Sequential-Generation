@@ -19,7 +19,7 @@ from blocks.bricks.cost import BinaryCrossEntropy
 from blocks.utils import shared_floatx_nans
 from blocks.roles import add_role, WEIGHT, BIAS, PARAMETER, AUXILIARY
 
-from BlocksAttention import ZoomableAttentionWindow
+from BlocksAttention import ZoomableAttention2d
 from DKCode import get_adam_updates
 from HelperFuncs import constFX, to_fX
 from LogPDFs import log_prob_bernoulli, gaussian_kld
@@ -248,7 +248,7 @@ class AttentionReader2d(Initializable):
                 input_dim=dec_dim, output_dim=dec_dim,
                 weights_init=self.weights_init, biases_init=self.biases_init,
                 use_bias=True)
-        self.zoomer = ZoomableAttentionWindow(height, width, N)
+        self.zoomer = ZoomableAttention2d(height, width, N)
         self.readout = MLP(activations=[Identity()], dims=[dec_dim, 5], **kwargs)
 
         self.children = [self.pre_trafo, self.readout]
@@ -309,7 +309,7 @@ class AttentionWriter(Initializable):
 
         assert output_dim == width*height
 
-        self.zoomer = ZoomableAttentionWindow(height, width, N)
+        self.zoomer = ZoomableAttention2d(height, width, N)
 
         self.z_trafo = Linear(
                 name=self.name+'_ztrafo',
@@ -360,7 +360,7 @@ class AttentionWriter2(Initializable):
 
         assert output_dim == width*height
 
-        self.zoomer = ZoomableAttentionWindow(height, width, N)
+        self.zoomer = ZoomableAttention2d(height, width, N)
 
         self.pre_trafo = Linear(
                 name=self.name+'_pretrafo',

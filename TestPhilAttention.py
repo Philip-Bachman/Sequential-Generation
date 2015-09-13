@@ -15,7 +15,7 @@ from blocks.graph import ComputationGraph
 from blocks.filter import VariableFilter
 from blocks.roles import add_role, WEIGHT, BIAS, PARAMETER, AUXILIARY
 
-from BlocksAttention import ZoomableAttentionWindow
+from BlocksAttention import ZoomableAttention2d
 from RAMBlocks import SimpleAttentionReader2d
 
 from PIL import Image
@@ -23,7 +23,7 @@ import pylab
 
 
 #--------------------------------------------------------------------
-N = 40
+N = 16
 height = 480
 width =  640
 con_dim = 100
@@ -39,7 +39,7 @@ gamma2_ = T.vector()
 
 SAR2d = SimpleAttentionReader2d(x_dim=height*width, con_dim=con_dim, \
                                 height=height, width=width, N=N, \
-                                init_scale=4.0)
+                                init_scale=2.0)
 
 READ_ = SAR2d.direct_read(x=I_, center_y=center_y_, center_x=center_x_, \
                           delta=delta_, gamma1=gamma1_, gamma2=gamma2_)

@@ -243,11 +243,11 @@ def test_img_scan(attention=False):
 #############################################
 #############################################
 
-def test_seq_cond_gen(step_type='add'):
+def test_seq_cond_gen_static(step_type='add'):
     ##############################
     # File tag, for output stuff #
     ##############################
-    result_tag = "{}SCG".format(RESULT_PATH)
+    result_tag = "{}AAA_SCG".format(RESULT_PATH)
 
     ##########################
     # Get some training data #
@@ -270,14 +270,14 @@ def test_seq_cond_gen(step_type='add'):
     ############################################################
     # Setup some parameters for the Iterative Refinement Model #
     ############################################################
-    total_steps = 15
-    init_steps = 4
+    total_steps = 10
+    init_steps = 3
     exit_rate = 0.2
     x_dim = 784
     y_dim = 784
     z_dim = 100
-    rnn_dim = 250
-    write_dim = 200
+    rnn_dim = 300
+    write_dim = 300
     mlp_dim = 250
 
     rnninits = {
@@ -289,7 +289,7 @@ def test_seq_cond_gen(step_type='add'):
         'biases_init': Constant(0.),
     }
 
-    read_N = 3 # inner/outer grid dimension for reader
+    read_N = 2 # inner/outer grid dimension for reader
     read_dim = 2*read_N**2   # total number of "pixels" read by reader
     grid_dim = read_N**2     # number of pixels at each read scale
     reader_mlp = SimpleAttentionReader2d(x_dim=x_dim, con_dim=rnn_dim,
@@ -321,7 +321,7 @@ def test_seq_cond_gen(step_type='add'):
 
     SeqCondGen_doc_str = \
     """
-    SecCondGen -- constructs a conditional density under time constraints.
+    SeqCondGen -- constructs conditional densities under time constraints.
 
     This model sequentially constructs a conditional density estimate by taking
     repeated glimpses at the input x, and constructing a hypothesis about the
@@ -329,15 +329,27 @@ def test_seq_cond_gen(step_type='add'):
     some training set. We learn a proper generative model, using variational
     inference -- which can be interpreted as a sort of guided policy search.
 
+    The input pairs (x, y) can be either "static" or "sequential". In the
+    static case, the same x and y are used at every step of the hypothesis
+    construction loop. In the sequential case, x and y can change at each step
+    of the loop.
+
     Parameters:
+        x_and_y_are_seqs: boolean telling whether the conditioning information
+                          and prediction targets are sequential.
         total_steps: total number of steps in sequential estimation process
-        init_steps: number of steps we are guaranteed to use
+        init_steps: number of steps prior to first NLL measurement
         exit_rate: probability of exiting following each non "init" step
+                   **^^ THIS IS SET TO 0 WHEN USING SEQUENTIAL INPUT ^^**
+        nll_weight: weight for the prediction NLL term at each step.
+                   **^^ THIS IS IGNORED WHEN USING STATIC INPUT ^^**
         step_type: whether to use "additive" steps or "jump" steps
+                   -- jump steps predict directly from the controller LSTM's
+                      "hidden" state (a.k.a. its memory cells).
         x_dim: dimension of inputs on which to condition
         y_dim: dimension of outputs to predict
         reader_mlp: used for reading from the input
-        writer_mlp: used for writing to prediction for the output
+        writer_mlp: used for writing to the output prediction
         con_mlp_in: preprocesses input to the "controller" LSTM
         con_rnn: the "controller" LSTM
         gen_mlp_in: preprocesses input to the "generator" LSTM
@@ -349,9 +361,11 @@ def test_seq_cond_gen(step_type='add'):
     """
 
     SCG = SeqCondGen(
+                x_and_y_are_seqs=False, # this test doesn't use sequential x/y
                 total_steps=total_steps,
                 init_steps=init_steps,
                 exit_rate=exit_rate,
+                nll_weight=0.0, # ignored, because x_and_y_are_seqs == False
                 step_type=step_type,
                 x_dim=x_dim,
                 y_dim=y_dim,
@@ -508,4 +522,4 @@ def test_seq_cond_gen(step_type='add'):
 
 if __name__=="__main__":
     #test_img_scan(attention=False)
-    test_seq_cond_gen(step_type='add')
+    test_seq_cond_gen_static(step_type='add')
