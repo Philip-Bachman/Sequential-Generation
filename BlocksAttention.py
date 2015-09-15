@@ -317,7 +317,7 @@ class ZoomableAttention1d(object):
         FX = self.filterbank_matrix(center_x, delta, sigma)
         # apply to the batch of inputs
         _W = FX * inputs.dimshuffle(0,'x',1)
-        W = _W.sum(axis=-2)
+        W = _W.sum(axis=-1)
         return W
 
     def write(self, windows, center_x, delta, sigma):

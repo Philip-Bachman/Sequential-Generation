@@ -41,7 +41,7 @@ SAR2d = SimpleAttentionReader2d(x_dim=height*width, con_dim=con_dim, \
                                 height=height, width=width, N=N, \
                                 init_scale=2.0)
 
-READ_ = SAR2d.direct_read(x=I_, center_y=center_y_, center_x=center_x_, \
+READ_ = SAR2d.direct_read(x1=I_, center_y=center_y_, center_x=center_x_, \
                           delta=delta_, gamma1=gamma1_, gamma2=gamma2_)
 WRITE_ = SAR2d.direct_write(windows=W_, center_y=center_y_, \
                             center_x=center_x_, delta=delta_)

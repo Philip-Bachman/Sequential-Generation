@@ -141,3 +141,29 @@ def shift_and_scale_into_01(X):
     X = X - np.min(X, axis=1, keepdims=True)
     X = X / np.max(X, axis=1, keepdims=True)
     return X
+
+
+def one_hot(Yc, cat_dim=None):
+    """
+    Given a tensor Yc of dimension d with integer values from range(cat_dim),
+    return new tensor of dimension d + 1 with values 0/1, where the last
+    dimension gives a one-hot representation of the values in Yc.
+
+    if cat_dim is not given, cat_dim is set to max(Yc) + 1
+    """
+    if cat_dim is None:
+        cat_dim = T.max(Yc) + 1
+    ranges = T.shape_padleft(T.arange(cat_dim), Yc.ndim)
+    Yoh = T.eq(ranges, T.shape_padright(Yc, 1))
+    return Yoh
+
+def one_hot_np(Yc, cat_dim=None):
+    """
+    Given a numpy integer column vector Yc, generate a matrix Yoh in which
+    Yoh[i,:] is a one-hot vector -- Yoh[i,Yc[i]] = 1.0 and other Yoh[i,j] = 0
+    """
+    if cat_dim is None:
+        cat_dim = np.max(Yc) + 1
+    Yoh = np.zeros((Yc.size, cat_dim))
+    Yoh[np.arange(Yc.size),Yc.flatten()] = 1.0
+    return Yoh
