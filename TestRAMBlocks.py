@@ -295,11 +295,47 @@ def test_seq_cond_gen_static(step_type='add'):
     init_steps = 3
     exit_rate = 0.2
     x_dim = obs_dim
-    y_dim = obs_dim + label_dim
+    y_dim = obs_dim #+ label_dim
     z_dim = 100
     rnn_dim = 300
     write_dim = 300
-    mlp_dim = 250
+    mlp_dim = 300
+
+    def visualize_attention(result, pre_tag="AAA", post_tag="AAA"):
+        seq_len = result[0].shape[0]
+        samp_count = result[0].shape[1]
+        # get generated predictions
+        x_samps = np.zeros((seq_len*samp_count, obs_dim))
+        #y_samps = np.zeros((seq_len*samp_count, label_dim))
+        idx = 0
+        for s1 in range(samp_count):
+            for s2 in range(seq_len):
+                x_samps[idx] = result[0][s2,s1,:obs_dim]
+                #y_samps[idx] = result[0][s2,s1,obs_dim:]
+                idx += 1
+        file_name = "{0:s}_traj_xs_{1:s}.png".format(pre_tag, post_tag)
+        utils.visualize_samples(x_samps, file_name, num_rows=20)
+        #file_name = "{0:s}_traj_ys_{1:s}.png".format(pre_tag, post_tag)
+        #utils.visualize_samples(y_samps, file_name, num_rows=20)
+        # get sequential attention maps
+        seq_samps = np.zeros((seq_len*samp_count, x_dim))
+        idx = 0
+        for s1 in range(samp_count):
+            for s2 in range(seq_len):
+                seq_samps[idx] = result[1][s2,s1,:x_dim] + result[1][s2,s1,x_dim:]
+                idx += 1
+        file_name = "{0:s}_traj_att_maps_{1:s}.png".format(pre_tag, post_tag)
+        utils.visualize_samples(seq_samps, file_name, num_rows=20)
+        # get sequential attention maps (read out values)
+        seq_samps = np.zeros((seq_len*samp_count, x_dim))
+        idx = 0
+        for s1 in range(samp_count):
+            for s2 in range(seq_len):
+                seq_samps[idx] = result[2][s2,s1,:x_dim] + result[2][s2,s1,x_dim:]
+                idx += 1
+        file_name = "{0:s}_traj_read_outs_{1:s}.png".format(pre_tag, post_tag)
+        utils.visualize_samples(seq_samps, file_name, num_rows=20)
+        return
 
     rnninits = {
         'weights_init': IsotropicGaussian(0.01),
@@ -328,7 +364,9 @@ def test_seq_cond_gen_static(step_type='add'):
                      name="gen_mlp_in", **inits)
 
     # mlps for turning LSTM outputs into conditionals over z_gen
-    con_mlp_out = CondNet([], [rnn_dim, z_dim], name="con_mlp_out", **inits)
+    con_mlp_out = CondNet([Rectifier(), Rectifier()], \
+                          [rnn_dim, mlp_dim, mlp_dim, z_dim], \
+                          name="con_mlp_out", **inits)
     gen_mlp_out = CondNet([], [rnn_dim, z_dim], name="gen_mlp_out", **inits)
     var_mlp_out = CondNet([], [rnn_dim, z_dim], name="var_mlp_out", **inits)
 
@@ -373,6 +411,7 @@ def test_seq_cond_gen_static(step_type='add'):
         writer_mlp: used for writing to the output prediction
         con_mlp_in: preprocesses input to the "controller" LSTM
         con_rnn: the "controller" LSTM
+        con_mlp_out: CondNet for distribution over z given con_rnn
         gen_mlp_in: preprocesses input to the "generator" LSTM
         gen_rnn: the "generator" LSTM
         gen_mlp_out: CondNet for distribution over z given gen_rnn
@@ -393,6 +432,7 @@ def test_seq_cond_gen_static(step_type='add'):
                 reader_mlp=reader_mlp,
                 writer_mlp=writer_mlp,
                 con_mlp_in=con_mlp_in,
+                con_mlp_out=con_mlp_out,
                 con_rnn=con_rnn,
                 gen_mlp_in=gen_mlp_in,
                 gen_mlp_out=gen_mlp_out,
@@ -404,52 +444,18 @@ def test_seq_cond_gen_static(step_type='add'):
 
     compile_start_time = time.time()
 
-    # build the cost gradients, training function, samplers, etc.
+    # build the attention trajectory sampler
     SCG.build_attention_funcs()
 
-    ###########################################
-    # Sample and draw attention trajectories. #
-    ###########################################
+    # quick test of attention trajectory sampler
     samp_count = 100
-    XYb = XYva[:samp_count,:]
-    Xb, Yb = split_xy(XYb)
-    result = SCG.sample_attention(Xb, XYb)
-    print("result[0].shape: {}".format(result[0].shape))
-    print("result[1].shape: {}".format(result[1].shape))
-    print("result[2].shape: {}".format(result[2].shape))
-    seq_len = result[0].shape[0]
-    # get generated predictions
-    x_samps = np.zeros((seq_len*samp_count, obs_dim))
-    y_samps = np.zeros((seq_len*samp_count, label_dim))
-    idx = 0
-    for s1 in range(samp_count):
-        for s2 in range(seq_len):
-            x_samps[idx] = result[0][s2,s1,:obs_dim]
-            y_samps[idx] = result[0][s2,s1,obs_dim:]
-            idx += 1
-    file_name = "{0:s}_traj_xs.png".format(result_tag)
-    utils.visualize_samples(x_samps, file_name, num_rows=20)
-    file_name = "{0:s}_traj_ys.png".format(result_tag)
-    utils.visualize_samples(y_samps, file_name, num_rows=20)
-    # get sequential attention maps
-    seq_samps = np.zeros((seq_len*samp_count, x_dim))
-    idx = 0
-    for s1 in range(samp_count):
-        for s2 in range(seq_len):
-            seq_samps[idx] = result[1][s2,s1,:x_dim] + result[1][s2,s1,x_dim:]
-            idx += 1
-    file_name = "{0:s}_traj_att_maps.png".format(result_tag)
-    utils.visualize_samples(seq_samps, file_name, num_rows=20)
-    # get sequential attention maps (read out values)
-    seq_samps = np.zeros((seq_len*samp_count, x_dim))
-    idx = 0
-    for s1 in range(samp_count):
-        for s2 in range(seq_len):
-            seq_samps[idx] = result[2][s2,s1,:x_dim] + result[2][s2,s1,x_dim:]
-            idx += 1
-    file_name = "{0:s}_traj_read_outs.png".format(result_tag)
-    utils.visualize_samples(seq_samps, file_name, num_rows=20)
+    #XYb = XYva[:samp_count,:]
+    #Xb, Yb = split_xy(XYb)
+    Xb = Xva[:samp_count]
+    result = SCG.sample_attention(Xb, Xb)
+    visualize_attention(result, pre_tag=result_tag, post_tag="b0")
 
+    # build the main model functions (i.e. training and cost functions)
     SCG.build_model_funcs()
 
     compile_end_time = time.time()
@@ -466,7 +472,7 @@ def test_seq_cond_gen_static(step_type='add'):
     out_file.flush()
     costs = [0. for i in range(10)]
     learn_rate = 0.0001
-    momentum = 0.75
+    momentum = 0.8
     batch_idx = np.arange(batch_size) + tr_samples
     for i in range(250000):
         scale = min(1.0, ((i+1) / 2500.0))
@@ -475,22 +481,22 @@ def test_seq_cond_gen_static(step_type='add'):
         if (i > 10000):
             momentum = 0.95
         else:
-            momentum = 0.75
+            momentum = 0.8
         # get the indices of training samples for this batch update
         batch_idx += batch_size
         if (np.max(batch_idx) >= tr_samples):
             # we finished an "epoch", so we rejumble the training set
-            XYtr = row_shuffle(XYtr)
+            #XYtr = row_shuffle(XYtr)
+            Xtr = row_shuffle(Xtr)
             batch_idx = np.arange(batch_size)
         # set sgd and objective function hyperparams for this update
-        zero_ary = np.zeros((1,))
-        SCG.lr.set_value(to_fX(zero_ary + learn_rate))
-        SCG.mom_1.set_value(to_fX(zero_ary + momentum))
-        SCG.mom_2.set_value(to_fX(zero_ary + 0.99))
+        SCG.set_sgd_params(lr=learn_rate, mom_1=momentum, mom_2=0.99)
+        SCG.set_lam_kld(lam_kld_q2p=0.95, lam_kld_p2q=0.05, lam_kld_p2g=0.05)
         # perform a minibatch update and record the cost for this batch
-        XYb = XYtr.take(batch_idx, axis=0)
-        Xb, Yb = split_xy(XYb)
-        result = SCG.train_joint(Xb, XYb)
+        #XYb = XYtr.take(batch_idx, axis=0)
+        #Xb, Yb = split_xy(XYb)
+        Xb = Xtr.take(batch_idx, axis=0)
+        result = SCG.train_joint(Xb, Xb)
         costs = [(costs[j] + result[j]) for j in range(len(result))]
 
         # output diagnostic information and checkpoint parameters, etc.
@@ -502,8 +508,9 @@ def test_seq_cond_gen_static(step_type='add'):
             str4 = "    nll_term  : {0:.4f}".format(costs[2])
             str5 = "    kld_q2p   : {0:.4f}".format(costs[3])
             str6 = "    kld_p2q   : {0:.4f}".format(costs[4])
-            str7 = "    reg_term  : {0:.4f}".format(costs[5])
-            joint_str = "\n".join([str1, str2, str3, str4, str5, str6, str7])
+            str7 = "    kld_p2g   : {0:.4f}".format(costs[5])
+            str8 = "    reg_term  : {0:.4f}".format(costs[6])
+            joint_str = "\n".join([str1, str2, str3, str4, str5, str6, str7, str8])
             print(joint_str)
             out_file.write(joint_str+"\n")
             out_file.flush()
@@ -511,10 +518,12 @@ def test_seq_cond_gen_static(step_type='add'):
         if ((i % 500) == 0): #((i % 1000) == 0):
             SCG.save_model_params("{}_params.pkl".format(result_tag))
             # compute a small-sample estimate of NLL bound on validation set
-            XYva = row_shuffle(XYva)
-            XYb = XYva[:1000]
-            Xb, Yb = split_xy(XYb)
-            va_costs = SCG.compute_nll_bound(Xb, XYb)
+            #XYva = row_shuffle(XYva)
+            #XYb = XYva[:1000]
+            #Xb, Yb = split_xy(XYb)
+            Xva = row_shuffle(Xva)
+            Xb = Xva[:1000]
+            va_costs = SCG.compute_nll_bound(Xb, Xb)
             str1 = "    va_nll_bound : {}".format(va_costs[1])
             str2 = "    va_nll_term  : {}".format(va_costs[2])
             str3 = "    va_kld_q2p   : {}".format(va_costs[3])
@@ -526,41 +535,12 @@ def test_seq_cond_gen_static(step_type='add'):
             # Sample and draw attention trajectories. #
             ###########################################
             samp_count = 100
-            XYb = XYva[:samp_count,:]
-            Xb, Yb = split_xy(XYb)
-            result = SCG.sample_attention(Xb, XYb)
-            seq_len = result[0].shape[0]
-            # get generated predictions
-            x_samps = np.zeros((seq_len*samp_count, obs_dim))
-            y_samps = np.zeros((seq_len*samp_count, label_dim))
-            idx = 0
-            for s1 in range(samp_count):
-                for s2 in range(seq_len):
-                    x_samps[idx] = result[0][s2,s1,:obs_dim]
-                    y_samps[idx] = result[0][s2,s1,obs_dim:]
-                    idx += 1
-            file_name = "{0:s}_traj_xs_b{1:d}.png".format(result_tag, i)
-            utils.visualize_samples(x_samps, file_name, num_rows=20)
-            file_name = "{0:s}_traj_ys_b{1:d}.png".format(result_tag, i)
-            utils.visualize_samples(y_samps, file_name, num_rows=20)
-            # get sequential attention maps
-            seq_samps = np.zeros((seq_len*samp_count, x_dim))
-            idx = 0
-            for s1 in range(samp_count):
-                for s2 in range(seq_len):
-                    seq_samps[idx] = result[1][s2,s1,:x_dim] + result[1][s2,s1,x_dim:]
-                    idx += 1
-            file_name = "{0:s}_traj_att_maps_b{1:d}.png".format(result_tag, i)
-            utils.visualize_samples(seq_samps, file_name, num_rows=20)
-            # get sequential attention maps (read out values)
-            seq_samps = np.zeros((seq_len*samp_count, x_dim))
-            idx = 0
-            for s1 in range(samp_count):
-                for s2 in range(seq_len):
-                    seq_samps[idx] = result[2][s2,s1,:x_dim] + result[2][s2,s1,x_dim:]
-                    idx += 1
-            file_name = "{0:s}_traj_read_outs_b{1:d}.png".format(result_tag, i)
-            utils.visualize_samples(seq_samps, file_name, num_rows=20)
+            #XYb = XYva[:samp_count,:]
+            #Xb, Yb = split_xy(XYb)
+            Xb = Xva[:samp_count]
+            result = SCG.sample_attention(Xb, Xb)
+            post_tag = "b{0:d}".format(i)
+            visualize_attention(result, pre_tag=result_tag, post_tag=post_tag)
 
 ##########################################################
 ##########################################################
@@ -782,10 +762,8 @@ def test_seq_cond_gen_sequence(step_type='add'):
             Xtr = row_shuffle(Xtr)
             batch_idx = np.arange(batch_size)
         # set sgd and objective function hyperparams for this update
-        zero_ary = np.zeros((1,))
-        SCG.lr.set_value(to_fX(zero_ary + learn_rate))
-        SCG.mom_1.set_value(to_fX(zero_ary + momentum))
-        SCG.mom_2.set_value(to_fX(zero_ary + 0.99))
+        SCG.set_sgd_params(lr=learn_rate, mom_1=momentum, mom_2=0.99)
+        SCG.set_lam_kld(lam_kld_q2p=0.95, lam_kld_p2q=0.05, lam_kld_p2g=0.0)
         # perform a minibatch update and record the cost for this batch
         Xb = Xtr.take(batch_idx, axis=0)
         Xb = batch_reshape(Xb, reps=step_reps)
@@ -801,8 +779,9 @@ def test_seq_cond_gen_sequence(step_type='add'):
             str4 = "    nll_term  : {0:.4f}".format(costs[2])
             str5 = "    kld_q2p   : {0:.4f}".format(costs[3])
             str6 = "    kld_p2q   : {0:.4f}".format(costs[4])
-            str7 = "    reg_term  : {0:.4f}".format(costs[5])
-            joint_str = "\n".join([str1, str2, str3, str4, str5, str6, str7])
+            str7 = "    kld_p2g   : {0:.4f}".format(costs[5])
+            str8 = "    reg_term  : {0:.4f}".format(costs[6])
+            joint_str = "\n".join([str1, str2, str3, str4, str5, str6, str7, str8])
             print(joint_str)
             out_file.write(joint_str+"\n")
             out_file.flush()
@@ -833,5 +812,5 @@ def test_seq_cond_gen_sequence(step_type='add'):
 
 if __name__=="__main__":
     #test_oi_seq_cond_gen(attention=False)
-    #test_seq_cond_gen_static(step_type='add')
-    test_seq_cond_gen_sequence(step_type='add')
+    test_seq_cond_gen_static(step_type='add')
+    #test_seq_cond_gen_sequence(step_type='add')

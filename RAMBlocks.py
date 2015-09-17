@@ -978,6 +978,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         writer_mlp: used for writing to the output prediction
         con_mlp_in: preprocesses input to the "controller" LSTM
         con_rnn: the "controller" LSTM
+        con_mlp_out: CondNet for distribution over z given con_rnn
         gen_mlp_in: preprocesses input to the "generator" LSTM
         gen_rnn: the "generator" LSTM
         gen_mlp_out: CondNet for distribution over z given gen_rnn
@@ -989,7 +990,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
                     exit_rate, nll_weight,
                     step_type, x_dim, y_dim,
                     reader_mlp, writer_mlp,
-                    con_mlp_in, con_rnn,
+                    con_mlp_in, con_rnn, con_mlp_out,
                     gen_mlp_in, gen_rnn, gen_mlp_out,
                     var_mlp_in, var_rnn, var_mlp_out,
                     **kwargs):
@@ -1016,6 +1017,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         # grab handles for sequential read/write models
         self.con_mlp_in = con_mlp_in
         self.con_rnn = con_rnn
+        self.con_mlp_out = con_mlp_out
         self.gen_mlp_in = gen_mlp_in
         self.gen_rnn = gen_rnn
         self.gen_mlp_out = gen_mlp_out
@@ -1025,15 +1027,57 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         # create a shared variable switch for controlling sampling
         ones_ary = numpy.ones((1,)).astype(theano.config.floatX)
         self.train_switch = theano.shared(value=ones_ary, name='train_switch')
+        # create shared variables for controlling KLd terms
+        self.lam_kld_q2p = theano.shared(value=ones_ary, name='lam_kld_q2p')
+        self.lam_kld_p2q = theano.shared(value=ones_ary, name='lam_kld_p2q')
+        self.lam_kld_p2g = theano.shared(value=ones_ary, name='lam_kld_p2g')
+        self.set_lam_kld(lam_kld_q2p=0.95, lam_kld_p2q=0.05, lam_kld_p2g=0.0)
+        # create shared variables for controlling optimization/updates
+        self.lr = theano.shared(value=0.0001*ones_ary, name='lr')
+        self.mom_1 = theano.shared(value=0.9*ones_ary, name='mom_1')
+        self.mom_2 = theano.shared(value=0.99*ones_ary, name='mom_2')
+
         # setup a "null pointer" that will point to the computation graph
         # for this model, which can be built by self.build_model_funcs()...
         self.cg = None
 
         # record the sub-models around which this model is built
         self.children = [self.reader_mlp, self.writer_mlp,
-                         self.con_mlp_in, self.con_rnn,
+                         self.con_mlp_in, self.con_rnn, self.con_mlp_out,
                          self.gen_mlp_in, self.gen_rnn, self.gen_mlp_out,
                          self.var_mlp_in, self.var_rnn, self.var_mlp_out]
+        return
+
+    def set_sgd_params(self, lr=0.01, mom_1=0.9, mom_2=0.999):
+        """
+        Set learning rate and momentum parameter for all updates.
+        """
+        zero_ary = numpy.zeros((1,))
+        # set learning rate
+        new_lr = zero_ary + lr
+        self.lr.set_value(to_fX(new_lr))
+        # set momentums (use first and second order "momentum")
+        new_mom_1 = zero_ary + mom_1
+        self.mom_1.set_value(to_fX(new_mom_1))
+        new_mom_2 = zero_ary + mom_2
+        self.mom_2.set_value(to_fX(new_mom_2))
+        return
+
+    def set_lam_kld(self, lam_kld_q2p=0.0, lam_kld_p2q=1.0, lam_kld_p2g=0.0):
+        """
+        Set the relative weight of various KL-divergence terms.
+
+        kld_q2p: KLd between guide reader and primary reader. KL(q||p)
+        kld_p2q: KLd between primary reader and guide reader. KL(p||q)
+        kld_p2g: KLd between primary reader and primary controller. KL(p||g)
+        """
+        zero_ary = numpy.zeros((1,))
+        new_lam = zero_ary + lam_kld_q2p
+        self.lam_kld_q2p.set_value(to_fX(new_lam))
+        new_lam = zero_ary + lam_kld_p2q
+        self.lam_kld_p2q.set_value(to_fX(new_lam))
+        new_lam = zero_ary + lam_kld_p2g
+        self.lam_kld_p2g.set_value(to_fX(new_lam))
         return
 
     def _construct_nll_scales(self):
@@ -1133,10 +1177,10 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
 
     #------------------------------------------------------------------------
 
-    @recurrent(sequences=['x', 'y', 'u', 'nll_scale'], contexts=[],
+    @recurrent(sequences=['x', 'y', 'u', 'u_hc', 'nll_scale'], contexts=[],
                states=['c', 'h_con', 'c_con', 'h_gen', 'c_gen', 'h_var', 'c_var'],
-               outputs=['c', 'h_con', 'c_con', 'h_gen', 'c_gen', 'h_var', 'c_var', 'nll', 'kl_q2p', 'kl_p2q', 'att_map', 'read_img'])
-    def iterate(self, x, y, u, nll_scale, c, h_con, c_con, h_gen, c_gen, h_var, c_var):
+               outputs=['c', 'h_con', 'c_con', 'h_gen', 'c_gen', 'h_var', 'c_var', 'nll', 'kl_q2p', 'kl_p2q', 'kl_p2g', 'att_map', 'read_img'])
+    def iterate(self, x, y, u, u_hc, nll_scale, c, h_con, c_con, h_gen, c_gen, h_var, c_var):
         if self.step_type == 'add':
             # additive steps use c as a "direct workspace", which means it's
             # already directly comparable to y.
@@ -1168,6 +1212,9 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         # estimate guide conditional over z given h_var
         q_z_mean, q_z_logvar, q_z = \
                 self.var_mlp_out.apply(h_var, u)
+        # estimate controller conditional over z given h_con (from time t-1)
+        g_z_mean, g_z_logvar, g_z = \
+                self.con_mlp_out.apply(h_con, u)
 
         # mix samples from p/q based on value of self.train_switch
         z = (self.train_switch[0] * q_z) + \
@@ -1177,6 +1224,8 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         i_con = self.con_mlp_in.apply(tensor.concatenate([z], axis=1))
         h_con, c_con = self.con_rnn.apply(states=h_con, cells=c_con, \
                                           inputs=i_con, iterate=False)
+        # add a bit of noise to h_con
+        h_con = h_con + u_hc
         # update the "workspace" (stored in c)
         if self.step_type == 'add':
             c = c + self.writer_mlp.apply(h_con)
@@ -1192,12 +1241,14 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
                             p_z_mean, p_z_logvar), axis=1)
         kl_p2q = tensor.sum(gaussian_kld(p_z_mean, p_z_logvar, \
                             q_z_mean, q_z_logvar), axis=1)
-        return c, h_con, c_con, h_gen, c_gen, h_var, c_var, nll, kl_q2p, kl_p2q, att_map, read_img
+        kl_p2g = tensor.sum(gaussian_kld(p_z_mean, p_z_logvar, \
+                            g_z_mean, g_z_logvar), axis=1)
+        return c, h_con, c_con, h_gen, c_gen, h_var, c_var, nll, kl_q2p, kl_p2q, kl_p2g, att_map, read_img
 
     #------------------------------------------------------------------------
 
     @application(inputs=['x', 'y'],
-                 outputs=['cs', 'h_cons', 'nlls', 'kl_q2ps', 'kl_p2qs', 'att_maps', 'read_imgs'])
+                 outputs=['cs', 'h_cons', 'nlls', 'kl_q2ps', 'kl_p2qs', 'kl_p2gs', 'att_maps', 'read_imgs'])
     def process_inputs(self, x, y):
         # get important size and shape information
 
@@ -1220,11 +1271,9 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         # get initial states for all model components
         c0 = self.c_0.repeat(batch_size, axis=0)
         cc0 = self.cc_0.repeat(batch_size, axis=0)
-        hc0 = self.hc_0.repeat(batch_size, axis=0)
-        hc0 = hc0 + self.theano_rng.normal(
-                            size=(hc0.shape[0], hc0.shape[1]),
-                            avg=0., std=1.)
-
+        u_hc0 = self.theano_rng.normal(size=(batch_size, hc_dim),
+                                       avg=0., std=0.05)
+        hc0 = self.hc_0.repeat(batch_size, axis=0) + u_hc0
         cg0 = self.cg_0.repeat(batch_size, axis=0)
         hg0 = self.hg_0.repeat(batch_size, axis=0)
         cv0 = self.cv_0.repeat(batch_size, axis=0)
@@ -1235,23 +1284,29 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
                     size=(self.total_steps, batch_size, z_dim),
                     avg=0., std=1.)
 
+        u_hc = self.theano_rng.normal(
+                    size=(self.total_steps, batch_size, hc_dim),
+                    avg=0., std=0.05)
+
         # run the multi-stage guided generative process
-        cs, h_cons, _, _, _, _, _, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
-                self.iterate(x=x, y=y, u=u, nll_scale=self.nll_scales,
+        cs, h_cons, _, _, _, _, _, nlls, kl_q2ps, kl_p2qs, kl_p2gs, att_maps, read_imgs = \
+                self.iterate(x=x, y=y, u=u, u_hc=u_hc,
+                             nll_scale=self.nll_scales,
                              c=c0,
                              h_con=hc0, c_con=cc0,
                              h_gen=hg0, c_gen=cg0,
                              h_var=hv0, c_var=cv0)
 
         # add name tags to the constructed values
-        att_maps.name = "att_maps"
-        read_imgs.name = "read_imgs"
         cs.name = "cs"
         h_cons.name = "h_cons"
         nlls.name = "nlls"
         kl_q2ps.name = "kl_q2ps"
         kl_p2qs.name = "kl_p2qs"
-        return cs, h_cons, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs
+        kl_p2gs.name = "kl_p2gs"
+        att_maps.name = "att_maps"
+        read_imgs.name = "read_imgs"
+        return cs, h_cons, nlls, kl_q2ps, kl_p2qs, kl_p2gs, att_maps, read_imgs
 
     def build_model_funcs(self):
         """
@@ -1266,18 +1321,20 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
             y_sym = tensor.matrix('y_sym')
 
         # collect estimates of y given x produced by this model
-        cs, h_cons, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
+        cs, h_cons, nlls, kl_q2ps, kl_p2qs, kl_p2gs, att_maps, read_imgs = \
                 self.process_inputs(x_sym, y_sym)
 
         # get the expected NLL part of the VFE bound
         self.nll_term = nlls.sum(axis=0).mean()
         self.nll_term.name = "nll_term"
 
-        # get KL(q || p) and KL(p || q)
+        # get KL(q || p) and KL(p || q) and KL(p || g)
         self.kld_q2p_term = kl_q2ps.sum(axis=0).mean()
         self.kld_q2p_term.name = "kld_q2p_term"
         self.kld_p2q_term = kl_p2qs.sum(axis=0).mean()
         self.kld_p2q_term.name = "kld_p2q_term"
+        self.kld_p2g_term = kl_p2gs.sum(axis=0).mean()
+        self.kld_p2g_term.name = "kld_p2g_term"
 
         # get the proper VFE bound on NLL
         self.nll_bound = self.nll_term + self.kld_q2p_term
@@ -1292,8 +1349,11 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         self.reg_term.name = "reg_term"
 
         # compute the full cost w.r.t. which we will optimize params
-        self.joint_cost = self.nll_term + (0.95 * self.kld_q2p_term) + \
-                          (0.05 * self.kld_p2q_term) + self.reg_term
+        self.joint_cost = self.nll_term + \
+                          (self.lam_kld_q2p[0] * self.kld_q2p_term) + \
+                          (self.lam_kld_p2q[0] * self.kld_p2q_term) + \
+                          (self.lam_kld_p2g[0] * self.kld_p2g_term) + \
+                          self.reg_term
         self.joint_cost.name = "joint_cost"
 
         # get the gradient of the joint cost for all optimizable parameters
@@ -1303,12 +1363,6 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         for i, p in enumerate(self.joint_params):
             self.joint_grads[p] = grad_list[i]
 
-        # shared var learning rate for generator and inferencer
-        zero_ary = to_fX( numpy.zeros((1,)) )
-        self.lr = theano.shared(value=zero_ary, name='scg_lr')
-        # shared var momentum parameters for generator and inferencer
-        self.mom_1 = theano.shared(value=zero_ary, name='scg_mom_1')
-        self.mom_2 = theano.shared(value=zero_ary, name='scg_mom_2')
         # construct the updates for all trainable parameters
         self.joint_updates = get_adam_updates(params=self.joint_params, \
                 grads=self.joint_grads, alpha=self.lr, \
@@ -1317,7 +1371,8 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
 
         # collect the outputs to return from this function
         outputs = [self.joint_cost, self.nll_bound, self.nll_term, \
-                   self.kld_q2p_term, self.kld_p2q_term, self.reg_term]
+                   self.kld_q2p_term, self.kld_p2q_term, self.kld_p2g_term, \
+                   self.reg_term]
         # collect the required inputs
         inputs = [x_sym, y_sym]
 
@@ -1347,7 +1402,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
             x_sym = tensor.matrix('x_sym_att_funcs')
             y_sym = tensor.matrix('y_sym_att_funcs')
         # collect estimates of y given x produced by this model
-        cs, h_cons, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
+        cs, h_cons, nlls, kl_q2ps, kl_p2qs, kl_p2gs, att_maps, read_imgs = \
                 self.process_inputs(x_sym, y_sym)
         # build the function for computing the attention trajectories
         print("Compiling attention tracker...")
