@@ -1267,12 +1267,13 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
             # into a proper sequential form
             batch_size = x.shape[0]
             x = x.dimshuffle('x',0,1).repeat(self.total_steps, axis=0)
+            y = y.dimshuffle('x',0,1).repeat(self.total_steps, axis=0)
 
         # get initial states for all model components
         c0 = self.c_0.repeat(batch_size, axis=0)
         cc0 = self.cc_0.repeat(batch_size, axis=0)
-        u_hc0 = self.theano_rng.normal(size=(batch_size, hc_dim),
-                                       avg=0., std=0.05)
+        u_hc0 = 0.05 * self.theano_rng.normal(size=(batch_size, hc_dim),
+                                               avg=0., std=1.)
         hc0 = self.hc_0.repeat(batch_size, axis=0) + u_hc0
         cg0 = self.cg_0.repeat(batch_size, axis=0)
         hg0 = self.hg_0.repeat(batch_size, axis=0)
@@ -1284,9 +1285,9 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
                     size=(self.total_steps, batch_size, z_dim),
                     avg=0., std=1.)
 
-        u_hc = self.theano_rng.normal(
-                    size=(self.total_steps, batch_size, hc_dim),
-                    avg=0., std=0.05)
+        u_hc = 0.05 * self.theano_rng.normal(
+                        size=(self.total_steps, batch_size, hc_dim),
+                        avg=0., std=1.)
 
         # run the multi-stage guided generative process
         cs, h_cons, _, _, _, _, _, nlls, kl_q2ps, kl_p2qs, kl_p2gs, att_maps, read_imgs = \

@@ -252,7 +252,7 @@ def test_seq_cond_gen_static(step_type='add'):
     ##############################
     # File tag, for output stuff #
     ##############################
-    result_tag = "{}AAA_SCG".format(RESULT_PATH)
+    result_tag = "{}CCC_SCG".format(RESULT_PATH)
 
     ##########################
     # Get some training data #
@@ -295,7 +295,7 @@ def test_seq_cond_gen_static(step_type='add'):
     init_steps = 3
     exit_rate = 0.2
     x_dim = obs_dim
-    y_dim = obs_dim #+ label_dim
+    y_dim = obs_dim + label_dim
     z_dim = 100
     rnn_dim = 300
     write_dim = 300
@@ -306,17 +306,17 @@ def test_seq_cond_gen_static(step_type='add'):
         samp_count = result[0].shape[1]
         # get generated predictions
         x_samps = np.zeros((seq_len*samp_count, obs_dim))
-        #y_samps = np.zeros((seq_len*samp_count, label_dim))
+        y_samps = np.zeros((seq_len*samp_count, label_dim))
         idx = 0
         for s1 in range(samp_count):
             for s2 in range(seq_len):
                 x_samps[idx] = result[0][s2,s1,:obs_dim]
-                #y_samps[idx] = result[0][s2,s1,obs_dim:]
+                y_samps[idx] = result[0][s2,s1,obs_dim:]
                 idx += 1
         file_name = "{0:s}_traj_xs_{1:s}.png".format(pre_tag, post_tag)
         utils.visualize_samples(x_samps, file_name, num_rows=20)
-        #file_name = "{0:s}_traj_ys_{1:s}.png".format(pre_tag, post_tag)
-        #utils.visualize_samples(y_samps, file_name, num_rows=20)
+        file_name = "{0:s}_traj_ys_{1:s}.png".format(pre_tag, post_tag)
+        utils.visualize_samples(y_samps, file_name, num_rows=20)
         # get sequential attention maps
         seq_samps = np.zeros((seq_len*samp_count, x_dim))
         idx = 0
@@ -347,10 +347,10 @@ def test_seq_cond_gen_static(step_type='add'):
     }
 
     read_N = 2 # inner/outer grid dimension for reader
-    read_dim = 2*read_N**2   # total number of "pixels" read by reader
     reader_mlp = SimpleAttentionReader2d(x_dim=x_dim, con_dim=rnn_dim,
                                          width=28, height=28, N=read_N,
                                          init_scale=2.0, **inits)
+    read_dim = reader_mlp.read_dim # total number of "pixels" read by reader
 
     writer_mlp = MLP([None, None], [rnn_dim, write_dim, y_dim], \
                      name="writer_mlp", **inits)
@@ -449,10 +449,10 @@ def test_seq_cond_gen_static(step_type='add'):
 
     # quick test of attention trajectory sampler
     samp_count = 100
-    #XYb = XYva[:samp_count,:]
-    #Xb, Yb = split_xy(XYb)
-    Xb = Xva[:samp_count]
-    result = SCG.sample_attention(Xb, Xb)
+    XYb = XYva[:samp_count,:]
+    Xb, Yb = split_xy(XYb)
+    #Xb = Xva[:samp_count]
+    result = SCG.sample_attention(Xb, XYb)
     visualize_attention(result, pre_tag=result_tag, post_tag="b0")
 
     # build the main model functions (i.e. training and cost functions)
@@ -486,17 +486,17 @@ def test_seq_cond_gen_static(step_type='add'):
         batch_idx += batch_size
         if (np.max(batch_idx) >= tr_samples):
             # we finished an "epoch", so we rejumble the training set
-            #XYtr = row_shuffle(XYtr)
-            Xtr = row_shuffle(Xtr)
+            XYtr = row_shuffle(XYtr)
+            #Xtr = row_shuffle(Xtr)
             batch_idx = np.arange(batch_size)
         # set sgd and objective function hyperparams for this update
         SCG.set_sgd_params(lr=learn_rate, mom_1=momentum, mom_2=0.99)
         SCG.set_lam_kld(lam_kld_q2p=0.95, lam_kld_p2q=0.05, lam_kld_p2g=0.05)
         # perform a minibatch update and record the cost for this batch
-        #XYb = XYtr.take(batch_idx, axis=0)
-        #Xb, Yb = split_xy(XYb)
-        Xb = Xtr.take(batch_idx, axis=0)
-        result = SCG.train_joint(Xb, Xb)
+        XYb = XYtr.take(batch_idx, axis=0)
+        Xb, Yb = split_xy(XYb)
+        #Xb = Xtr.take(batch_idx, axis=0)
+        result = SCG.train_joint(Xb, XYb)
         costs = [(costs[j] + result[j]) for j in range(len(result))]
 
         # output diagnostic information and checkpoint parameters, etc.
@@ -518,12 +518,12 @@ def test_seq_cond_gen_static(step_type='add'):
         if ((i % 500) == 0): #((i % 1000) == 0):
             SCG.save_model_params("{}_params.pkl".format(result_tag))
             # compute a small-sample estimate of NLL bound on validation set
-            #XYva = row_shuffle(XYva)
-            #XYb = XYva[:1000]
-            #Xb, Yb = split_xy(XYb)
-            Xva = row_shuffle(Xva)
-            Xb = Xva[:1000]
-            va_costs = SCG.compute_nll_bound(Xb, Xb)
+            XYva = row_shuffle(XYva)
+            XYb = XYva[:1000]
+            Xb, Yb = split_xy(XYb)
+            #Xva = row_shuffle(Xva)
+            #Xb = Xva[:1000]
+            va_costs = SCG.compute_nll_bound(Xb, XYb)
             str1 = "    va_nll_bound : {}".format(va_costs[1])
             str2 = "    va_nll_term  : {}".format(va_costs[2])
             str3 = "    va_kld_q2p   : {}".format(va_costs[3])
@@ -535,10 +535,10 @@ def test_seq_cond_gen_static(step_type='add'):
             # Sample and draw attention trajectories. #
             ###########################################
             samp_count = 100
-            #XYb = XYva[:samp_count,:]
-            #Xb, Yb = split_xy(XYb)
-            Xb = Xva[:samp_count]
-            result = SCG.sample_attention(Xb, Xb)
+            XYb = XYva[:samp_count,:]
+            Xb, Yb = split_xy(XYb)
+            #Xb = Xva[:samp_count]
+            result = SCG.sample_attention(Xb, XYb)
             post_tag = "b{0:d}".format(i)
             visualize_attention(result, pre_tag=result_tag, post_tag=post_tag)
 
