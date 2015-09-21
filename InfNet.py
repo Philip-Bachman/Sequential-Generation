@@ -392,7 +392,9 @@ class InfNet(object):
 
         # construct the outputs we will want to access
         output_mean = mu_acts[-1]
-        output_logvar = sigma_acts[-1]
+        if self.shared_logvar:
+            shared_lv = T.mean(sigma_acts[-1], axis=1, keepdims=True)
+            output_logvar = shared_lv.repeat(self.sigma_layers[-1].out_dim, axis=1)
 
         # wrap them up for easy returnage
         result = [output_mean, output_logvar]

@@ -252,7 +252,7 @@ def test_seq_cond_gen_static(step_type='add'):
     ##############################
     # File tag, for output stuff #
     ##############################
-    result_tag = "{}CCC_SCG".format(RESULT_PATH)
+    result_tag = "{}AAA_SCG".format(RESULT_PATH)
 
     ##########################
     # Get some training data #
@@ -297,9 +297,9 @@ def test_seq_cond_gen_static(step_type='add'):
     x_dim = obs_dim
     y_dim = obs_dim + label_dim
     z_dim = 100
-    rnn_dim = 300
-    write_dim = 300
-    mlp_dim = 300
+    rnn_dim = 400
+    write_dim = 400
+    mlp_dim = 400
 
     def visualize_attention(result, pre_tag="AAA", post_tag="AAA"):
         seq_len = result[0].shape[0]
@@ -312,6 +312,13 @@ def test_seq_cond_gen_static(step_type='add'):
             for s2 in range(seq_len):
                 x_samps[idx] = result[0][s2,s1,:obs_dim]
                 y_samps[idx] = result[0][s2,s1,obs_dim:]
+                # add ticks at the corners of label predictions, to make them
+                # easier to parse visually.
+                max_val = np.mean(result[0][s2,s1,obs_dim:])
+                y_samps[idx][0] = max_val
+                y_samps[idx][9] = max_val
+                y_samps[idx][-1] = max_val
+                y_samps[idx][-10] = max_val
                 idx += 1
         file_name = "{0:s}_traj_xs_{1:s}.png".format(pre_tag, post_tag)
         utils.visualize_samples(x_samps, file_name, num_rows=20)
@@ -491,7 +498,7 @@ def test_seq_cond_gen_static(step_type='add'):
             batch_idx = np.arange(batch_size)
         # set sgd and objective function hyperparams for this update
         SCG.set_sgd_params(lr=learn_rate, mom_1=momentum, mom_2=0.99)
-        SCG.set_lam_kld(lam_kld_q2p=0.95, lam_kld_p2q=0.05, lam_kld_p2g=0.05)
+        SCG.set_lam_kld(lam_kld_q2p=0.95, lam_kld_p2q=0.05, lam_kld_p2g=0.1)
         # perform a minibatch update and record the cost for this batch
         XYb = XYtr.take(batch_idx, axis=0)
         Xb, Yb = split_xy(XYb)

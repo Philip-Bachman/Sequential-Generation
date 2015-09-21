@@ -1,5 +1,5 @@
 #############################################################################
-# Code for a variational Sequential Revelation and Refinement Model.        #
+# Code for a variational Walkout model (kind of like a GSN).                #
 #############################################################################
 
 # basic python
@@ -27,251 +27,134 @@ from HelperFuncs import to_fX
 # This thing does cool stuff, very deeply!   #
 ##############################################
 
-class SRRModel(object):
+class WalkoutModel(object):
     """
-    Controller for training a sequential revelation and refinement model.
+    Controller for training a forwards-backwards chainy model.
 
     Parameters:
         rng: numpy.random.RandomState (for reproducibility)
-        x_out: the goal state for iterative refinement
-        p_zi_given_xi: InfNet for stochastic part of step
-        p_sip1_given_zi: HydraNet for deterministic part of step
-        p_x_given_si: HydraNet for transform from s-space to x-space
-        q_zi_given_xi: InfNet for the guide policy
+        x_out: the goal state for forwards-backwards walking process
+        p_z_given_x: InfNet for stochastic part of step
+        p_x_given_z: HydraNet for deterministic part of step
         params: REQUIRED PARAMS SHOWN BELOW
                 x_dim: dimension of observations to construct
                 z_dim: dimension of latent space for policy wobble
-                s_dim: dimension of space in which to perform construction
-                use_p_x_given_si: boolean for whether to use p_x_given_si
-                rev_sched: list of "revelation" blocks. each block is described
-                           by the number of steps prior to revelation, and the
-                           percentage of remaining pixels to reveal.
-                rev_masks: matrix of revelation masks. the row i provides the
-                           mask for iteration i of the srr loop. when this
-                           argument is passed, rev_sched is ignored and the
-                           revelation schedule is determined by rev_masks.
-                step_type: either "add" or "jump"
+                walkout_steps: number of steps to walk out
                 x_type: can be "bernoulli" or "gaussian"
-                obs_transform: can be 'none' or 'sigmoid'
+                x_transform: can be 'none' or 'sigmoid'
     """
     def __init__(self, rng=None,
             x_out=None, \
-            p_zi_given_xi=None, \
-            p_sip1_given_zi=None, \
-            p_x_given_si=None, \
-            q_zi_given_xi=None, \
+            p_z_given_x=None, \
+            p_x_given_z=None, \
             params=None, \
             shared_param_dicts=None):
-        # setup a rng for this SRRModel
+        # setup a rng for this WalkoutModel
         self.rng = RandStream(rng.randint(100000))
 
         # grab the user-provided parameters
         self.params = params
         self.x_dim = self.params['x_dim']
         self.z_dim = self.params['z_dim']
-        self.s_dim = self.params['s_dim']
-        self.use_p_x_given_si = self.params['use_p_x_given_si']
-        self.step_type = self.params['step_type']
+        self.walkout_steps = self.params['walkout_steps']
         self.x_type = self.params['x_type']
-        if self.use_p_x_given_si:
-            print("Constructing hypotheses indirectly in s-space...")
-        else:
-            print("Constructing hypotheses directly in x-space...")
-            assert(self.s_dim == self.x_dim)
-        if 'obs_transform' in self.params:
-            assert((self.params['obs_transform'] == 'sigmoid') or \
-                    (self.params['obs_transform'] == 'none'))
-            if self.params['obs_transform'] == 'sigmoid':
-                self.obs_transform = lambda x: T.nnet.sigmoid(x)
-            else:
-                self.obs_transform = lambda x: x
-        else:
-            self.obs_transform = lambda x: T.nnet.sigmoid(x)
-        if self.x_type == 'bernoulli':
-            self.obs_transform = lambda x: T.nnet.sigmoid(x)
         self.shared_param_dicts = shared_param_dicts
-        # Deal with revelation scheduling
-        if ('rev_masks' in self.params) and (self.params['rev_masks'] is not None):
-            rmp = self.params['rev_masks'][0].astype(theano.config.floatX)
-            rmq = self.params['rev_masks'][1].astype(theano.config.floatX)
-            self.rev_masks_p = theano.shared(value=rmp, name='srrm_rev_masks_p')
-            self.rev_masks_q = theano.shared(value=rmq, name='srrm_rev_masks_q')
-            self.rev_sched = None
-            self.use_rev_masks = True
+        if 'x_transform' in self.params:
+            assert((self.params['x_transform'] == 'sigmoid') or \
+                    (self.params['x_transform'] == 'none'))
+            if self.params['x_transform'] == 'sigmoid':
+                self.x_transform = lambda x: T.nnet.sigmoid(x)
+            else:
+                self.x_transform = lambda x: x
         else:
-            self.rev_sched = self.params['rev_sched']
-            self.rev_masks_p = None
-            self.rev_masks_q = None
-            self.use_rev_masks = False
-            nice_nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
-            # "validate" the set of revelation block descriptions
-            for rev_block in self.rev_sched:
-                assert(rev_block[0] in nice_nums)
-                assert((rev_block[1] >= 0.0) and (rev_block[1] <= 1.01))
+            self.x_transform = lambda x: T.nnet.sigmoid(x)
+        if self.x_type == 'bernoulli':
+            self.x_transform = lambda x: T.nnet.sigmoid(x)
         assert((self.x_type == 'bernoulli') or (self.x_type == 'gaussian'))
         assert((self.step_type == 'add') or (self.step_type == 'jump'))
 
-
         # grab handles to the relevant networks
-        self.p_zi_given_xi = p_zi_given_xi
-        self.p_sip1_given_zi = p_sip1_given_zi
-        self.p_x_given_si = p_x_given_si
-        self.q_zi_given_xi = q_zi_given_xi
+        self.p_z_given_x = p_z_given_x
+        self.p_x_given_z = p_x_given_z
 
         # record the symbolic variables that will provide inputs to the
-        # computation graph created for this SRRModel
+        # computation graph created for this WalkoutModel
         self.x_out = x_out           # target output for generation
-        self.zi_zmuv = T.tensor3()   # ZMUV gauss noise for policy wobble
-        self.p_masks = T.tensor3()   # revelation masks for primary policy
-        self.q_masks = T.tensor3()   # revelation masks for guide policy
-        if self.use_rev_masks:
-            self.total_steps = self.params['rev_masks'][0].shape[0]
-        else:
-            self.total_steps = sum([rb[0] for rb in self.rev_sched])
-
-        # setup switching variable for changing between sampling/training
-        zero_ary = to_fX( np.zeros((1,)) )
-        self.train_switch = theano.shared(value=zero_ary, name='srrm_train_switch')
-        self.set_train_switch(1.0)
+        self.zi_zmuv = T.tensor3()   # ZMUV gauss noise for walk-out wobble
 
         if self.shared_param_dicts is None:
             # initialize the parameters "owned" by this model
-            s0_init = to_fX( np.zeros((self.s_dim,)) )
-            ss_init = to_fX( 0.5 * np.ones((self.total_steps,)) )
-            self.s0 = theano.shared(value=s0_init, name='srrm_s0')
-            self.obs_logvar = theano.shared(value=zero_ary, name='srrm_obs_logvar')
+            zero_ary = to_fX( np.zeros((1,)) )
+            self.obs_logvar = theano.shared(value=zero_ary, name='obs_logvar')
             self.bounded_logvar = 8.0 * T.tanh((1.0/8.0) * self.obs_logvar[0])
-            self.step_scales = theano.shared(value=ss_init, name='srrm_step_scales')
             self.shared_param_dicts = {}
-            self.shared_param_dicts['s0'] = self.s0
             self.shared_param_dicts['obs_logvar'] = self.obs_logvar
-            self.shared_param_dicts['step_scales'] = self.step_scales
         else:
             # grab the parameters required by this model from a given dict
-            self.s0 = self.shared_param_dicts['s0']
             self.obs_logvar = self.shared_param_dicts['obs_logvar']
             self.bounded_logvar = 8.0 * T.tanh((1.0/8.0) * self.obs_logvar[0])
-            self.step_scales = self.shared_param_dicts['step_scales']
 
-        ##################################################################
-        # Setup the sequential revelation and refinement loop using scan #
-        ##################################################################
-        # ss: This is a sequence of scalars that will be used to rescale the
-        #     "gradient" input to the primary and guide policies.
-        #
-        # zi_zmuv: This is a sequence of ZMUV gaussian samples that will be
-        #          reparametrized to sample actions from the policies.
-        #
-        # p_masks: This is a sequence of "unmasking" masks. When one of these
-        #          masking variables is 1, the corresponding value in self.x_out
-        #          will be "revealed" to the primary policy. Prediction error
-        #          is measured for a value only the first time it is revealed.
-        #          Once revealed, a value remains "visible" to the policy.
-        #          The final step should reveal all values.
-        #
-        # q_masks: This is a sequence of "unmasking" masks. These are similar
-        #          to p_masks, but control which values are revealed to the
-        #          guide policy. The guide policy masking sequence should be
-        #          constructed to stay "ahead of" the primary policy's masking
-        #          sequence. The guide policy needs to know which values will
-        #          be revealed to the primary policy so that it can focus its
-        #          reconstruction efforts on those values. Otherwise, the guide
-        #          policy will immediately reconstruct the entire target.
-        #
-        # si: This is the current "belief state" for each trial in the training
-        #     batch. The belief state is updated in each iteration, and passed
-        #     forward through the recurrence.
-        #
-        # mi_p: This is the current revelation mask for the primary policy.
-        #
-        # mi_q: This is the current revelation mask for the guide policy.
-        #
-        def srr_step_func(ss, zi_zmuv, p_masks, q_masks, si, mi_p, mi_q):
-            # transform the current belief state into an observation
-            si_as_x = self._from_si_to_x(si)
-            full_grad = T.log(1.0 + T.exp(ss)) * (self.x_out - si_as_x)
+        ###############################################################
+        # Setup the forwards (i.e. training) walk-out loop using scan #
+        ###############################################################
+        def forwards_loop(xi_zmuv, zi_zmuv, xi_fw, zi_fw):
+            # get samples of next zi, according to the forwards model
+            zi_fw_mean, zi_fw_logvar = self.p_z_given_x.apply(xi_fw, \
+                                       do_samples=False)
+            zi_fw = zi_fw_mean + (T.exp(0.5 * zi_fw_logvar) * zi_zmuv)
 
-            # get the masked belief state and gradient for primary policy
-            xi_for_p = (mi_p * self.x_out) + ((1.0 - mi_p) * si_as_x)
-            grad_for_p = mi_p * full_grad
+            # check reverse direction probability p(xi_fw | zi_fw)
+            xi_bw_mean, xi_bw_logvar = self.p_x_given_z.apply(zi_fw, \
+                                       do_samples=False)
+            xi_bw_mean = self.x_transform(xi_bw_mean)
+            nll_xi_bw = log_prob_gaussian2(xi_fw, xi_bw_mean, \
+                        log_vars=xi_bw_logvar, mask=None)
+            nll_xi_bw = nll_xi_bw.flatten()
 
-            # update the guide policy's revelation mask
-            new_to_q = (1.0 - mi_q) * q_masks
-            mip1_q = mi_q + new_to_q
-            # get the masked belief state and gradient for guide policy
-            #xi_for_q = (mip1_q * self.x_out) + ((1.0 - mip1_q) * si_as_x)
-            xi_for_q = xi_for_p
-            grad_for_q = mip1_q * full_grad
+            # get samples of next xi, according to the forwards model
+            xi_fw_mean, xi_fw_logvar = self.p_x_given_z.apply(zi_fw, \
+                                       do_samples=False)
+            xi_fw_mean = self.x_transform(xi_fw_mean)
+            xi_fw = xi_fw_mean + (T.exp(0.5 * xi_fw_logvar) * xi_zmuv)
 
-            # get samples of next zi, according to the primary policy
-            zi_p_mean, zi_p_logvar = self.p_zi_given_xi.apply( \
-                    T.horizontal_stack(xi_for_p, grad_for_p), \
-                    do_samples=False)
-            zi_p = zi_p_mean + (T.exp(0.5 * zi_p_logvar) * zi_zmuv)
-            # get samples of next zi, according to the guide policy
-            zi_q_mean, zi_q_logvar = self.q_zi_given_xi.apply( \
-                    T.horizontal_stack(xi_for_q, grad_for_q), \
-                    do_samples=False)
-            zi_q = zi_q_mean + (T.exp(0.5 * zi_q_logvar) * zi_zmuv)
-            # make zi samples that can be switched between zi_p and zi_q
-            zi = ((self.train_switch[0] * zi_q) + \
-                 ((1.0 - self.train_switch[0]) * zi_p))
+            # check reverse direction probability p(zi_fw | xi_fw)
+            zi_bw_mean, zi_bw_logvar = self.p_z_given_x.apply(xi_fw, \
+                                       do_samples=False)
+            nll_zi_bw = log_prob_gaussian2(zi_fw, zi_bw_mean, \
+                        log_vars=zi_bw_logvar, mask=None)
+            nll_zi_bw = nll_zi_bw.flatten()
 
-            # compute relevant KLds for this step
-            kldi_q2p = gaussian_kld(zi_q_mean, zi_q_logvar, \
-                                    zi_p_mean, zi_p_logvar) # KL(q || p)
-            kldi_p2q = gaussian_kld(zi_p_mean, zi_p_logvar, \
-                                    zi_q_mean, zi_q_logvar) # KL(p || q)
-            kldi_p2g = gaussian_kld(zi_p_mean, zi_p_logvar, \
-                                    0.0, 0.0) # KL(p || N(0, I))
-
-            # compute next si, given sampled zi (i.e. update the belief state)
-            hydra_out = self.p_sip1_given_zi.apply(zi)
-            si_step = hydra_out[0]
-            if (self.step_type == 'jump'):
-                # jump steps always do a full swap of belief state
-                sip1 = si_step
-            else:
-                # additive steps adjust the belief state like an LSTM
-                write_gate = T.nnet.sigmoid(2.0 + hydra_out[1])
-                erase_gate = T.nnet.sigmoid(2.0 + hydra_out[2])
-                sip1 = (erase_gate * si) + (write_gate * si_step)
-            # update the primary policy's revelation mask
-            new_to_p = (1.0 - mi_p) * p_masks
-            mip1_p = mi_p + new_to_p
-            # compute NLL only for the newly revealed values
-            nlli = self._construct_nll_costs(sip1, self.x_out, new_to_p)
             # each loop iteration produces the following values:
-            #   sip1: belief state at end of current step
-            #   mip1_p: revealed values mask to use in next step (primary)
-            #   mip1_q: revealed values mask to use in next step (guide)
-            #   nlli: NLL for values revealed at end of current step
-            #   kldi_q2p: KL(q || p) for the current step
-            #   kldi_p2q: KL(p || q) for the current step
-            #   kldi_p2g: KL(p || N(0,I)) for the current step
-            return sip1, mip1_p, mip1_q, nlli, kldi_q2p, kldi_p2q, kldi_p2g
+            #   xi_fw: xi generated fom zi by forwards walk
+            #   zi_fw: zi generated fom xi by forwards walk
+            #   xi_fw_mean: ----
+            #   xi_fw_logvar: ----
+            #   zi_fw_mean: ----
+            #   zi_fw_logvar: ----
+            #   nll_xi_bw: NLL for reverse step zi_fw -> xi_fw
+            #   nll_zi_bw: NLL for reverse step xi_fw -> zi_fw
+            return xi_fw, zi_fw, xi_fw_mean, xi_fw_logvar, zi_fw_mean, zi_fw_logvar, nll_xi_bw, nll_zi_bw
 
-        # initialize belief state to self.s0
-        self.s0_full = T.alloc(0.0, self.x_out.shape[0], self.s_dim) + self.s0
-        # initialize revelation masks to 0 for all values in all trials
-        self.m0_full = T.zeros_like(self.x_out)
+        # initialize states for x/z
+        self.x0 = self.x_out
+        self.z0 = T.alloc(0.0, self.x0.shape[0], self.z_dim)
         # setup initial values to pass to scan op
-        outputs_init = [self.s0_full, self.m0_full, self.m0_full, \
-                        None, None, None, None]
-        sequences_init = [self.step_scales, self.zi_zmuv, self.p_masks, self.q_masks]
+        outputs_init = [self.x0, self.z0, None, None, None, None, None, None]
+        sequences_init = [self.xi_zmuv, self.zi_zmuv]
         # apply scan op for the sequential imputation loop
-        self.scan_results, self.scan_updates = theano.scan(srr_step_func, \
+        self.scan_results, self.scan_updates = theano.scan(forwards_loop, \
                     outputs_info=outputs_init, \
                     sequences=sequences_init)
 
         # grab results of the scan op. all values are computed for each step
-        self.si = self.scan_results[0]       # belief states
-        self.mi_p = self.scan_results[1]     # primary revelation masks
-        self.mi_q = self.scan_results[2]     # guide revelation masks
-        self.nlli = self.scan_results[3]     # NLL on newly revealed values
-        self.kldi_q2p = self.scan_results[4] # KL(q || p)
-        self.kldi_p2q = self.scan_results[5] # KL(p || q)
-        self.kldi_p2g = self.scan_results[6] # KL(p || N(0,I))
+        self.xi = self.scan_results[0]
+        self.zi = self.scan_results[1]
+        self.xi_fw_mean = self.scan_results[2]
+        self.xi_fw_logvar = self.scan_results[3]
+        self.zi_fw_mean = self.scan_results[4]
+        self.zi_fw_logvar = self.scan_results[5]
+        self.nll_xi_bw = self.scan_results[6]
+        self.nll_zi_bw = self.scan_results[7]
 
         ######################################################################
         # ALL SYMBOLIC VARS NEEDED FOR THE OBJECTIVE SHOULD NOW BE AVAILABLE #
@@ -357,17 +240,6 @@ class SRRModel(object):
         #self.gen_inf_weights = self.p_zi_given_xi.shared_layers[0].W
         return
 
-    def _from_si_to_x(self, si):
-        """
-        Convert the given si from s-space to x-space.
-        """
-        if self.use_p_x_given_si:
-            x_pre_trans, _ = self.p_x_given_si.apply(si)
-        else:
-            x_pre_trans = si
-        x_post_trans = self.obs_transform(x_pre_trans)
-        return x_post_trans
-
     def set_sgd_params(self, lr=0.01, mom_1=0.9, mom_2=0.999):
         """
         Set learning rate and momentum parameter for all updates.
@@ -423,7 +295,7 @@ class SRRModel(object):
     def _construct_zi_zmuv(self, xo):
         """
         Construct the necessary ZMUV gaussian samples for generating
-        trajectories from this SRRModel, for input matrix xo.
+        trajectories from this WalkoutModel, for input matrix xo.
         """
         zi_zmuv = self.rng.normal( \
                 size=(self.total_steps, xo.shape[0], self.z_dim), \
@@ -720,7 +592,7 @@ class SRRModel(object):
         f_handle.close()
         return
 
-def load_srrmodel_from_file(f_name=None, rng=None):
+def load_WalkoutModel_from_file(f_name=None, rng=None):
     """
     Load a clone of some previously trained model.
     """
@@ -747,9 +619,9 @@ def load_srrmodel_from_file(f_name=None, rng=None):
             child_model_dicts['p_x_given_si'], rng=rng, Xd=xd)
     q_zi_given_xi = load_infnet_from_dict( \
             child_model_dicts['q_zi_given_xi'], rng=rng, Xd=xd)
-    # now, create a new SRRModel based on the loaded data
+    # now, create a new WalkoutModel based on the loaded data
     xo = T.matrix()
-    clone_net = SRRModel(rng=rng, \
+    clone_net = WalkoutModel(rng=rng, \
                          x_out=xo, \
                          p_zi_given_xi=p_zi_given_xi, \
                          p_sip1_given_zi=p_sip1_given_zi, \
@@ -759,7 +631,7 @@ def load_srrmodel_from_file(f_name=None, rng=None):
                          shared_param_dicts=self_dot_shared_param_dicts)
     # helpful output
     print("==================================================")
-    print("LOADED SRRModel WITH PARAMS:")
+    print("LOADED WalkoutModel WITH PARAMS:")
     for k in self_dot_params:
         print("    {0:s}: {1:s}".format(str(k), str(self_dot_params[k])))
     print("==================================================")

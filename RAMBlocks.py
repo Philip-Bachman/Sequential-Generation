@@ -1226,6 +1226,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
                                           inputs=i_con, iterate=False)
         # add a bit of noise to h_con
         h_con = h_con + u_hc
+        
         # update the "workspace" (stored in c)
         if self.step_type == 'add':
             c = c + self.writer_mlp.apply(h_con)
@@ -1272,7 +1273,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         # get initial states for all model components
         c0 = self.c_0.repeat(batch_size, axis=0)
         cc0 = self.cc_0.repeat(batch_size, axis=0)
-        u_hc0 = 0.05 * self.theano_rng.normal(size=(batch_size, hc_dim),
+        u_hc0 = 0.1 * self.theano_rng.normal(size=(batch_size, hc_dim),
                                                avg=0., std=1.)
         hc0 = self.hc_0.repeat(batch_size, axis=0) + u_hc0
         cg0 = self.cg_0.repeat(batch_size, axis=0)
@@ -1285,7 +1286,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
                     size=(self.total_steps, batch_size, z_dim),
                     avg=0., std=1.)
 
-        u_hc = 0.05 * self.theano_rng.normal(
+        u_hc = 0.1 * self.theano_rng.normal(
                         size=(self.total_steps, batch_size, hc_dim),
                         avg=0., std=1.)
 
