@@ -9,6 +9,10 @@ import theano.tensor as T
 # MISCELLANEOUS HELPER FUNCTIONS #
 ##################################
 
+def tanh_clip(x, clip_val=10.0):
+    x_clipped = clip_val * T.tanh((1. / clip_val) * x)
+    return x_clipped
+
 def DCG(x):
     x_dcg = theano.gradient.disconnected_grad(x)
     return x_dcg

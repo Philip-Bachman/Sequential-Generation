@@ -5,6 +5,7 @@
 from __future__ import print_function, division
 
 # basic python
+import time
 import cPickle as pickle
 from PIL import Image
 import numpy as np
@@ -167,8 +168,14 @@ def test_imoold_generation(step_type='add', attention=False):
                 writer_mlp=writer_mlp)
     draw.initialize()
 
+    compile_start_time = time.time()
+
     # build the cost gradients, training function, samplers, etc.
     draw.build_model_funcs()
+
+    compile_end_time = time.time()
+    compile_minutes = (compile_end_time - compile_start_time) / 60.0
+    print("THEANO COMPILE TIME (MIN): {}".format(compile_minutes))
 
     ################################################################
     # Apply some updates, to check that they aren't totally broken #
@@ -215,7 +222,8 @@ def test_imoold_generation(step_type='add', attention=False):
             str5 = "    kld_q2p   : {0:.4f}".format(costs[3])
             str6 = "    kld_p2q   : {0:.4f}".format(costs[4])
             str7 = "    reg_term  : {0:.4f}".format(costs[5])
-            joint_str = "\n".join([str1, str2, str3, str4, str5, str6, str7])
+            str8 = "    step_klds : {0:s}".format(np.array_str(costs[6], precision=2))
+            joint_str = "\n".join([str1, str2, str3, str4, str5, str6, str7, str8])
             print(joint_str)
             out_file.write(joint_str+"\n")
             out_file.flush()
