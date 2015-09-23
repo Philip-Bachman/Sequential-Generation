@@ -280,7 +280,7 @@ class TrajectoryGenerator(object):
 
 if __name__ == "__main__":
     # configure an object renderer
-    OPTR = ObjectPainter(32, 32, obj_type='square', obj_scale=0.2)
+    OPTR = ObjectPainter(32, 32, obj_type='circle', obj_scale=0.4)
 
     _center_x = T.vector()
     _center_y = T.vector()
@@ -312,7 +312,7 @@ if __name__ == "__main__":
         center_y = to_fX( traj_y.T.ravel() )
         delta = to_fX( np.ones(center_x.shape) )
         sigma = to_fX( np.ones(center_x.shape) )
-        W = write_func(center_y, center_x, delta, 0.05*sigma)
+        W = write_func(center_y, center_x, delta, 0.2*sigma)
     end_time = time.time()
     render_time = end_time - start_time
     render_bps = batch_count / render_time
