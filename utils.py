@@ -47,9 +47,7 @@ def scale_to_unit_interval(ndar, eps=1e-8):
     return ndar
 
 def tile_raster_images(X, img_shape=None, tile_shape=None, tile_spacing=(0, 0),
-                        scale=True,
-                        output_pixel_vals=True,
-                        colorImg=False):
+                        scale=True, colorImg=False):
     """
     Transform an array with one flattened image per row, into an array in
     which images are reshaped and layed out like tiles on a floor.
@@ -59,11 +57,11 @@ def tile_raster_images(X, img_shape=None, tile_shape=None, tile_spacing=(0, 0),
     (such as the first layer of a neural net).
     """
     X = X * 1.0 # converts ints to floats
-    
+
     if colorImg:
         channelSize = X.shape[1]/3
         X = (X[:,0:channelSize], X[:,channelSize:2*channelSize], X[:,2*channelSize:3*channelSize], None)
-    
+
     assert len(img_shape) == 2
     assert len(tile_shape) == 2
     assert len(tile_spacing) == 2
@@ -82,25 +80,17 @@ def tile_raster_images(X, img_shape=None, tile_shape=None, tile_spacing=(0, 0),
     if isinstance(X, tuple):
         assert len(X) == 4
         # Create an output np ndarray to store the image
-        if output_pixel_vals:
-            out_array = np.zeros((out_shape[0], out_shape[1], 4), dtype='uint8')
-        else:
-            out_array = np.zeros((out_shape[0], out_shape[1], 4), dtype=X.dtype)
+        out_array = np.zeros((out_shape[0], out_shape[1], 4), dtype='uint8')
 
         #colors default to 0, alpha defaults to 1 (opaque)
-        if output_pixel_vals:
-            channel_defaults = [0, 0, 0, 255]
-        else:
-            channel_defaults = [0., 0., 0., 1.]
+        channel_defaults = [0, 0, 0, 255]
 
-        
         for i in xrange(4):
             if X[i] is None:
                 # if channel is None, fill it with zeros of the correct
                 # dtype
                 out_array[:, :, i] = np.zeros(out_shape,
-                        dtype='uint8' if output_pixel_vals else out_array.dtype
-                        ) + channel_defaults[i]
+                        dtype='uint8') + channel_defaults[i]
                 if i < 3:
                     print('WHY AM I HERE (utils.py line 101)?')
             else:
@@ -110,7 +100,10 @@ def tile_raster_images(X, img_shape=None, tile_shape=None, tile_spacing=(0, 0),
                 if scale:
                     # shift and scale this channel to be in [0...1]
                     xi = (X[i] - X[i].min()) / (X[i].max() - X[i].min())
-                out_array[:, :, i] = tile_raster_images(xi, img_shape, tile_shape, tile_spacing, False, output_pixel_vals) 
+                out_array[:, :, i] = tile_raster_images(xi, img_shape=img_shape, \
+                                    tile_shape=tile_shape, \
+                                    tile_shaping=tile_spacing, \
+                                    scale=False)
         return out_array
 
     else:
@@ -118,8 +111,11 @@ def tile_raster_images(X, img_shape=None, tile_shape=None, tile_spacing=(0, 0),
         H, W = img_shape
         Hs, Ws = tile_spacing
 
+        mean_pix_val = np.zeros((1,)) + (128 * np.max(X.astype(np.float32)))
+        mean_pix_val = mean_pix_val.astype(np.uint8)
+
         # generate a matrix to store the output
-        out_array = np.zeros(out_shape, dtype='uint8' if output_pixel_vals else X.dtype)
+        out_array = np.zeros(out_shape, dtype='uint8') + mean_pix_val[0]
         for tile_row in xrange(tile_shape[0]):
             for tile_col in xrange(tile_shape[1]):
                 if tile_row * tile_shape[1] + tile_col < X.shape[0]:
@@ -137,7 +133,7 @@ def tile_raster_images(X, img_shape=None, tile_shape=None, tile_spacing=(0, 0),
                         tile_row * (H+Hs): tile_row * (H + Hs) + H,
                         tile_col * (W+Ws): tile_col * (W + Ws) + W
                         ] \
-                        = this_img * (255 if output_pixel_vals else 1)
+                        = this_img * 255
         return out_array
 
 def visualize(EN, proto_key, layer_num, file_name):
@@ -145,7 +141,7 @@ def visualize(EN, proto_key, layer_num, file_name):
     size = int(np.sqrt(W.shape[1]))
     # hist(W.flatten(),bins=50)
     image = PIL.Image.fromarray(tile_raster_images(X=W, \
-            img_shape=(size, size), tile_shape=(10,W.shape[0]/10),tile_spacing=(1, 1)))
+            img_shape=(size, size), tile_shape=(10,W.shape[0]/10), tile_spacing=(1, 1)))
     image.save(file_name)
     return
 
@@ -308,6 +304,3 @@ def plot_scatter(x, y, f_name, x_label=None, y_label=None):
         frameon=None)
     plt.close(fig)
     return
-
-
-

@@ -32,7 +32,7 @@ def my_batched_dot(A, B):
 #-----------------------------------------------------------------------------
 
 class ZoomableAttention2d(object):
-    def __init__(self, img_height, img_width, N, init_scale=2.0):
+    def __init__(self, img_height, img_width, N, img_scale=1.0, att_scale=0.75):
         """
         A zoomable attention window for images.
 
@@ -42,32 +42,34 @@ class ZoomableAttention2d(object):
             shape of the images
         N :
             $N \times N$ attention window size
-        init_scale :
-            initial scaling for source images vs. attention grid
+        img_scale :
+            coordinate range for image
+        att_scale :
+            initial scale of attention grid relative to image
         """
         self.img_height = img_height
         self.img_width = img_width
         self.N = N
-        self.init_scale = init_scale
-        # make offsets for internal dispersement of grid points.
-        #   -- internal grid coordinates range over [-1...+1]
-        offsets = np.arange(N) - (N / 2.0) + 0.5
-        offsets = offsets / np.max(offsets)
-        offsets = offsets.astype(theano.config.floatX)
-        self.grid_offsets = T.constant(offsets)
+        self.img_scale = img_scale
+        self.att_scale = att_scale
         # make coordinate vectors for x and y location in the image.
         #   -- image coordinates for the smallest dimension range over
-        #      [-init_scale....init_scale], and coordinates for the largest
+        #      [-img_scale....img_scale], and coordinates for the largest
         #      dimension are at the same scale, but over a larger range.
         x_coords = (np.arange(img_width) - (img_width / 2.0) + 0.5)
         y_coords = (np.arange(img_height) - (img_height / 2.0) + 0.5)
         rescale = min(np.max(x_coords), np.max(y_coords))
-        x_coords = (init_scale / rescale) * x_coords
-        y_coords = (init_scale / rescale) * y_coords
+        x_coords = (img_scale / rescale) * x_coords
+        y_coords = (img_scale / rescale) * y_coords
         x_coords = x_coords.astype(theano.config.floatX)
         y_coords = y_coords.astype(theano.config.floatX)
         self.img_x = T.constant(x_coords)
         self.img_y = T.constant(y_coords)
+        # make offsets for internal dispersement of grid points.
+        offsets = np.arange(N) - (N / 2.0) + 0.5
+        offsets = (offsets / np.max(offsets)) * (att_scale * img_scale)
+        offsets = offsets.astype(theano.config.floatX)
+        self.grid_offsets = T.constant(offsets)
         return
 
     def filterbank_matrices(self, center_y, center_x, delta, sigma):
@@ -99,12 +101,11 @@ class ZoomableAttention2d(object):
         FY = T.exp( -(self.img_y - grid_y.dimshuffle([0,1,'x']))**2. / \
                    (2. * sigma.dimshuffle([0,'x','x'])**2.) )
 
-        # normalize the attention weights (1 / (sigma * sqrt(2*pi)))
-        #Z = sigma.dimshuffle([0,'x','x'])**(-1.0) * (1.0 / 6.283**0.5)
-        #FX = Z * FX
-        #FY = Z * FY
-        FX = FX / (FX.sum(axis=-1).dimshuffle(0, 1, 'x') + tol)
-        FY = FY / (FY.sum(axis=-1).dimshuffle(0, 1, 'x') + tol)
+        # normalize the attention weights
+        #FX = FX / (FX.sum(axis=-1).dimshuffle(0, 1, 'x') + tol)
+        #FY = FY / (FY.sum(axis=-1).dimshuffle(0, 1, 'x') + tol)
+        FX = FX / (T.max(FX.sum(axis=-1)) + tol)
+        FY = FY / (T.max(FY.sum(axis=-1)) + tol)
         return FY, FX
 
 

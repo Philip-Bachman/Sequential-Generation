@@ -9,6 +9,7 @@ import numpy.random as npr
 import theano
 import theano.tensor as T
 import time
+from HelperFuncs import to_fX
 
 
 def my_batched_dot(A, B):
@@ -186,36 +187,136 @@ class TrajectoryGenerator(object):
         self.y_range = y_range
         self.x_min, self.x_max = x_range
         self.y_min, self.y_max = y_range
+        self.max_speed = max_speed
         return
+
+    def _rand_pos(self, num_samples, rand_vals=None):
+        """
+        Generate positions uniformly at random within our bounding box.
+        """
+        # generate initial positions
+        if rand_vals is None:
+            samp_pos = npr.rand(num_samples,2)
+        else:
+            samp_pos = rand_vals
+        # scale x and y coords
+        samp_pos[:,0] = samp_pos[:,0] * (self.x_range[1] - self.x_range[0])
+        samp_pos[:,1] = samp_pos[:,1] * (self.y_range[1] - self.y_range[0])
+        # shift x and y coords
+        samp_pos[:,0] = samp_pos[:,0] + self.x_min
+        samp_pos[:,1] = samp_pos[:,1] + self.y_min
+        return samp_pos
+
+    def _rand_vel(self, num_samples, randn_vals=None):
+        """
+        Generate a random velocity under constraint on l2 norm.
+        """
+        # generate initial velocities
+        if randn_vals is None:
+            samp_vel = npr.randn(num_samples,2)
+        else:
+            samp_vel = randn_vals
+        # rescale initial velocities to be appropriately large
+        vel_norms = np.sqrt(np.sum(samp_vel**2.0, axis=1, keepdims=True))
+        samp_vel = samp_vel * np.minimum(1.0, (self.max_speed / vel_norms))
+        return samp_vel
+
+    def _initial_pos_and_vel(self, num_samples):
+        """
+        Generate random initial positions and velocities.
+        """
+        # generate initial positions
+        samp_pos = self._rand_pos(num_samples)
+        # generate initial velocities
+        samp_vel = self._rand_vel(num_samples, randn_vals=None)
+        return samp_pos, samp_vel
+
+    def _update_pos_and_vel(self, samp_pos, samp_vel):
+        """
+        Return updated positions and velocities.
+        """
+        # advance positions
+        new_pos = samp_pos + samp_vel
+        # clip to the required bounding box, and flip velocities when the box
+        # boundary is crossed by a trajectory.
+        x_min_clip = new_pos[:,0] < self.x_min
+        x_max_clip = new_pos[:,0] > self.x_max
+        y_min_clip = new_pos[:,1] < self.y_min
+        y_max_clip = new_pos[:,1] > self.y_max
+        new_pos[x_min_clip,0] = self.x_min
+        new_pos[x_max_clip,0] = self.x_max
+        new_pos[y_min_clip,1] = self.y_min
+        new_pos[y_max_clip,1] = self.y_max
+        # flip velocities for coordinates that were clipped
+        x_clipped = x_min_clip | x_max_clip
+        y_clipped = y_min_clip | y_max_clip
+        new_vel = samp_vel[:,:]
+        new_vel[x_clipped,0] = -samp_vel[x_clipped,0]
+        new_vel[y_clipped,1] = -samp_vel[y_clipped,1]
+        return new_pos, new_vel
+
+    def generate_trajectories(self, num_samples, traj_len, vel_reset=0.05):
+        """
+        Generate a set of trajectories with the given length.
+        """
+        # initialize container arrays
+        traj_pos = np.zeros((traj_len, num_samples, 2))
+        traj_vel = np.zeros((traj_len, num_samples, 2))
+        randn_vals = npr.randn(traj_len, num_samples, 2)
+        vel_switches = npr.rand(traj_len, num_samples) < vel_reset
+        # generate and record some trajectories
+        step_pos, step_vel = self._initial_pos_and_vel(num_samples)
+        for i in range(traj_len):
+            rand_vel = self._rand_vel(num_samples, randn_vals[i])
+            traj_pos[i,:,:] = step_pos
+            traj_vel[i,:,:] = step_vel
+            traj_vel[i,vel_switches[i],:] = rand_vel[vel_switches[i],:]
+            step_pos, step_vel = self._update_pos_and_vel(step_pos, step_vel)
+        traj_pos = traj_pos.astype(theano.config.floatX)
+        traj_vel = traj_vel.astype(theano.config.floatX)
+        return traj_pos, traj_vel
+
 
 
 if __name__ == "__main__":
-    samp_count = 200
-    center_x = np.linspace(start=-0.8, stop=0.8, num=samp_count).astype(theano.config.floatX)
-    center_y = np.linspace(start=-0.8, stop=0.8, num=samp_count).astype(theano.config.floatX)
-    delta = np.ones((samp_count,)).astype(theano.config.floatX)
-    sigma = np.ones((samp_count,)).astype(theano.config.floatX)
-
-    OPTR = ObjectPainter(32, 32, obj_type='cross', obj_scale=0.2)
+    # configure an object renderer
+    OPTR = ObjectPainter(32, 32, obj_type='square', obj_scale=0.2)
 
     _center_x = T.vector()
     _center_y = T.vector()
     _delta = T.vector()
     _sigma = T.vector()
-
     _W = OPTR.write(_center_y, _center_x, _delta, _sigma)
     write_func = theano.function(inputs=[_center_y, _center_x, _delta, _sigma], \
                                  outputs=_W)
 
-    start_time = time.time()
+    # configure a trajectory generator
+    num_samples = 100
+    traj_len = 64
+    x_range = [-0.8,0.8]
+    y_range = [-0.8,0.8]
+    max_speed = 0.15
+    TRAJ = TrajectoryGenerator(x_range=x_range, y_range=y_range, \
+                               max_speed=max_speed)
+
     # test the writer function
-    gen_count = 100
-    for i in range(gen_count):
+    start_time = time.time()
+    batch_count = 50
+    for i in range(batch_count):
+        # generate a minibatch of trajectories
+        traj_pos, traj_vel = TRAJ.generate_trajectories(num_samples, traj_len)
+        traj_x = traj_pos[:,:,0]
+        traj_y = traj_pos[:,:,1]
+        # draw the trajectories
+        center_x = to_fX( traj_x.T.ravel() )
+        center_y = to_fX( traj_y.T.ravel() )
+        delta = to_fX( np.ones(center_x.shape) )
+        sigma = to_fX( np.ones(center_x.shape) )
         W = write_func(center_y, center_x, delta, 0.05*sigma)
     end_time = time.time()
     render_time = end_time - start_time
-    render_frames = gen_count * samp_count
-    render_fps = render_frames / render_time
-    print("RENDER FPS: {0:.2f}".format(render_fps))
+    render_bps = batch_count / render_time
+    print("RENDER BATCH/SECOND: {0:.2f}".format(render_bps))
 
-    utils.visualize_samples(W, "AAAAA.png", num_rows=10)
+    W = W[:20*traj_len]
+    utils.visualize_samples(W, "AAAAA.png", num_rows=20)

@@ -356,7 +356,8 @@ def test_seq_cond_gen_static(step_type='add'):
     read_N = 2 # inner/outer grid dimension for reader
     reader_mlp = SimpleAttentionReader2d(x_dim=x_dim, con_dim=rnn_dim,
                                          width=28, height=28, N=read_N,
-                                         init_scale=2.0, **inits)
+                                         img_scale=0.2, att_scale=0.5,
+                                         **inits)
     read_dim = reader_mlp.read_dim # total number of "pixels" read by reader
 
     writer_mlp = MLP([None, None], [rnn_dim, write_dim, y_dim], \

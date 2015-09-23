@@ -42,11 +42,13 @@ class SimpleAttentionCore2d(Initializable):
         height: #rows after reshaping inputs to 2d
         width: #cols after reshaping inputs to 2d
         N: this will be an N x N reader/writer -- N x N at two scales!
-        init_scale: the scale of source image vs. attention grid
+        img_scale: the scale of source image, which will have coordinates in
+                   the range [-img_scale...img_scale].
+        att_scale: initial portion of the image covered by the attention grid
     """
-    def __init__(self, x_dim, con_dim, height, width, N, init_scale, **kwargs):
+    def __init__(self, x_dim, con_dim, height, width, N, img_scale, att_scale,
+                 **kwargs):
         super(SimpleAttentionCore2d, self).__init__(**kwargs)
-
         self.img_height = height
         self.img_width = width
         self.N = N
@@ -54,15 +56,16 @@ class SimpleAttentionCore2d(Initializable):
         self.con_dim = con_dim  # dimension of controller input
         self.read_dim = 2*N*N   # dimension of reader output
         self.grid_dim = N*N
-        self.init_scale = init_scale
+        self.img_scale = img_scale
+        self.att_scale = att_scale
         # add and initialize a parameter for controlling sigma scale
-        init_ary = (1.75 / self.N) * numpy.ones((1,))
+        init_ary = img_scale * att_scale * (1.5 / self.N) * numpy.ones((1,))
         self.sigma_scale = shared_floatx_nans((1,), name='sigma_scale')
         self.sigma_scale.set_value(init_ary.astype(theano.config.floatX))
         add_role(self.sigma_scale, PARAMETER)
 
         # get a localized reader mechanism and a controller decoder
-        self.zoomer = ZoomableAttention2d(height, width, N, init_scale)
+        self.zoomer = ZoomableAttention2d(height, width, N, img_scale, att_scale)
         # con_decoder converts controller input to (5) attention parameters
         self.con_decoder = MLP(activations=[Identity()], dims=[con_dim, 5], \
                                **kwargs)
@@ -217,16 +220,20 @@ class SimpleAttentionReader2d(SimpleAttentionCore2d):
         height: #rows after reshaping inputs to 2d
         width: #cols after reshaping inputs to 2d
         N: this will be an N x N reader -- N x N at two scales!
-        init_scale: the scale of source image vs. attention grid
+        img_scale: the scale of source image, which will have coordinates in
+                   the range [-img_scale...img_scale].
+        att_scale: initial portion of the image covered by the attention grid
     """
-    def __init__(self, x_dim, con_dim, height, width, N, init_scale, **kwargs):
+    def __init__(self, x_dim, con_dim, height, width, N, img_scale, att_scale,
+                 **kwargs):
         super(SimpleAttentionReader2d, self).__init__(
                 x_dim=x_dim,
                 con_dim=con_dim,
                 height=height,
                 width=width,
                 N=N,
-                init_scale=init_scale,
+                img_scale=img_scale,
+                att_scale=att_scale,
                 name="reader2d", **kwargs
         )
         return
@@ -251,16 +258,20 @@ class SimpleAttentionWriter2d(SimpleAttentionCore2d):
         height: #rows after reshaping inputs to 2d
         width: #cols after reshaping inputs to 2d
         N: this will be an N x N reader -- N x N at two scales!
-        init_scale: the scale of source image vs. attention grid
+        img_scale: the scale of source image, which will have coordinates in
+                   the range [-img_scale...img_scale].
+        att_scale: initial portion of the image covered by the attention grid
     """
-    def __init__(self, x_dim, con_dim, height, width, N, init_scale, **kwargs):
+    def __init__(self, x_dim, con_dim, height, width, N, img_scale, att_scale,
+                 **kwargs):
         super(SimpleAttentionWriter2d, self).__init__(
                 x_dim=x_dim,
                 con_dim=con_dim,
                 height=height,
                 width=width,
                 N=N,
-                init_scale=init_scale,
+                img_scale=img_scale,
+                att_scale=att_scale,
                 name="writer2d", **kwargs
         )
         return
@@ -1037,6 +1048,9 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         self.mom_1 = theano.shared(value=0.9*ones_ary, name='mom_1')
         self.mom_2 = theano.shared(value=0.99*ones_ary, name='mom_2')
 
+        # set noise scale for the controller
+        self.con_noise = 0.05
+
         # setup a "null pointer" that will point to the computation graph
         # for this model, which can be built by self.build_model_funcs()...
         self.cg = None
@@ -1226,7 +1240,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
                                           inputs=i_con, iterate=False)
         # add a bit of noise to h_con
         h_con = h_con + u_hc
-        
+
         # update the "workspace" (stored in c)
         if self.step_type == 'add':
             c = c + self.writer_mlp.apply(h_con)
@@ -1273,8 +1287,8 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         # get initial states for all model components
         c0 = self.c_0.repeat(batch_size, axis=0)
         cc0 = self.cc_0.repeat(batch_size, axis=0)
-        u_hc0 = 0.1 * self.theano_rng.normal(size=(batch_size, hc_dim),
-                                               avg=0., std=1.)
+        u_hc0 = self.con_noise * self.theano_rng.normal( \
+                        size=(batch_size, hc_dim), avg=0., std=1.)
         hc0 = self.hc_0.repeat(batch_size, axis=0) + u_hc0
         cg0 = self.cg_0.repeat(batch_size, axis=0)
         hg0 = self.hg_0.repeat(batch_size, axis=0)
@@ -1286,7 +1300,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
                     size=(self.total_steps, batch_size, z_dim),
                     avg=0., std=1.)
 
-        u_hc = 0.1 * self.theano_rng.normal(
+        u_hc = self.con_noise * self.theano_rng.normal(
                         size=(self.total_steps, batch_size, hc_dim),
                         avg=0., std=1.)
 

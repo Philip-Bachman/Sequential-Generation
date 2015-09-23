@@ -434,6 +434,8 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
         self.dec_rnn = dec_rnn
         self.dec_mlp_out = dec_mlp_out
         self.writer_mlp = writer_mlp
+        # regularization noise on RNN states
+        self.rnn_noise = 0.025
 
         # record the sub-models that underlie this model
         self.children = [self.mix_enc_mlp, self.mix_dec_mlp, self.reader_mlp,
@@ -499,9 +501,8 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
                states=['c', 'h_enc', 'c_enc', 'h_dec', 'c_dec', 'nll', 'kl_q2p', 'kl_p2q'],
                outputs=['c', 'h_enc', 'c_enc', 'h_dec', 'c_dec', 'nll', 'kl_q2p', 'kl_p2q'])
     def iterate(self, u, u_enc, u_dec, c, h_enc, c_enc, h_dec, c_dec, nll, kl_q2p, kl_p2q, x):
-        # add noise to encoder and decoder state
-        h_enc = h_enc + u_enc
-        h_dec = h_dec + u_dec
+
+
         # get current prediction
         if self.step_type == 'add':
             # additive steps use c as a "direct workspace", which means it's
@@ -519,6 +520,8 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
         i_enc = self.enc_mlp_in.apply(tensor.concatenate([r_enc, h_dec], axis=1))
         h_enc, c_enc = self.enc_rnn.apply(states=h_enc, cells=c_enc,
                                           inputs=i_enc, iterate=False)
+        # add noise to the encoder state
+        h_enc = h_enc + u_enc
         # estimate encoder conditional over z given h_enc
         q_gen_mean, q_gen_logvar, q_z_gen = \
                 self.enc_mlp_out.apply(h_enc, u)
@@ -530,6 +533,8 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
         i_dec = self.dec_mlp_in.apply(tensor.concatenate([z_gen], axis=1))
         h_dec, c_dec = self.dec_rnn.apply(states=h_dec, cells=c_dec, \
                                           inputs=i_dec, iterate=False)
+        # add noise to the decoder state
+        h_dec = h_dec + u_dec
         # additive steps use c as the "workspace"
         if self.step_type == 'add':
             c = c + self.writer_mlp.apply(h_dec)
@@ -549,9 +554,6 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
                states=['c', 'h_dec', 'c_dec'],
                outputs=['c', 'h_dec', 'c_dec'])
     def decode(self, u, u_dec, c, h_dec, c_dec):
-        # add noise to decoder state
-        h_dec = h_dec + u_dec
-
         # sample z from p(z | h_dec) -- we used q(z | h_enc) during training
         p_gen_mean, p_gen_logvar, p_z_gen = \
                 self.dec_mlp_out.apply(h_dec, u)
@@ -561,6 +563,8 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
         h_dec, c_dec = self.dec_rnn.apply(
                     states=h_dec, cells=c_dec,
                     inputs=i_dec, iterate=False)
+        # add noise to decoder state
+        h_dec = h_dec + u_dec
         # additive steps use c as the "workspace"
         if self.step_type == 'add':
             c = c + self.writer_mlp.apply(h_dec)
@@ -595,7 +599,14 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
         hd0 = mix_init[:, cd_dim:(cd_dim+hd_dim)]
         ce0 = mix_init[:, (cd_dim+hd_dim):(cd_dim+hd_dim+ce_dim)]
         he0 = mix_init[:, (cd_dim+hd_dim+ce_dim):]
-        c0 = tensor.zeros_like(x_out) + self.c_0
+        # add noise to initial decoder state
+        hd0 = hd0 + (self.rnn_noise * self.theano_rng.normal(
+                        size=(hd0.shape[0], hd0.shape[1]),
+                        avg=0., std=1.))
+        # add noise to initial encoder state
+        he0 = he0 + (self.rnn_noise * self.theano_rng.normal(
+                        size=(he0.shape[0], hd0.shape[1]),
+                        avg=0., std=1.))
 
         # compute KL-divergence information for the mixture init step
         kl_q2p_mix = tensor.sum(gaussian_kld(z_mix_mean, z_mix_logvar, \
@@ -609,10 +620,10 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
         u_gen = self.theano_rng.normal(
                     size=(self.n_iter, batch_size, z_gen_dim),
                     avg=0., std=1.)
-        u_enc = 0.025 * self.theano_rng.normal(
+        u_enc = self.rnn_noise * self.theano_rng.normal(
                     size=(self.n_iter, batch_size, he_dim),
                     avg=0., std=1.)
-        u_dec = 0.025 * self.theano_rng.normal(
+        u_dec = self.rnn_noise * self.theano_rng.normal(
                     size=(self.n_iter, batch_size, hd_dim),
                     avg=0., std=1.)
 
@@ -663,12 +674,16 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
         cd0 = mix_init[:, :cd_dim]
         hd0 = mix_init[:, cd_dim:(cd_dim+hd_dim)]
         c0 = tensor.alloc(0.0, n_samples, c_dim) + self.c_0
+        # add noise to initial decoder state
+        hd0 = hd0 + (self.rnn_noise * self.theano_rng.normal(
+                        size=(hd0.shape[0], hd0.shape[1]),
+                        avg=0., std=1.))
 
         # sample from zero-mean unit-std. Gaussian for use in scan op
         u_gen = self.theano_rng.normal(
                     size=(self.n_iter, n_samples, z_gen_dim),
                     avg=0., std=1.)
-        u_dec = 0.025 * self.theano_rng.normal(
+        u_dec = self.rnn_noise * self.theano_rng.normal(
                     size=(self.n_iter, n_samples, hd_dim),
                     avg=0., std=1.)
 
