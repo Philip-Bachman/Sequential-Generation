@@ -38,14 +38,14 @@ from MotionRenderers import TrajectoryGenerator, ObjectPainter
 
 RESULT_PATH = "RAM_TEST_RESULTS/"
 
-def test_seq_cond_gen_sequence(step_type='add'):
+def test_seq_cond_gen_sequence(step_type='add', num_objs=2):
     ##############################
     # File tag, for output stuff #
     ##############################
     result_tag = "{}VID_SCG".format(RESULT_PATH)
 
     batch_size = 100
-    traj_len = 10
+    traj_len = 24
     im_dim = 32
     obs_dim = im_dim*im_dim
 
@@ -85,8 +85,20 @@ def test_seq_cond_gen_sequence(step_type='add'):
             img_set = W[start_idx:end_idx,:]
             batch_imgs[i,:,:] = img_set
         batch_imgs = np.swapaxes(batch_imgs, 0, 1)
-        batch_imgs = to_fX( batch_imgs )
-        return batch_imgs
+        return to_fX( batch_imgs )
+
+    def generate_batch_multi(num_samples, num_objs=1):
+        obj_imgs = []
+        for b in range(num_objs):
+            imgs = generate_batch(num_samples)
+            obj_imgs.append(imgs)
+        batch_imgs = obj_imgs[0]
+        for imgs in obj_imgs[1:]:
+            batch_imgs = batch_imgs + imgs
+        # clip to 0...0.99
+        batch_imgs = np.maximum(batch_imgs, 0.00)
+        batch_imgs = np.minimum(batch_imgs, 0.99)
+        return to_fX( batch_imgs )
 
     ############################################################
     # Setup some parameters for the Iterative Refinement Model #
@@ -101,6 +113,7 @@ def test_seq_cond_gen_sequence(step_type='add'):
     rnn_dim = 400
     write_dim = 400
     mlp_dim = 400
+    att_spec_dim = 5
 
     def visualize_attention(result, pre_tag="AAA", post_tag="AAA"):
         seq_len = result[0].shape[0]
@@ -143,13 +156,19 @@ def test_seq_cond_gen_sequence(step_type='add'):
         'biases_init': Constant(0.),
     }
 
+    # MLP for converting controller state into an attention specification
+    att_spec_mlp = CondNet([], [rnn_dim, att_spec_dim], \
+                           name="att_spec_mlp", **inits)
+
+    # module for doing local 2d read defined by an attention specification
     read_N = 2 # inner/outer grid dimension for reader
-    reader_mlp = SimpleAttentionReader2d(x_dim=obs_dim, con_dim=rnn_dim,
+    reader_mlp = SimpleAttentionReader2d(x_dim=obs_dim,
                                          width=im_dim, height=im_dim, N=read_N,
-                                         img_scale=1.0, att_scale=0.5,
+                                         img_scale=1.5, att_scale=0.5,
                                          **inits)
     read_dim = reader_mlp.read_dim # total number of "pixels" read by reader
 
+    # MLP for converting controller state into a "belief" state update
     writer_mlp = MLP([None, None], [rnn_dim, write_dim, obs_dim], \
                      name="writer_mlp", **inits)
 
@@ -176,9 +195,9 @@ def test_seq_cond_gen_sequence(step_type='add'):
     var_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
                          name="var_rnn", **rnninits)
 
-    SeqCondGen_doc_str = \
+    SeqCondGen2d_doc_str = \
     """
-    SeqCondGen -- constructs conditional densities under time constraints.
+    SeqCondGen2d -- constructs conditional densities under time constraints.
 
     This model sequentially constructs a conditional density estimate by taking
     repeated glimpses at the input x, and constructing a hypothesis about the
@@ -190,6 +209,10 @@ def test_seq_cond_gen_sequence(step_type='add'):
     static case, the same x and y are used at every step of the hypothesis
     construction loop. In the sequential case, x and y can change at each step
     of the loop.
+
+    ***                                                                     ***
+    *** This version of the model assumes the use of a 2d attention module. ***
+    ***                                                                     ***
 
     Parameters:
         x_and_y_are_seqs: boolean telling whether the conditioning information
@@ -205,8 +228,17 @@ def test_seq_cond_gen_sequence(step_type='add'):
                       "hidden" state (a.k.a. its memory cells).
         x_dim: dimension of inputs on which to condition
         y_dim: dimension of outputs to predict
+        att_spec_mlp: used for converting controller LSTM visible state into
+                      an attention specification
         reader_mlp: used for reading from the input
+                    -- this is a 2d attention module for which the attention
+                       location is specified by 5 inputs, the first two of
+                       which we will assume are (x,y) coordinates.
         writer_mlp: used for writing to the output prediction
+                    -- for "add" steps, this takes the controller's visible
+                       state as input and updates the current "belief" state.
+                       for "jump" steps, this converts the controller's memory
+                       state into the current "belief" state.
         con_mlp_in: preprocesses input to the "controller" LSTM
         con_rnn: the "controller" LSTM
         con_mlp_out: CondNet for distribution over z given con_rnn
@@ -218,7 +250,7 @@ def test_seq_cond_gen_sequence(step_type='add'):
         var_mlp_out: CondNet for distribution over z given gen_rnn
     """
 
-    SCG = SeqCondGen(
+    SCG = SeqCondGen2d(
                 x_and_y_are_seqs=True,
                 total_steps=total_steps,
                 init_steps=init_steps,
@@ -227,6 +259,7 @@ def test_seq_cond_gen_sequence(step_type='add'):
                 step_type=step_type,
                 x_dim=obs_dim,
                 y_dim=obs_dim,
+                att_spec_mlp=att_spec_mlp,
                 reader_mlp=reader_mlp,
                 writer_mlp=writer_mlp,
                 con_mlp_in=con_mlp_in,
@@ -247,7 +280,7 @@ def test_seq_cond_gen_sequence(step_type='add'):
 
     # quick test of attention trajectory sampler
     samp_count = 32
-    Xb = generate_batch(samp_count)
+    Xb = generate_batch_multi(samp_count, num_objs=num_objs)
     result = SCG.sample_attention(Xb, Xb)
     result[0] = Xb
     visualize_attention(result, pre_tag=result_tag, post_tag="b0")
@@ -282,7 +315,7 @@ def test_seq_cond_gen_sequence(step_type='add'):
         SCG.set_sgd_params(lr=learn_rate, mom_1=momentum, mom_2=0.99)
         SCG.set_lam_kld(lam_kld_q2p=0.95, lam_kld_p2q=0.05, lam_kld_p2g=0.0)
         # perform a minibatch update and record the cost for this batch
-        Xb = generate_batch(batch_size)
+        Xb = generate_batch_multi(samp_count, num_objs=num_objs)
         result = SCG.train_joint(Xb, Xb)
         costs = [(costs[j] + result[j]) for j in range(len(result))]
 
@@ -306,7 +339,7 @@ def test_seq_cond_gen_sequence(step_type='add'):
             SCG.save_model_params("{}_params.pkl".format(result_tag))
             # compute a small-sample estimate of NLL bound on validation set
             samp_count = 128
-            Xb = generate_batch(samp_count)
+            Xb = generate_batch_multi(samp_count, num_objs=num_objs)
             va_costs = SCG.compute_nll_bound(Xb, Xb)
             str1 = "    va_nll_bound : {}".format(va_costs[1])
             str2 = "    va_nll_term  : {}".format(va_costs[2])
@@ -319,7 +352,7 @@ def test_seq_cond_gen_sequence(step_type='add'):
             # Sample and draw attention trajectories. #
             ###########################################
             samp_count = 32
-            Xb = generate_batch(samp_count)
+            Xb = generate_batch_multi(samp_count, num_objs=num_objs)
             result = SCG.sample_attention(Xb, Xb)
             post_tag = "b{0:d}".format(i)
             visualize_attention(result, pre_tag=result_tag, post_tag=post_tag)
@@ -327,4 +360,4 @@ def test_seq_cond_gen_sequence(step_type='add'):
 
 
 if __name__=="__main__":
-    test_seq_cond_gen_sequence(step_type='add')
+    test_seq_cond_gen_sequence(step_type='add', num_objs=2)
