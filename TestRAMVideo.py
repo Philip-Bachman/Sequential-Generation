@@ -156,9 +156,6 @@ def test_seq_cond_gen_sequence(step_type='add', num_objs=2):
         'biases_init': Constant(0.),
     }
 
-    # MLP for converting controller state into an attention specification
-    att_spec_mlp = CondNet([], [rnn_dim, att_spec_dim], \
-                           name="att_spec_mlp", **inits)
 
     # module for doing local 2d read defined by an attention specification
     read_N = 2 # inner/outer grid dimension for reader
@@ -173,25 +170,37 @@ def test_seq_cond_gen_sequence(step_type='add', num_objs=2):
                      name="writer_mlp", **inits)
 
     # mlps for processing inputs to LSTMs
-    con_mlp_in = MLP([Identity()], [                       z_dim, 4*rnn_dim], \
+    con_mlp_in = MLP([Identity()], \
+                     [(z_dim + rnn_dim), 4*rnn_dim], \
                      name="con_mlp_in", **inits)
-    var_mlp_in = MLP([Identity()], [(y_dim + read_dim + rnn_dim), 4*rnn_dim], \
+    rav_mlp_in = MLP([Identity()], \
+                     [(z_dim + rnn_dim + y_dim), 4*rnn_dim], \
+                     name="con_mlp_in", **inits)
+    obs_mlp_in = MLP([Identity()], \
+                     [(read_dim + rnn_dim + att_spec_dim), 4*rnn_dim], \
+                     name="obs_mlp_in", **inits)
+    var_mlp_in = MLP([Identity()], \
+                     [(read_dim + rnn_dim + att_spec_dim + y_dim), 4*rnn_dim], \
                      name="var_mlp_in", **inits)
-    gen_mlp_in = MLP([Identity()], [        (read_dim + rnn_dim), 4*rnn_dim], \
-                     name="gen_mlp_in", **inits)
 
-    # mlps for turning LSTM outputs into conditionals over z_gen
-    con_mlp_out = CondNet([Rectifier(), Rectifier()], \
-                          [rnn_dim, mlp_dim, mlp_dim, z_dim], \
+    # mlps for converting controller states into an attention specification
+    con_mlp_out = CondNet([Rectifier()], [rnn_dim, mlp_dim, att_spec_dim], \
                           name="con_mlp_out", **inits)
-    gen_mlp_out = CondNet([], [rnn_dim, z_dim], name="gen_mlp_out", **inits)
-    var_mlp_out = CondNet([], [rnn_dim, z_dim], name="var_mlp_out", **inits)
+    rav_mlp_out = CondNet([Rectifier()], [rnn_dim, mlp_dim, att_spec_dim], \
+                          name="con_mlp_out", **inits)
+    # mlps for turning LSTM outputs into conditionals over z_o2c
+    obs_mlp_out = CondNet([Rectifier()], [rnn_dim, mlp_dim, z_dim], \
+                          name="obs_mlp_out", **inits)
+    var_mlp_out = CondNet([Rectifier()], [rnn_dim, mlp_dim, z_dim], \
+                          name="var_mlp_out", **inits)
 
     # LSTMs for the actual LSTMs (obviously, perhaps)
     con_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
                          name="con_rnn", **rnninits)
-    gen_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
-                         name="gen_rnn", **rnninits)
+    rav_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
+                         name="rav_rnn", **rnninits)
+    obs_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
+                         name="obs_rnn", **rnninits)
     var_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
                          name="var_rnn", **rnninits)
 
@@ -228,8 +237,6 @@ def test_seq_cond_gen_sequence(step_type='add', num_objs=2):
                       "hidden" state (a.k.a. its memory cells).
         x_dim: dimension of inputs on which to condition
         y_dim: dimension of outputs to predict
-        att_spec_mlp: used for converting controller LSTM visible state into
-                      an attention specification
         reader_mlp: used for reading from the input
                     -- this is a 2d attention module for which the attention
                        location is specified by 5 inputs, the first two of
@@ -241,13 +248,13 @@ def test_seq_cond_gen_sequence(step_type='add', num_objs=2):
                        state into the current "belief" state.
         con_mlp_in: preprocesses input to the "controller" LSTM
         con_rnn: the "controller" LSTM
-        con_mlp_out: CondNet for distribution over z given con_rnn
-        gen_mlp_in: preprocesses input to the "generator" LSTM
-        gen_rnn: the "generator" LSTM
-        gen_mlp_out: CondNet for distribution over z given gen_rnn
+        con_mlp_out: CondNet for distribution over att_spec given con_rnn
+        obs_mlp_in: preprocesses input to the "generator" LSTM
+        obs_rnn: the "generator" LSTM
+        obs_mlp_out: CondNet for distribution over z given obs_rnn
         var_mlp_in: preprocesses input to the "variational" LSTM
         var_rnn: the "variational" LSTM
-        var_mlp_out: CondNet for distribution over z given gen_rnn
+        var_mlp_out: CondNet for distribution over z given obs_rnn
     """
 
     SCG = SeqCondGen2d(
@@ -259,15 +266,17 @@ def test_seq_cond_gen_sequence(step_type='add', num_objs=2):
                 step_type=step_type,
                 x_dim=obs_dim,
                 y_dim=obs_dim,
-                att_spec_mlp=att_spec_mlp,
                 reader_mlp=reader_mlp,
                 writer_mlp=writer_mlp,
                 con_mlp_in=con_mlp_in,
                 con_mlp_out=con_mlp_out,
                 con_rnn=con_rnn,
-                gen_mlp_in=gen_mlp_in,
-                gen_mlp_out=gen_mlp_out,
-                gen_rnn=gen_rnn,
+                rav_mlp_in=rav_mlp_in,
+                rav_mlp_out=rav_mlp_out,
+                rav_rnn=rav_rnn,
+                obs_mlp_in=obs_mlp_in,
+                obs_mlp_out=obs_mlp_out,
+                obs_rnn=obs_rnn,
                 var_mlp_in=var_mlp_in,
                 var_mlp_out=var_mlp_out,
                 var_rnn=var_rnn)
@@ -313,7 +322,7 @@ def test_seq_cond_gen_sequence(step_type='add', num_objs=2):
             momentum = 0.9
         # set sgd and objective function hyperparams for this update
         SCG.set_sgd_params(lr=learn_rate, mom_1=momentum, mom_2=0.99)
-        SCG.set_lam_kld(lam_kld_q2p=0.95, lam_kld_p2q=0.05, lam_kld_p2g=0.0)
+        SCG.set_lam_kld(lam_kld_q2p=0.95, lam_kld_p2q=0.05)
         # perform a minibatch update and record the cost for this batch
         Xb = generate_batch_multi(samp_count, num_objs=num_objs)
         result = SCG.train_joint(Xb, Xb)
@@ -328,9 +337,8 @@ def test_seq_cond_gen_sequence(step_type='add', num_objs=2):
             str4 = "    nll_term  : {0:.4f}".format(costs[2])
             str5 = "    kld_q2p   : {0:.4f}".format(costs[3])
             str6 = "    kld_p2q   : {0:.4f}".format(costs[4])
-            str7 = "    kld_p2g   : {0:.4f}".format(costs[5])
-            str8 = "    reg_term  : {0:.4f}".format(costs[6])
-            joint_str = "\n".join([str1, str2, str3, str4, str5, str6, str7, str8])
+            str7 = "    reg_term  : {0:.4f}".format(costs[5])
+            joint_str = "\n".join([str1, str2, str3, str4, str5, str6, str7])
             print(joint_str)
             out_file.write(joint_str+"\n")
             out_file.flush()
