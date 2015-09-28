@@ -1746,8 +1746,9 @@ class SeqCondGen2d(BaseRecurrent, Initializable, Random):
             return 5
         elif name in ['c_as_y', 'y']:
             return self.y_dim
-        elif name in == 'c':
-            return self.writer_mlp.get_dim('output')
+        elif name == 'c':
+            return self.y_dim
+            #return self.writer_mlp.get_dim('output')
         elif name == 'h_con':
             return self.con_rnn.get_dim('states')
         elif name == 'c_con':
@@ -1777,7 +1778,7 @@ class SeqCondGen2d(BaseRecurrent, Initializable, Random):
                outputs=['c', 'h_con', 'c_con', 'h_rav', 'c_rav', 'h_obs', 'c_obs', 'h_var', 'c_var', 'z_o2c', 'c_as_y', 'nll', 'kl_q2p', 'kl_p2q', 'att_map', 'read_img'])
     def iterate(self, x, y, u_o2c, u_c2o, nll_scale, c, h_con, c_con, h_rav, c_rav, h_obs, c_obs, h_var, c_var, z_o2c):
         # Get the current prediction for y
-        if step_type == 'jump':
+        if self.step_type == 'jump':
             # Controller hidden state tracks belief state (for jump steps)
             c = self.writer_mlp.apply(c_con)
         # Convert from belief state to prediction for y
@@ -1946,7 +1947,7 @@ class SeqCondGen2d(BaseRecurrent, Initializable, Random):
     def process_inputs(self, x, y):
         # get important size and shape information
 
-        z_dim = self.get_dim('z')
+        z_o2c_dim = self.get_dim('z_o2c')
         cc_dim = self.get_dim('c_con')
         co_dim = self.get_dim('c_obs')
         cv_dim = self.get_dim('c_var')
@@ -1979,10 +1980,10 @@ class SeqCondGen2d(BaseRecurrent, Initializable, Random):
 
         # get noise samples for stochastic channel observer -> controller
         u_o2c = self.theano_rng.normal(
-                    size=(self.total_steps, batch_size, z_dim),
+                    size=(self.total_steps, batch_size, z_o2c_dim),
                     avg=0., std=1.)
         z0 = 0. * self.theano_rng.normal(
-                    size=(batch_size, z_dim), avg=0., std=1.)
+                    size=(batch_size, z_o2c_dim), avg=0., std=1.)
 
         # get noise samples for stochastic channel controller -> observer
         u_c2o = self.att_noise * self.theano_rng.normal(

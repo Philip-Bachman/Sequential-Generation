@@ -45,7 +45,7 @@ def test_seq_cond_gen_sequence(step_type='add', num_objs=2):
     result_tag = "{}VID_SCG".format(RESULT_PATH)
 
     batch_size = 100
-    traj_len = 24
+    traj_len = 10
     im_dim = 32
     obs_dim = im_dim*im_dim
 
@@ -110,9 +110,9 @@ def test_seq_cond_gen_sequence(step_type='add', num_objs=2):
     x_dim = obs_dim
     y_dim = obs_dim
     z_dim = 100
-    rnn_dim = 400
-    write_dim = 400
-    mlp_dim = 400
+    rnn_dim = 500
+    write_dim = 500
+    mlp_dim = 500
     att_spec_dim = 5
 
     def visualize_attention(result, pre_tag="AAA", post_tag="AAA"):
@@ -161,7 +161,7 @@ def test_seq_cond_gen_sequence(step_type='add', num_objs=2):
     read_N = 2 # inner/outer grid dimension for reader
     reader_mlp = SimpleAttentionReader2d(x_dim=obs_dim,
                                          width=im_dim, height=im_dim, N=read_N,
-                                         img_scale=1.5, att_scale=0.5,
+                                         img_scale=1.0, att_scale=0.4,
                                          **inits)
     read_dim = reader_mlp.read_dim # total number of "pixels" read by reader
 
