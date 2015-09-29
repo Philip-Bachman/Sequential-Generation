@@ -45,7 +45,7 @@ def test_seq_cond_gen_sequence(step_type='add', num_objs=2):
     result_tag = "{}VID_SCG".format(RESULT_PATH)
 
     batch_size = 100
-    traj_len = 10
+    traj_len = 12
     im_dim = 32
     obs_dim = im_dim*im_dim
 
@@ -104,9 +104,9 @@ def test_seq_cond_gen_sequence(step_type='add', num_objs=2):
     # Setup some parameters for the Iterative Refinement Model #
     ############################################################
     total_steps = traj_len
-    init_steps = 3
+    init_steps = 4
     exit_rate = 0.0
-    nll_weight = 0.4
+    nll_weight = 1.0
     x_dim = obs_dim
     y_dim = obs_dim
     z_dim = 100
@@ -175,7 +175,7 @@ def test_seq_cond_gen_sequence(step_type='add', num_objs=2):
                      name="con_mlp_in", **inits)
     rav_mlp_in = MLP([Identity()], \
                      [(z_dim + rnn_dim + y_dim), 4*rnn_dim], \
-                     name="con_mlp_in", **inits)
+                     name="rav_mlp_in", **inits)
     obs_mlp_in = MLP([Identity()], \
                      [(read_dim + rnn_dim + att_spec_dim), 4*rnn_dim], \
                      name="obs_mlp_in", **inits)
@@ -187,7 +187,7 @@ def test_seq_cond_gen_sequence(step_type='add', num_objs=2):
     con_mlp_out = CondNet([Rectifier()], [rnn_dim, mlp_dim, att_spec_dim], \
                           name="con_mlp_out", **inits)
     rav_mlp_out = CondNet([Rectifier()], [rnn_dim, mlp_dim, att_spec_dim], \
-                          name="con_mlp_out", **inits)
+                          name="rav_mlp_out", **inits)
     # mlps for turning LSTM outputs into conditionals over z_o2c
     obs_mlp_out = CondNet([Rectifier()], [rnn_dim, mlp_dim, z_dim], \
                           name="obs_mlp_out", **inits)
@@ -206,13 +206,12 @@ def test_seq_cond_gen_sequence(step_type='add', num_objs=2):
 
     SeqCondGen2d_doc_str = \
     """
-    SeqCondGen2d -- constructs conditional densities under time constraints.
+    SeqCondGen2d -- develops beliefs subject to constraints on perception.
 
     This model sequentially constructs a conditional density estimate by taking
     repeated glimpses at the input x, and constructing a hypothesis about the
     output y. The objective is maximum likelihood for (x,y) pairs drawn from
-    some training set. We learn a proper generative model, using variational
-    inference -- which can be interpreted as a sort of guided policy search.
+    some training set.
 
     The input pairs (x, y) can be either "static" or "sequential". In the
     static case, the same x and y are used at every step of the hypothesis
@@ -221,6 +220,9 @@ def test_seq_cond_gen_sequence(step_type='add', num_objs=2):
 
     ***                                                                     ***
     *** This version of the model assumes the use of a 2d attention module. ***
+    ***                                                                     ***
+    *** The attention module should accept 5d inputs for specifying the     ***
+    *** location, scale, etc. of the attention-based reader.                ***
     ***                                                                     ***
 
     Parameters:
@@ -248,13 +250,16 @@ def test_seq_cond_gen_sequence(step_type='add', num_objs=2):
                        state into the current "belief" state.
         con_mlp_in: preprocesses input to the "controller" LSTM
         con_rnn: the "controller" LSTM
-        con_mlp_out: CondNet for distribution over att_spec given con_rnn
-        obs_mlp_in: preprocesses input to the "generator" LSTM
-        obs_rnn: the "generator" LSTM
-        obs_mlp_out: CondNet for distribution over z given obs_rnn
-        var_mlp_in: preprocesses input to the "variational" LSTM
-        var_rnn: the "variational" LSTM
-        var_mlp_out: CondNet for distribution over z given obs_rnn
+        con_mlp_out: CondNet for distribution over z_c2o given con_rnn
+        rav_mlp_in: preprocesses input to the "variational controller" LSTM
+        rav_rnn: the "variational controller" LSTM
+        rav_mlp_out: CondNet for distribution over z_c2o given rav_rnn
+        obs_mlp_in: preprocesses input to the "observer" LSTM
+        obs_rnn: the "observer" LSTM
+        obs_mlp_out: CondNet for distribution over z_o2c given obs_rnn
+        var_mlp_in: preprocesses input to the "variational observer" LSTM
+        var_rnn: the "variational observer" LSTM
+        var_mlp_out: CondNet for distribution over z_o2c given var_rnn
     """
 
     SCG = SeqCondGen2d(
@@ -321,7 +326,7 @@ def test_seq_cond_gen_sequence(step_type='add', num_objs=2):
         else:
             momentum = 0.9
         # set sgd and objective function hyperparams for this update
-        SCG.set_sgd_params(lr=learn_rate, mom_1=momentum, mom_2=0.99)
+        SCG.set_sgd_params(lr=scale*learn_rate, mom_1=momentum, mom_2=0.99)
         SCG.set_lam_kld(lam_kld_q2p=0.95, lam_kld_p2q=0.05)
         # perform a minibatch update and record the cost for this batch
         Xb = generate_batch_multi(samp_count, num_objs=num_objs)

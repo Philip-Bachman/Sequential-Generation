@@ -1795,7 +1795,7 @@ class SeqCondGen2d(BaseRecurrent, Initializable, Random):
         nll_grad_rav = y - c_as_y # condition on NLL gradient information
         i_rav = self.rav_mlp_in.apply(tensor.concatenate( \
                                       [z_o2c, h_obs, nll_grad_rav], axis=1))
-        h_rav, c_rav = self.con_rnn.apply(states=h_rav, cells=c_rav, \
+        h_rav, c_rav = self.rav_rnn.apply(states=h_rav, cells=c_rav, \
                                           inputs=i_rav, iterate=False)
 
         ####################################################################
