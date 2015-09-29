@@ -1741,14 +1741,13 @@ class SeqCondGen2d(BaseRecurrent, Initializable, Random):
         elif name == 'nll_scale':
             return 1
         elif name in ['u_o2c', 'z_o2c']:
-            return self.obs_mlp_out.get_dim('output')
+            return self.obs_mlp_out.output_dim
         elif name in ['u_c2o', 'z_c2o', 'att_spec']:
             return 5
         elif name in ['c_as_y', 'y']:
             return self.y_dim
         elif name == 'c':
-            return self.y_dim
-            #return self.writer_mlp.get_dim('output')
+            return self.writer_mlp.output_dim
         elif name == 'h_con':
             return self.con_rnn.get_dim('states')
         elif name == 'c_con':

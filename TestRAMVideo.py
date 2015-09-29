@@ -22,7 +22,7 @@ from blocks.filter import VariableFilter
 from blocks.graph import ComputationGraph
 from blocks.roles import PARAMETER
 from blocks.model import Model
-from blocks.bricks import Tanh, Identity, Rectifier
+from blocks.bricks import Tanh, Identity, Rectifier, MLP
 from blocks.bricks.cost import BinaryCrossEntropy
 from blocks.bricks.recurrent import SimpleRecurrent, LSTM
 
@@ -106,7 +106,7 @@ def test_seq_cond_gen_sequence(step_type='add', num_objs=2):
     total_steps = traj_len
     init_steps = 3
     exit_rate = 0.0
-    nll_weight = 0.1
+    nll_weight = 0.4
     x_dim = obs_dim
     y_dim = obs_dim
     z_dim = 100
@@ -161,7 +161,7 @@ def test_seq_cond_gen_sequence(step_type='add', num_objs=2):
     read_N = 2 # inner/outer grid dimension for reader
     reader_mlp = SimpleAttentionReader2d(x_dim=obs_dim,
                                          width=im_dim, height=im_dim, N=read_N,
-                                         img_scale=1.0, att_scale=0.4,
+                                         img_scale=1.0, att_scale=0.25,
                                          **inits)
     read_dim = reader_mlp.read_dim # total number of "pixels" read by reader
 
