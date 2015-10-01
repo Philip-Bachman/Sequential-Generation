@@ -57,6 +57,7 @@ class InfNet(object):
             sigma_config: list of "layer descriptions" for sigma part
             activation: "function handle" for the desired non-linearity
             init_scale: scaling factor for hidden layer weights (__ * 0.01)
+            shared_logvar: boolean for whether to used shared logvar
         shared_param_dicts: parameters for the MLP controlled by this InfNet
     """
     def __init__(self, \
@@ -100,6 +101,10 @@ class InfNet(object):
             self.sigma_init_scale = params['sigma_init_scale']
         else:
             self.sigma_init_scale = 1.0
+        if 'shared_logvar' in params:
+            self.shared_logvar = params['shared_logvar']
+        else:
+            self.shared_logvar = False
         # Check if the params for this net were given a priori. This option
         # will be used for creating "clones" of an inference network, with all
         # of the network parameters shared between clones.
@@ -394,7 +399,9 @@ class InfNet(object):
         output_mean = mu_acts[-1]
         if self.shared_logvar:
             shared_lv = T.mean(sigma_acts[-1], axis=1, keepdims=True)
-            output_logvar = shared_lv.repeat(self.sigma_layers[-1].out_dim, axis=1)
+            output_logvar = shared_lv + T.zeros_like(sigma_acts[-1])
+        else:
+            output_logvar = sigma_acts[-1]
 
         # wrap them up for easy returnage
         result = [output_mean, output_logvar]

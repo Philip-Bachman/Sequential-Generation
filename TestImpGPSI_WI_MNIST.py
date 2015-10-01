@@ -43,29 +43,18 @@ def test_mnist(step_type='add',
     # Get some training data #
     ##########################
     rng = np.random.RandomState(1234)
-    Xtr, Xva, Xte = load_binarized_mnist(data_path='./data/')
-    Xtr = np.vstack((Xtr, Xva))
-    Xva = Xte
-    #del Xte
+    dataset = 'data/mnist.pkl.gz'
+    datasets = load_udm(dataset, as_shared=False, zero_mean=False)
+    Xtr = datasets[0][0]
+    Xva = datasets[1][0]
+    Xte = datasets[2][0]
+    # Merge validation set and training set, and test on test set.
+    #Xtr = np.concatenate((Xtr, Xva), axis=0)
+    #Xva = Xte
+    Xtr = to_fX(shift_and_scale_into_01(Xtr))
+    Xva = to_fX(shift_and_scale_into_01(Xva))
     tr_samples = Xtr.shape[0]
     va_samples = Xva.shape[0]
-
-    ##########################
-    # Get some training data #
-    ##########################
-    # rng = np.random.RandomState(1234)
-    # dataset = 'data/mnist.pkl.gz'
-    # datasets = load_udm(dataset, as_shared=False, zero_mean=False)
-    # Xtr = datasets[0][0]
-    # Xva = datasets[1][0]
-    # Xte = datasets[2][0]
-    # # Merge validation set and training set, and test on test set.
-    # #Xtr = np.concatenate((Xtr, Xva), axis=0)
-    # #Xva = Xte
-    # Xtr = to_fX(shift_and_scale_into_01(Xtr))
-    # Xva = to_fX(shift_and_scale_into_01(Xva))
-    # tr_samples = Xtr.shape[0]
-    # va_samples = Xva.shape[0]
     batch_size = 200
     batch_reps = 1
     all_pix_mean = np.mean(np.mean(Xtr, axis=1))
@@ -93,8 +82,8 @@ def test_mnist(step_type='add',
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
-    params['activation'] = tanh_actfun #relu_actfun
-    params['init_scale'] = 'xg' #init_scale
+    params['activation'] = relu_actfun
+    params['init_scale'] = init_scale
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
     params['bias_noise'] = 0.0
@@ -111,8 +100,8 @@ def test_mnist(step_type='add',
     output_config = [s_dim, s_dim, s_dim]
     params['shared_config'] = shared_config
     params['output_config'] = output_config
-    params['activation'] = tanh_actfun #relu_actfun
-    params['init_scale'] = 'xg' #init_scale
+    params['activation'] = relu_actfun
+    params['init_scale'] = init_scale
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
     params['bias_noise'] = 0.0
@@ -120,7 +109,7 @@ def test_mnist(step_type='add',
     params['build_theano_funcs'] = False
     p_s0_given_h = HydraNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
-    p_s0_given_h.init_biases(0.0)
+    p_s0_given_h.init_biases(0.2)
     #################
     # p_zi_given_xi #
     #################
@@ -130,7 +119,7 @@ def test_mnist(step_type='add',
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
-    params['activation'] = tanh_actfun #relu_actfun
+    params['activation'] = relu_actfun
     params['init_scale'] = init_scale
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
@@ -139,7 +128,7 @@ def test_mnist(step_type='add',
     params['build_theano_funcs'] = False
     p_zi_given_xi = InfNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
-    p_zi_given_xi.init_biases(0.0)
+    p_zi_given_xi.init_biases(0.2)
     ###################
     # p_sip1_given_zi #
     ###################
@@ -148,7 +137,7 @@ def test_mnist(step_type='add',
     output_config = [s_dim, s_dim, s_dim]
     params['shared_config'] = shared_config
     params['output_config'] = output_config
-    params['activation'] = tanh_actfun #relu_actfun
+    params['activation'] = relu_actfun
     params['init_scale'] = init_scale
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
@@ -157,7 +146,7 @@ def test_mnist(step_type='add',
     params['build_theano_funcs'] = False
     p_sip1_given_zi = HydraNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
-    p_sip1_given_zi.init_biases(0.0)
+    p_sip1_given_zi.init_biases(0.2)
     ################
     # p_x_given_si #
     ################
@@ -166,7 +155,7 @@ def test_mnist(step_type='add',
     output_config = [x_dim, x_dim]
     params['shared_config'] = shared_config
     params['output_config'] = output_config
-    params['activation'] = tanh_actfun #relu_actfun
+    params['activation'] = relu_actfun
     params['init_scale'] = init_scale
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
@@ -175,7 +164,7 @@ def test_mnist(step_type='add',
     params['build_theano_funcs'] = False
     p_x_given_si = HydraNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
-    p_x_given_si.init_biases(0.0)
+    p_x_given_si.init_biases(0.2)
     ###############
     # q_h_given_x #
     ###############
@@ -185,8 +174,8 @@ def test_mnist(step_type='add',
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
-    params['activation'] = tanh_actfun #relu_actfun
-    params['init_scale'] = 'xg' #init_scale
+    params['activation'] = relu_actfun
+    params['init_scale'] = init_scale
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
     params['bias_noise'] = 0.0
@@ -194,7 +183,7 @@ def test_mnist(step_type='add',
     params['build_theano_funcs'] = False
     q_h_given_x = InfNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
-    q_h_given_x.init_biases(0.0)
+    q_h_given_x.init_biases(0.2)
     #################
     # q_zi_given_xi #
     #################
@@ -204,7 +193,7 @@ def test_mnist(step_type='add',
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
-    params['activation'] = tanh_actfun #relu_actfun
+    params['activation'] = relu_actfun
     params['init_scale'] = init_scale
     params['vis_drop'] = 0.0
     params['hid_drop'] = 0.0
@@ -213,7 +202,7 @@ def test_mnist(step_type='add',
     params['build_theano_funcs'] = False
     q_zi_given_xi = InfNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
-    q_zi_given_xi.init_biases(0.0)
+    q_zi_given_xi.init_biases(0.2)
 
     ###########################################################
     # Define parameters for the GPSImputer, and initialize it #
@@ -249,7 +238,7 @@ def test_mnist(step_type='add',
     out_file = open(log_name, 'wb')
     costs = [0. for i in range(10)]
     learn_rate = 0.0002
-    momentum = 0.5
+    momentum = 0.8
     batch_idx = np.arange(batch_size) + tr_samples
     for i in range(250000):
         scale = min(1.0, ((i+1) / 5000.0))
@@ -257,9 +246,9 @@ def test_mnist(step_type='add',
         if (((i + 1) % 15000) == 0):
             learn_rate = learn_rate * 0.93
         if (i > 10000):
-            momentum = 0.90
+            momentum = 0.95
         else:
-            momentum = 0.75
+            momentum = 0.8
         # get the indices of training samples for this batch update
         batch_idx += batch_size
         if (np.max(batch_idx) >= tr_samples):
@@ -272,7 +261,7 @@ def test_mnist(step_type='add',
         GPSI.set_train_switch(1.0)
         GPSI.set_lam_nll(lam_nll=1.0)
         GPSI.set_lam_kld(lam_kld_p=0.05, lam_kld_q=0.95, \
-                         lam_kld_g=(0.1 * lam_scale), lam_kld_s=(0.1 * lam_scale))
+                         lam_kld_g=0.00, lam_kld_s=(0.1 * lam_scale))
         GPSI.set_lam_l2w(1e-5)
         # perform a minibatch update and record the cost for this batch
         xb = to_fX( Xtr.take(batch_idx, axis=0) )
