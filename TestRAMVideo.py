@@ -363,7 +363,7 @@ def test_seq_cond_gen_sequence(step_type='add', obj_list=['circle'], glimpse_cou
         costs = [(costs[j] + result[j]) for j in range(len(result))]
 
         # output diagnostic information and checkpoint parameters, etc.
-        if ((i % 100) == 0):
+        if ((i % 200) == 0):
             costs = [(v / 100.0) for v in costs]
             str1 = "-- batch {0:d} --".format(i)
             str2 = "    total_cost: {0:.4f}".format(costs[0])
@@ -377,7 +377,7 @@ def test_seq_cond_gen_sequence(step_type='add', obj_list=['circle'], glimpse_cou
             out_file.write(joint_str+"\n")
             out_file.flush()
             costs = [0.0 for v in costs]
-        if ((i % 200) == 0):
+        if ((i % 400) == 0):
             SCG.save_model_params("{}_params.pkl".format(result_tag))
             # compute a small-sample estimate of NLL bound on validation set
             samp_count = 128
@@ -415,7 +415,7 @@ def test_seq_cond_gen_s_sequence(step_type='add', obj_list=['circle'], glimpse_c
     ##############################
     result_tag = "{}VID_SCGS".format(RESULT_PATH)
 
-    batch_size = 100
+    batch_size = 192
     traj_len = 12
     im_dim = 32
     obs_dim = im_dim*im_dim
@@ -427,7 +427,7 @@ def test_seq_cond_gen_s_sequence(step_type='add', obj_list=['circle'], glimpse_c
     TRAJ = TrajectoryGenerator(x_range=x_range, y_range=y_range, \
                                max_speed=max_speed)
     # configure an object renderer
-    OPTR1 = ObjectPainter(im_dim, im_dim, obj_type='circle', obj_scale=0.2)
+    OPTR1 = ObjectPainter(im_dim, im_dim, obj_type='circle', obj_scale=0.16)
     # get a Theano function for doing the rendering
     _center_x = T.vector()
     _center_y = T.vector()
@@ -437,7 +437,7 @@ def test_seq_cond_gen_s_sequence(step_type='add', obj_list=['circle'], glimpse_c
     paint_circle = theano.function(inputs=[_center_y, _center_x, _delta, _sigma], \
                                    outputs=_W)
     # configure an object renderer
-    OPTR2 = ObjectPainter(im_dim, im_dim, obj_type='cross', obj_scale=0.2)
+    OPTR2 = ObjectPainter(im_dim, im_dim, obj_type='cross', obj_scale=0.25)
     # get a Theano function for doing the rendering
     _center_x = T.vector()
     _center_y = T.vector()
@@ -458,34 +458,51 @@ def test_seq_cond_gen_s_sequence(step_type='add', obj_list=['circle'], glimpse_c
         delta = to_fX( np.ones(center_x.shape) )
         sigma = to_fX( np.ones(center_x.shape) )
         if obj_type == 'circle':
-            W = paint_circle(center_y, center_x, delta, 0.07*sigma)
+            W = paint_circle(center_y, center_x, delta, 0.05*sigma)
         else:
-            W = paint_cross(center_y, center_x, delta, 0.07*sigma)
+            W = paint_cross(center_y, center_x, delta, 0.05*sigma)
         # shape trajectories into a batch for passing to the model
         batch_imgs = np.zeros((num_samples, traj_len, obs_dim))
+        batch_coords = np.zeros((num_samples, traj_len, 2))
         for i in range(num_samples):
             start_idx = i * traj_len
             end_idx = start_idx + traj_len
             img_set = W[start_idx:end_idx,:]
             batch_imgs[i,:,:] = img_set
+            batch_coords[i,:,0] = center_y[start_idx:end_idx]
+            batch_coords[i,:,1] = center_x[start_idx:end_idx]
         batch_imgs = np.swapaxes(batch_imgs, 0, 1)
-        return to_fX( batch_imgs )
+        batch_coords = np.swapaxes(batch_coords, 0, 1)
+        return [to_fX( batch_imgs ), to_fX( batch_coords )]
 
     def generate_batch_multi(num_samples, objs=['circle']):
         obj_imgs = []
+        obj_coords = []
         for obj in objs:
-            imgs = generate_batch(num_samples, obj_type=obj)
+            imgs, coords = generate_batch(num_samples, obj_type=obj)
             obj_imgs.append(imgs)
+            obj_coords.append(coords)
+        seq_len = obj_coords[0].shape[0]
+        batch_size = obj_coords[0].shape[1]
         first_imgs = obj_imgs[0]
-        batch_imgs = obj_imgs[0]
-        for imgs in obj_imgs[1:]:
-            batch_imgs = batch_imgs + imgs
+        first_coords = obj_coords[0]
+        batch_imgs = np.zeros(obj_imgs[0].shape)
+        batch_coords = np.zeros(obj_coords[0].shape)
+        for o_num in range(len(objs)):
+            batch_imgs = batch_imgs + obj_imgs[o_num]
+            mask = npr.rand(seq_len, batch_size) < (1. / (o_num+1))
+            mask = mask[:,:,np.newaxis]
+            batch_coords = (mask * obj_coords[o_num]) + ((1.-mask) * batch_coords)
+        # add noise to image sequences
+        pix_mask = npr.rand(*batch_imgs.shape) < 0.05
+        pix_noise = npr.rand(*batch_imgs.shape)
+        batch_imgs = batch_imgs + (pix_mask * pix_noise)
         # clip to 0...0.99
         first_imgs = np.maximum(first_imgs, 0.001)
         first_imgs = np.minimum(first_imgs, 0.999)
         batch_imgs = np.maximum(batch_imgs, 0.001)
         batch_imgs = np.minimum(batch_imgs, 0.999)
-        return [to_fX(batch_imgs), to_fX(first_imgs)]
+        return [to_fX(batch_imgs), to_fX(first_imgs), to_fX(batch_coords)]
 
     ############################################################
     # Setup some parameters for the Iterative Refinement Model #
@@ -496,14 +513,14 @@ def test_seq_cond_gen_s_sequence(step_type='add', obj_list=['circle'], glimpse_c
     nll_weight = 1.0
     x_dim = obs_dim
     y_dim = obs_dim
-    z_att_dim = 50
-    z_slf_dim = 100
+    z_att_dim = 64
+    z_slf_dim = 64
     z_dim = z_att_dim + z_slf_dim
     att_spec_dim = 5
     all_spec_dim = att_spec_dim * glimpse_count
-    rnn_dim = 500
-    write_dim = 500
-    mlp_dim = 500
+    rnn_dim = 512
+    write_dim = 512
+    mlp_dim = 512
 
     def visualize_attention(result, pre_tag="AAA", post_tag="AAA"):
         seq_len = result[0].shape[0]
@@ -547,10 +564,11 @@ def test_seq_cond_gen_s_sequence(step_type='add', obj_list=['circle'], glimpse_c
     }
 
     # module for doing local 2d read defined by an attention specification
-    read_N = 3 # inner/outer grid dimension for reader
+    img_scale = 1.0 # image coords will range over [-img_scale...img_scale]
+    read_N = 3      # use NxN grid for reader
     reader_mlp = GridAttentionReader2d(x_dim=obs_dim,
                                       width=im_dim, height=im_dim, N=read_N,
-                                      img_scale=1.0, att_scale=0.25,
+                                      img_scale=img_scale, att_scale=0.25,
                                       **inits)
     glimpse_dim = reader_mlp.read_dim # total number of "pixels" read by reader
     read_dim = glimpse_count * glimpse_dim
@@ -674,10 +692,10 @@ def test_seq_cond_gen_s_sequence(step_type='add', obj_list=['circle'], glimpse_c
 
     # quick test of attention trajectory sampler
     samp_count = 32
-    Xb, Yb = generate_batch_multi(samp_count, objs=obj_list)
-    result = SCG.sample_attention(Xb, Xb)
+    Xb, Yb, Cb = generate_batch_multi(samp_count, objs=obj_list)
+    result = SCG.sample_attention(Xb, Yb)
     result[0] = Xb
-    visualize_attention(result, pre_tag=result_tag, post_tag="b0")
+    visualize_attention(result, pre_tag=result_tag, post_tag="a0")
 
     # build the main model functions (i.e. training and cost functions)
     SCG.build_model_funcs()
@@ -709,13 +727,13 @@ def test_seq_cond_gen_s_sequence(step_type='add', obj_list=['circle'], glimpse_c
         SCG.set_sgd_params(lr=scale*learn_rate, mom_1=momentum, mom_2=0.99)
         SCG.set_lam_kld(lam_kld_q2p=0.95, lam_kld_p2q=0.05)
         # perform a minibatch update and record the cost for this batch
-        Xb, Yb = generate_batch_multi(samp_count, objs=obj_list)
-        result = SCG.train_joint(Xb, Xb)
+        Xb, Yb, Cb = generate_batch_multi(samp_count, objs=obj_list)
+        result = SCG.train_joint(Xb, Yb)
         costs = [(costs[j] + result[j]) for j in range(len(result))]
 
         # output diagnostic information and checkpoint parameters, etc.
-        if ((i % 100) == 0):
-            costs = [(v / 100.0) for v in costs]
+        if ((i % 200) == 0):
+            costs = [(v / 200.0) for v in costs]
             str1 = "-- batch {0:d} --".format(i)
             str2 = "    total_cost: {0:.4f}".format(costs[0])
             str3 = "    nll_bound : {0:.4f}".format(costs[1])
@@ -728,12 +746,12 @@ def test_seq_cond_gen_s_sequence(step_type='add', obj_list=['circle'], glimpse_c
             out_file.write(joint_str+"\n")
             out_file.flush()
             costs = [0.0 for v in costs]
-        if ((i % 200) == 0):
+        if ((i % 400) == 0):
             SCG.save_model_params("{}_params.pkl".format(result_tag))
             # compute a small-sample estimate of NLL bound on validation set
             samp_count = 128
-            Xb, Yb = generate_batch_multi(samp_count, objs=obj_list)
-            va_costs = SCG.compute_nll_bound(Xb, Xb)
+            Xb, Yb, Cb = generate_batch_multi(samp_count, objs=obj_list)
+            va_costs = SCG.compute_nll_bound(Xb, Yb)
             str1 = "    va_nll_bound : {}".format(va_costs[1])
             str2 = "    va_nll_term  : {}".format(va_costs[2])
             str3 = "    va_kld_q2p   : {}".format(va_costs[3])
@@ -745,8 +763,8 @@ def test_seq_cond_gen_s_sequence(step_type='add', obj_list=['circle'], glimpse_c
             # Sample and draw attention trajectories. #
             ###########################################
             samp_count = 32
-            Xb, Yb = generate_batch_multi(samp_count, objs=obj_list)
-            result = SCG.sample_attention(Xb, Xb)
+            Xb, Yb, Cb = generate_batch_multi(samp_count, objs=obj_list)
+            result = SCG.sample_attention(Xb, Yb)
             post_tag = "b{0:d}".format(i)
             visualize_attention(result, pre_tag=result_tag, post_tag=post_tag)
 
@@ -754,5 +772,5 @@ if __name__=="__main__":
     #test_seq_cond_gen_sequence(step_type='add', obj_list=['cross','circle'], \
     #                           glimpse_count=1)
 
-    test_seq_cond_gen_s_sequence(step_type='add', obj_list=['circle','circle'], \
+    test_seq_cond_gen_s_sequence(step_type='add', obj_list=['cross','circle','circle'], \
                                  glimpse_count=1)
