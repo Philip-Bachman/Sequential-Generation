@@ -501,6 +501,8 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
                states=['c', 'h_enc', 'c_enc', 'h_dec', 'c_dec', 'nll', 'kl_q2p', 'kl_p2q'],
                outputs=['c', 'h_enc', 'c_enc', 'h_dec', 'c_dec', 'nll', 'kl_q2p', 'kl_p2q'])
     def iterate(self, u, u_enc, u_dec, c, h_enc, c_enc, h_dec, c_dec, nll, kl_q2p, kl_p2q, x):
+
+
         # get current prediction
         if self.step_type == 'add':
             # additive steps use c as a "direct workspace", which means it's

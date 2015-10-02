@@ -1216,18 +1216,19 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
         self.nll_term = nlls.sum(axis=0).mean()
         self.nll_term.name = "nll_term"
 
-        # get KL(q || p) and KL(p || q) and KL(p || g)
-        self.kld_q2p_term = kl_q2ps.sum(axis=0).mean()
+        # get KL(q || p) and KL(p || q)
+        self.kld_q2p_term = self.lam_kld_q2p[0] * kl_q2ps.sum(axis=0).mean()
         self.kld_q2p_term.name = "kld_q2p_term"
-        self.kld_p2q_term = kl_p2qs.sum(axis=0).mean()
+        self.kld_p2q_term = self.lam_kld_p2q[0] * kl_p2qs.sum(axis=0).mean()
         self.kld_p2q_term.name = "kld_p2q_term"
 
-        # get the proper VFE bound on NLL
-        self.nll_bound = self.nll_term + self.kld_q2p_term
-        self.nll_bound.name = "nll_bound"
+        # compute a cost that depends on all trainable model parameters
+        partial_cost = self.nll_term + \
+                       self.kld_q2p_term + \
+                       self.kld_p2q_term
 
         # grab handles for all the optimizable parameters in our cost
-        self.cg = ComputationGraph([self.nll_bound])
+        self.cg = ComputationGraph([partial_cost])
         self.joint_params = self.get_model_params(ary_type='theano')
 
         # apply some l2 regularization to the model parameters
@@ -1236,8 +1237,8 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
 
         # compute the full cost w.r.t. which we will optimize params
         self.joint_cost = self.nll_term + \
-                          (self.lam_kld_q2p[0] * self.kld_q2p_term) + \
-                          (self.lam_kld_p2q[0] * self.kld_p2q_term) + \
+                          self.kld_q2p_term + \
+                          self.kld_p2q_term + \
                           self.reg_term
         self.joint_cost.name = "joint_cost"
 
@@ -1249,13 +1250,13 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
             self.joint_grads[p] = grad_list[i]
 
         # construct the updates for all trainable parameters
-        self.joint_updates = get_adam_updates(params=self.joint_params, \
-                grads=self.joint_grads, alpha=self.lr, \
-                beta1=self.mom_1, beta2=self.mom_2, \
-                mom2_init=1e-3, smoothing=1e-5, max_grad_norm=10.0)
+        self.joint_updates = get_adam_updates(params=self.joint_params,
+                grads=self.joint_grads, alpha=self.lr,
+                beta1=self.mom_1, beta2=self.mom_2,
+                mom2_init=1e-3, smoothing=1e-5, max_grad_norm=5.0)
 
         # collect the outputs to return from this function
-        outputs = [self.joint_cost, self.nll_bound, self.nll_term, \
+        outputs = [self.joint_cost, self.nll_term, \
                    self.kld_q2p_term, self.kld_p2q_term, self.reg_term]
         # collect the required inputs
         inputs = [x_sym, y_sym]
@@ -1333,6 +1334,7 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
             result = [y_preds, a_maps, r_outs]
             return result
         self.sample_attention = switchy_sampler
+        return
 
     def get_model_params(self, ary_type='numpy'):
         """
@@ -1394,7 +1396,7 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
 ## less memory. Maybe it'll even work better too?         ##
 ##                                                        ##
 ## This version of the model adds a direct regression     ##
-## cost for shaping attentoin placement.                  ##
+## cost for shaping attention placement.                  ##
 ############################################################
 ############################################################
 
@@ -1660,10 +1662,10 @@ class SeqCondGen2dSL(BaseRecurrent, Initializable, Random):
 
     #------------------------------------------------------------------------
 
-    @recurrent(sequences=['x', 'y', 'y_att', 'u', 'nll_scale'], contexts=[],
+    @recurrent(sequences=['x', 'y', 'y_att', 'u', 'u_att', 'nll_scale'], contexts=[],
                states=['c', 'h_con', 'c_con', 'h_rav', 'c_rav'],
                outputs=['c', 'h_con', 'c_con', 'h_rav', 'c_rav', 'c_as_y', 'nll', 'nll_att', 'kl_q2p', 'kl_p2q', 'att_map', 'read_img'])
-    def iterate(self, x, y, y_att, u, nll_scale, c, h_con, c_con, h_rav, c_rav):
+    def iterate(self, x, y, y_att, u, u_att, nll_scale, c, h_con, c_con, h_rav, c_rav):
         # Get the current prediction for y
         if self.step_type == 'jump':
             # Controller hidden state tracks belief state (for jump steps)
@@ -1679,7 +1681,7 @@ class SeqCondGen2dSL(BaseRecurrent, Initializable, Random):
         #
         nll_grad_rav = y - c_as_y # condition on NLL gradient information
         i_rav = self.rav_mlp_in.apply(tensor.concatenate( \
-                                      [h_con, x, nll_grad_rav, 2.0*y_att], axis=1))
+                                      [h_con, x, nll_grad_rav], axis=1))
         h_rav, c_rav = self.rav_rnn.apply(states=h_rav, cells=c_rav, \
                                           inputs=i_rav, iterate=False)
 
@@ -1703,7 +1705,7 @@ class SeqCondGen2dSL(BaseRecurrent, Initializable, Random):
         p_z_mean, p_z_logvar, p_z = \
                 self.con_mlp_out.apply(h_con, u)
         q_z_mean, q_z_logvar, q_z = \
-                self.rav_mlp_out.apply(h_rav, u)
+                self.rav_mlp_out.apply(tensor.concatenate([h_rav, 2.0*y_att],axis=1), u)
         # mix samples from p/q based on value of self.train_switch
         z = (self.train_switch[0] * q_z) + \
             ((1.0 - self.train_switch[0]) * p_z)
@@ -1804,6 +1806,7 @@ class SeqCondGen2dSL(BaseRecurrent, Initializable, Random):
         cr_dim = self.get_dim('c_rav')
         hc_dim = self.get_dim('h_con')
         hr_dim = self.get_dim('h_rav')
+        as_dim = self.all_spec_dim
 
         if self.x_and_y_are_seqs:
             batch_size = x.shape[1]
@@ -1817,14 +1820,18 @@ class SeqCondGen2dSL(BaseRecurrent, Initializable, Random):
         cr0 = self.cr_0.repeat(batch_size, axis=0)
         hr0 = self.hr_0.repeat(batch_size, axis=0)
 
-        # get noise samples for stochastic variables
+        # get noise samples for main stochastic variables
         u = self.theano_rng.normal(
                     size=(self.total_steps, batch_size, z_dim),
+                    avg=0., std=1.)
+        # get noise samples for ultimate attention wobble
+        u_att = self.theano_rng.normal(
+                    size=(self.total_steps, batch_size, as_dim),
                     avg=0., std=1.)
 
         # run the multi-stage guided generative process
         cs, _, _, _, _, c_as_ys, nlls, nll_atts, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
-                self.iterate(x=x, y=y, y_att=y_att, u=u,
+                self.iterate(x=x, y=y, y_att=y_att, u=u, u_att=u_att,
                              nll_scale=self.nll_scales, c=c0,
                              h_con=hc0, c_con=cc0, h_rav=hr0, c_rav=cr0)
 
@@ -1860,21 +1867,23 @@ class SeqCondGen2dSL(BaseRecurrent, Initializable, Random):
         self.nll_term.name = "nll_term"
 
         # get the expected NLL attention part of the VFE bound
-        self.nll_att_term = nll_atts.sum(axis=0).mean()
+        self.nll_att_term = self.lam_nll_att[0] * nll_atts.sum(axis=0).mean()
         self.nll_att_term.name = "nll_atts_term"
 
-        # get KL(q || p) and KL(p || q) and KL(p || g)
-        self.kld_q2p_term = kl_q2ps.sum(axis=0).mean()
+        # get KL(q || p) and KL(p || q)
+        self.kld_q2p_term = self.lam_kld_q2p[0] * kl_q2ps.sum(axis=0).mean()
         self.kld_q2p_term.name = "kld_q2p_term"
-        self.kld_p2q_term = kl_p2qs.sum(axis=0).mean()
+        self.kld_p2q_term = self.lam_kld_p2q[0] * kl_p2qs.sum(axis=0).mean()
         self.kld_p2q_term.name = "kld_p2q_term"
 
-        # get the proper VFE bound on NLL
-        self.nll_bound = self.nll_term + self.nll_att_term + self.kld_q2p_term
-        self.nll_bound.name = "nll_bound"
+        # compute a cost that depends on all trainable model parameters
+        partial_cost = self.nll_term + \
+                       self.nll_att_term + \
+                       self.kld_q2p_term + \
+                       self.kld_p2q_term
 
         # grab handles for all the optimizable parameters in our cost
-        self.cg = ComputationGraph([self.nll_bound])
+        self.cg = ComputationGraph([partial_cost])
         self.joint_params = self.get_model_params(ary_type='theano')
 
         # apply some l2 regularization to the model parameters
@@ -1883,9 +1892,9 @@ class SeqCondGen2dSL(BaseRecurrent, Initializable, Random):
 
         # compute the full cost w.r.t. which we will optimize params
         self.joint_cost = self.nll_term + \
-                          (self.lam_nll_att[0] * self.nll_att_term) + \
-                          (self.lam_kld_q2p[0] * self.kld_q2p_term) + \
-                          (self.lam_kld_p2q[0] * self.kld_p2q_term) + \
+                          self.nll_att_term + \
+                          self.kld_q2p_term + \
+                          self.kld_p2q_term + \
                           self.reg_term
         self.joint_cost.name = "joint_cost"
 
@@ -1903,7 +1912,7 @@ class SeqCondGen2dSL(BaseRecurrent, Initializable, Random):
                 mom2_init=1e-3, smoothing=1e-5, max_grad_norm=10.0)
 
         # collect the outputs to return from this function
-        outputs = [self.joint_cost, self.nll_bound, self.nll_term, self.nll_att_term, \
+        outputs = [self.joint_cost, self.nll_term, self.nll_att_term, \
                    self.kld_q2p_term, self.kld_p2q_term, self.reg_term]
         # collect the required inputs
         inputs = [x_sym, y_sym, y_att_sym]
@@ -1933,14 +1942,6 @@ class SeqCondGen2dSL(BaseRecurrent, Initializable, Random):
         # collect estimates of y given x produced by this model
         cs, c_as_ys, nlls, nll_atts, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
                 self.process_inputs(x_sym, y_sym, y_att_sym)
-
-
-        # collect the outputs to return from this function
-        inputs = [x_sym, y_sym, y_att_sym]
-        outputs = [cs, c_as_ys, nlls, nll_atts, kl_q2ps, kl_p2qs]
-        print("Compiling scan loop tester...")
-        self.test_scan_loop = theano.function(inputs=inputs, \
-                                              outputs=outputs)
 
         # build the function for computing the attention trajectories
         print("Compiling attention tracker...")
@@ -1990,6 +1991,7 @@ class SeqCondGen2dSL(BaseRecurrent, Initializable, Random):
             result = [y_preds, a_maps, r_outs]
             return result
         self.sample_attention = switchy_sampler
+        return
 
     def get_model_params(self, ary_type='numpy'):
         """
