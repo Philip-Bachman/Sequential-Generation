@@ -413,7 +413,7 @@ def test_seq_cond_gen_s_sequence(step_type='add', obj_list=['circle'], glimpse_c
     ##############################
     # File tag, for output stuff #
     ##############################
-    result_tag = "{}VID_SCGS".format(RESULT_PATH)
+    result_tag = "{}VID_SCGS_ENT".format(RESULT_PATH)
 
     batch_size = 192
     traj_len = 12
@@ -584,7 +584,7 @@ def test_seq_cond_gen_s_sequence(step_type='add', obj_list=['circle'], glimpse_c
                      [(z_slf_dim + read_dim + all_spec_dim), mlp_dim, mlp_dim, 4*rnn_dim], \
                      name="con_mlp_in", **inits)
     rav_mlp_in = MLP([Rectifier(), Rectifier(), Identity()], \
-                     [(rnn_dim + x_dim + y_dim), mlp_dim, mlp_dim, 4*rnn_dim], \
+                     [(rnn_dim + y_dim), mlp_dim, mlp_dim, 4*rnn_dim], \
                      name="rav_mlp_in", **inits)
 
     # mlps for converting controller states into an attention specification
@@ -947,11 +947,11 @@ def test_seq_cond_gen_sl_sequence(step_type='add', obj_list=['circle'], glimpse_
     }
 
     # module for doing local 2d read defined by an attention specification
-    img_scale = 1.0 # image coords will range over [-img_scale...img_scale]
+    img_scale = 2.0 # image coords will range over [-img_scale...img_scale]
     read_N = 3      # use NxN grid for reader
     reader_mlp = GridAttentionReader2d(x_dim=obs_dim,
                                       width=im_dim, height=im_dim, N=read_N,
-                                      img_scale=img_scale, att_scale=0.25,
+                                      img_scale=img_scale, att_scale=0.33,
                                       **inits)
     glimpse_dim = reader_mlp.read_dim # total number of "pixels" read by reader
     read_dim = glimpse_count * glimpse_dim
@@ -965,11 +965,13 @@ def test_seq_cond_gen_sl_sequence(step_type='add', obj_list=['circle'], glimpse_
                      [(z_slf_dim + read_dim + all_spec_dim), mlp_dim, mlp_dim, 4*rnn_dim], \
                      name="con_mlp_in", **inits)
     rav_mlp_in = MLP([Rectifier(), Rectifier(), Identity()], \
-                     [(rnn_dim + x_dim + y_dim), mlp_dim, mlp_dim, 4*rnn_dim], \
+                     [(rnn_dim + y_dim), mlp_dim, mlp_dim, 4*rnn_dim], \
                      name="rav_mlp_in", **inits)
-    att_mlp_in = MLP([Rectifier(), Rectifier(), Identity()], \
+
+    # mlp for converting z_att into actual attention specs
+    att_mlp_in = CondNet([Rectifier(), Rectifier()], \
                      [z_att_dim, mlp_dim, mlp_dim, all_spec_dim], \
-                     name="rav_mlp_in", **inits)
+                     name="att_mlp_in", **inits)
 
     # mlps for converting controller states into an attention specification
     con_mlp_out = CondNet([Rectifier(), Rectifier()],
@@ -1109,7 +1111,7 @@ def test_seq_cond_gen_sl_sequence(step_type='add', obj_list=['circle'], glimpse_
             momentum = 0.9
         # set sgd and objective function hyperparams for this update
         SCG.set_sgd_params(lr=scale*learn_rate, mom_1=momentum, mom_2=0.99)
-        SCG.set_lam_nll_att(lam_nll_att=50.0)
+        SCG.set_lam_nll_att(lam_nll_att=25.0)
         SCG.set_lam_kld(lam_kld_q2p=0.95, lam_kld_p2q=0.05)
         # perform a minibatch update and record the cost for this batch
         Xb, Yb, Cb = generate_batch_multi(samp_count, objs=obj_list, \
@@ -1161,7 +1163,7 @@ def test_seq_cond_gen_sl_sequence(step_type='add', obj_list=['circle'], glimpse_
 if __name__=="__main__":
     #test_seq_cond_gen_sequence(step_type='add', obj_list=['cross','circle'], \
     #                           glimpse_count=1)
-    test_seq_cond_gen_s_sequence(step_type='add', obj_list=['cross', 'circle', 'circle'], \
-                                 glimpse_count=1)
-    #test_seq_cond_gen_sl_sequence(step_type='add', obj_list=['circle','circle'], \
-    #                              glimpse_count=1)
+    #test_seq_cond_gen_s_sequence(step_type='add', obj_list=['cross', 'circle', 'circle'], \
+    #                             glimpse_count=1)
+    test_seq_cond_gen_sl_sequence(step_type='add', obj_list=['circle','circle'], \
+                                  glimpse_count=1)

@@ -1054,7 +1054,7 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
         #
         nll_grad_rav = y - c_as_y # condition on NLL gradient information
         i_rav = self.rav_mlp_in.apply(tensor.concatenate( \
-                                      [h_con, x, nll_grad_rav], axis=1))
+                                      [h_con, nll_grad_rav], axis=1))
         h_rav, c_rav = self.rav_rnn.apply(states=h_rav, cells=c_rav, \
                                           inputs=i_rav, iterate=False)
 
@@ -1197,7 +1197,7 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
                     size=(self.total_steps, batch_size, z_dim),
                     avg=0., std=1.)
 
-        u_att = self.theano_rng.normal(
+        u_att = 0.33 * self.theano_rng.normal(
                     size=(self.total_steps, batch_size, as_dim),
                     avg=0., std=1.)
 
@@ -1668,6 +1668,8 @@ class SeqCondGen2dSL(BaseRecurrent, Initializable, Random):
             return 2
         elif name in ['u', 'z']:
             return self.con_mlp_out.output_dim
+        elif name in ['u_att']:
+            return self.all_spec_dim
         elif name in ['z_att']:
             return self.att_mlp_in.input_dim
         elif name in ['c_as_y', 'y']:
@@ -1709,7 +1711,7 @@ class SeqCondGen2dSL(BaseRecurrent, Initializable, Random):
         #
         nll_grad_rav = y - c_as_y # condition on NLL gradient information
         i_rav = self.rav_mlp_in.apply(tensor.concatenate( \
-                                      [h_con, x, nll_grad_rav], axis=1))
+                                      [h_con, nll_grad_rav], axis=1))
         h_rav, c_rav = self.rav_rnn.apply(states=h_rav, cells=c_rav, \
                                           inputs=i_rav, iterate=False)
 
@@ -1749,7 +1751,7 @@ class SeqCondGen2dSL(BaseRecurrent, Initializable, Random):
         z_att = z[:,:z_att_dim]
         z_slf = z[:,z_att_dim:]
         # transform latent variables z_att into one or more attention specs
-        att_specs = self.att_mlp_in.apply(z_att)
+        as_mean, as_logvar, att_specs = self.att_mlp_in.apply(z_att, u_att)
 
         #######################################################
         # Apply the attention-based reader to the input in x. #
@@ -1853,7 +1855,7 @@ class SeqCondGen2dSL(BaseRecurrent, Initializable, Random):
                     size=(self.total_steps, batch_size, z_dim),
                     avg=0., std=1.)
         # get noise samples for ultimate attention wobble
-        u_att = self.theano_rng.normal(
+        u_att = 0.25 * self.theano_rng.normal(
                     size=(self.total_steps, batch_size, as_dim),
                     avg=0., std=1.)
 
