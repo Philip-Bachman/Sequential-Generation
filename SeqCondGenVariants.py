@@ -22,7 +22,7 @@ from blocks.roles import add_role, WEIGHT, BIAS, PARAMETER, AUXILIARY
 
 from DKCode import get_adam_updates
 from HelperFuncs import constFX, to_fX
-from LogPDFs import log_prob_bernoulli, gaussian_kld
+from LogPDFs import log_prob_bernoulli, gaussian_kld, gaussian_ent
 
 
 ############################################################
@@ -831,7 +831,7 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
         rav_mlp_in: preprocesses input to the "variational controller" LSTM
         rav_rnn: the "variational controller" LSTM
         rav_mlp_out: CondNet for distribution over z given rav_rnn
-        att_mlp_in: converts a subset of z into attention specs
+        att_mlp_in: CondNet to convert a subset of z into attention specs
     """
     def __init__(self, x_and_y_are_seqs,
                     total_steps, init_steps,
@@ -886,6 +886,9 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
         self.lam_kld_q2p = theano.shared(value=ones_ary, name='lam_kld_q2p')
         self.lam_kld_p2q = theano.shared(value=ones_ary, name='lam_kld_p2q')
         self.set_lam_kld(lam_kld_q2p=0.95, lam_kld_p2q=0.05)
+        # create shared variable for controlling attention entropy
+        self.lam_ent_att = theano.shared(value=ones_ary, name='lam_ent_att')
+        self.set_lam_ent(lam_ent_att=0.05)
         # create shared variables for controlling optimization/updates
         self.lr = theano.shared(value=0.0001*ones_ary, name='lr')
         self.mom_1 = theano.shared(value=0.9*ones_ary, name='mom_1')
@@ -929,6 +932,15 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
         self.lam_kld_q2p.set_value(to_fX(new_lam))
         new_lam = zero_ary + lam_kld_p2q
         self.lam_kld_p2q.set_value(to_fX(new_lam))
+        return
+
+    def set_lam_ent(self, lam_ent_att=0.0):
+        """
+        Set the relative weight of entropy reward for attention.
+        """
+        zero_ary = numpy.zeros((1,))
+        new_lam = zero_ary + lam_ent_att
+        self.lam_ent_att.set_value(to_fX(new_lam))
         return
 
     def _construct_nll_scales(self):
@@ -1001,6 +1013,8 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
             return self.con_mlp_out.output_dim
         elif name in ['z_att']:
             return self.att_mlp_in.input_dim
+        elif name in ['u_att']:
+            return self.all_spec_dim
         elif name in ['c_as_y', 'y']:
             return self.y_dim
         elif name == 'c':
@@ -1021,10 +1035,10 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
 
     #------------------------------------------------------------------------
 
-    @recurrent(sequences=['x', 'y', 'u', 'nll_scale'], contexts=[],
+    @recurrent(sequences=['x', 'y', 'u', 'u_att', 'nll_scale'], contexts=[],
                states=['c', 'h_con', 'c_con', 'h_rav', 'c_rav'],
-               outputs=['c', 'h_con', 'c_con', 'h_rav', 'c_rav', 'c_as_y', 'nll', 'kl_q2p', 'kl_p2q', 'att_map', 'read_img'])
-    def iterate(self, x, y, u, nll_scale, c, h_con, c_con, h_rav, c_rav):
+               outputs=['c', 'h_con', 'c_con', 'h_rav', 'c_rav', 'c_as_y', 'nll', 'kl_q2p', 'kl_p2q', 'ent_att', 'att_map', 'read_img'])
+    def iterate(self, x, y, u, u_att, nll_scale, c, h_con, c_con, h_rav, c_rav):
         # Get the current prediction for y
         if self.step_type == 'jump':
             # Controller hidden state tracks belief state (for jump steps)
@@ -1080,7 +1094,8 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
         z_att = z[:,:z_att_dim]
         z_slf = z[:,z_att_dim:]
         # transform latent variables z_att into one or more attention specs
-        att_specs = self.att_mlp_in.apply(z_att)
+        as_mean, as_logvar, att_specs = self.att_mlp_in.apply(z_att, u_att)
+        ent_att = tensor.sum(gaussian_ent(as_mean, as_logvar), axis=1)
 
         #######################################################
         # Apply the attention-based reader to the input in x. #
@@ -1146,12 +1161,12 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
         # Compute the NLL of the y prediction as of this step. #
         ########################################################
         nll = -nll_scale * tensor.flatten(log_prob_bernoulli(y, c_as_y))
-        return c, h_con, c_con, h_rav, c_rav, c_as_y, nll, kl_q2p, kl_p2q, att_map, read_img
+        return c, h_con, c_con, h_rav, c_rav, c_as_y, nll, kl_q2p, kl_p2q, ent_att, att_map, read_img
 
     #------------------------------------------------------------------------
 
     @application(inputs=['x', 'y'],
-                 outputs=['cs', 'c_as_ys', 'nlls', 'kl_q2ps', 'kl_p2qs', 'att_maps', 'read_imgs'])
+                 outputs=['cs', 'c_as_ys', 'nlls', 'kl_q2ps', 'kl_p2qs', 'ent_atts', 'att_maps', 'read_imgs'])
     def process_inputs(self, x, y):
         # get important size and shape information
         z_dim = self.get_dim('z')
@@ -1159,6 +1174,7 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
         cr_dim = self.get_dim('c_rav')
         hc_dim = self.get_dim('h_con')
         hr_dim = self.get_dim('h_rav')
+        as_dim = self.all_spec_dim
 
         if self.x_and_y_are_seqs:
             batch_size = x.shape[1]
@@ -1181,9 +1197,14 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
                     size=(self.total_steps, batch_size, z_dim),
                     avg=0., std=1.)
 
+        u_att = self.theano_rng.normal(
+                    size=(self.total_steps, batch_size, as_dim),
+                    avg=0., std=1.)
+
         # run the multi-stage guided generative process
-        cs, _, _, _, _, c_as_ys, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
-                self.iterate(x=x, y=y, u=u, nll_scale=self.nll_scales, c=c0,
+        cs, _, _, _, _, c_as_ys, nlls, kl_q2ps, kl_p2qs, ent_atts, att_maps, read_imgs = \
+                self.iterate(x=x, y=y, u=u, u_att=u_att,
+                             nll_scale=self.nll_scales, c=c0,
                              h_con=hc0, c_con=cc0, h_rav=hr0, c_rav=cr0)
 
         # add name tags to the constructed values
@@ -1192,9 +1213,10 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
         nlls.name = "nlls"
         kl_q2ps.name = "kl_q2ps"
         kl_p2qs.name = "kl_p2qs"
+        ent_atts.name = "ent_atts"
         att_maps.name = "att_maps"
         read_imgs.name = "read_imgs"
-        return cs, c_as_ys, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs
+        return cs, c_as_ys, nlls, kl_q2ps, kl_p2qs, ent_atts, att_maps, read_imgs
 
     def build_model_funcs(self):
         """
@@ -1209,7 +1231,7 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
             y_sym = tensor.matrix('y_sym')
 
         # collect estimates of y given x produced by this model
-        cs, c_as_ys, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
+        cs, c_as_ys, nlls, kl_q2ps, kl_p2qs, ent_atts, att_maps, read_imgs = \
                 self.process_inputs(x_sym, y_sym)
 
         # get the expected NLL part of the VFE bound
@@ -1222,10 +1244,14 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
         self.kld_p2q_term = self.lam_kld_p2q[0] * kl_p2qs.sum(axis=0).mean()
         self.kld_p2q_term.name = "kld_p2q_term"
 
+        # get attention entropy term
+        self.ent_att_term = -self.lam_ent_att[0] * ent_atts.sum(axis=0).mean()
+
         # compute a cost that depends on all trainable model parameters
         partial_cost = self.nll_term + \
                        self.kld_q2p_term + \
-                       self.kld_p2q_term
+                       self.kld_p2q_term + \
+                       self.ent_att_term
 
         # grab handles for all the optimizable parameters in our cost
         self.cg = ComputationGraph([partial_cost])
@@ -1239,6 +1265,7 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
         self.joint_cost = self.nll_term + \
                           self.kld_q2p_term + \
                           self.kld_p2q_term + \
+                          self.ent_att_term + \
                           self.reg_term
         self.joint_cost.name = "joint_cost"
 
@@ -1257,7 +1284,8 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
 
         # collect the outputs to return from this function
         outputs = [self.joint_cost, self.nll_term, \
-                   self.kld_q2p_term, self.kld_p2q_term, self.reg_term]
+                   self.kld_q2p_term, self.kld_p2q_term, \
+                   self.ent_att_term, self.reg_term]
         # collect the required inputs
         inputs = [x_sym, y_sym]
 
@@ -1284,7 +1312,7 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
             x_sym = tensor.matrix('x_sym_att_funcs')
             y_sym = tensor.matrix('y_sym_att_funcs')
         # collect estimates of y given x produced by this model
-        cs, c_as_ys, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
+        cs, c_as_ys, nlls, kl_q2ps, kl_p2qs, ent_atts, att_maps, read_imgs = \
                 self.process_inputs(x_sym, y_sym)
         # build the function for computing the attention trajectories
         print("Compiling attention tracker...")

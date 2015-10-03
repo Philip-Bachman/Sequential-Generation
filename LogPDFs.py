@@ -15,7 +15,7 @@ def normal2(x, mean, logvar):
 def laplace(x, mean, logvar):
     sd = T.exp(0.5 * logvar)
     return -(abs(x - mean) / sd) - (0.5 * logvar) - np.log(2)
-    
+
 def standard_normal(x):
 	return C - (x**2 / 2)
 
@@ -100,6 +100,13 @@ def gaussian_kld(mu_left, logvar_left, mu_right, logvar_right):
             ((mu_left - mu_right)**2.0 / T.exp(logvar_right)) - 1.0)
     return gauss_klds
 
+def gaussian_ent(mu, logvar):
+	"""
+	Entropy of independent univariate gaussians.
+	"""
+	ent = (0.5 * logvar) + 17.0795
+	return ent
+
 def gaussian_kld_BN(logvar_left, logvar_right):
     """
     Compute KL divergence between a bunch of univariate Gaussian distributions
@@ -130,14 +137,14 @@ def log_gamma_lanczos(z):
     small = LOG_PI - T.log(T.sin(PI * z)) - log_gamma_lanczos_sub(flip_z)
     big = log_gamma_lanczos_sub(z)
     return T.switch(z < 0.5, small, big)
-   
+
 ## version that isn't vectorised, since g is small anyway
 def log_gamma_lanczos_sub(z): #expanded version
     # Coefficients used by the GNU Scientific Library
     g = 7
     p = np.array([0.99999999999980993, 676.5203681218851, -1259.1392167224028,
                   771.32342877765313, -176.61502916214059, 12.507343278686905,
-                  -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7])                    
+                  -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7])
     z = z - 1
     x = p[0]
     for i in range(1, g+2):
@@ -178,7 +185,7 @@ def log_mean_exp(a):
     """
     max_ = a.max(1)
     result = max_ + T.log(T.exp(a - max_.dimshuffle(0, 'x')).mean(1))
-    return result 
+    return result
 
 def theano_parzen(mu, sigma):
     """

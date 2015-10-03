@@ -561,12 +561,12 @@ def test_seq_cond_gen_s_sequence(step_type='add', obj_list=['circle'], glimpse_c
         'biases_init': Constant(0.),
     }
     inits = {
-        'weights_init': IsotropicGaussian(0.02),
+        'weights_init': IsotropicGaussian(0.01),
         'biases_init': Constant(0.),
     }
 
     # module for doing local 2d read defined by an attention specification
-    img_scale = 1.0 # image coords will range over [-img_scale...img_scale]
+    img_scale = 2.0 # image coords will range over [-img_scale...img_scale]
     read_N = 3      # use NxN grid for reader
     reader_mlp = GridAttentionReader2d(x_dim=obs_dim,
                                       width=im_dim, height=im_dim, N=read_N,
@@ -586,9 +586,6 @@ def test_seq_cond_gen_s_sequence(step_type='add', obj_list=['circle'], glimpse_c
     rav_mlp_in = MLP([Rectifier(), Rectifier(), Identity()], \
                      [(rnn_dim + x_dim + y_dim), mlp_dim, mlp_dim, 4*rnn_dim], \
                      name="rav_mlp_in", **inits)
-    att_mlp_in = MLP([Rectifier(), Rectifier(), Identity()], \
-                     [z_att_dim, mlp_dim, mlp_dim, all_spec_dim], \
-                     name="rav_mlp_in", **inits)
 
     # mlps for converting controller states into an attention specification
     con_mlp_out = CondNet([Rectifier(), Rectifier()],
@@ -597,6 +594,11 @@ def test_seq_cond_gen_s_sequence(step_type='add', obj_list=['circle'], glimpse_c
     rav_mlp_out = CondNet([Rectifier(), Rectifier()], \
                           [rnn_dim, mlp_dim, mlp_dim, z_dim], \
                           name="rav_mlp_out", **inits)
+
+    # mlp for converting z_att into actual attention specs
+    att_mlp_in = CondNet([Rectifier(), Rectifier()], \
+                     [z_att_dim, mlp_dim, mlp_dim, all_spec_dim], \
+                     name="att_mlp_in", **inits)
 
     # LSTMs for the actual LSTMs (obviously, perhaps)
     con_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
@@ -729,6 +731,7 @@ def test_seq_cond_gen_s_sequence(step_type='add', obj_list=['circle'], glimpse_c
         # set sgd and objective function hyperparams for this update
         SCG.set_sgd_params(lr=scale*learn_rate, mom_1=momentum, mom_2=0.99)
         SCG.set_lam_kld(lam_kld_q2p=0.95, lam_kld_p2q=0.05)
+        SCG.set_lam_ent(lam_ent_att=0.02)
         # perform a minibatch update and record the cost for this batch
         Xb, Yb, Cb = generate_batch_multi(samp_count, objs=obj_list, \
                                           img_scale=img_scale)
@@ -743,8 +746,9 @@ def test_seq_cond_gen_s_sequence(step_type='add', obj_list=['circle'], glimpse_c
             str3 = "    nll_term  : {0:.4f}".format(costs[1])
             str4 = "    kld_q2p   : {0:.4f}".format(costs[2])
             str5 = "    kld_p2q   : {0:.4f}".format(costs[3])
-            str6 = "    reg_term  : {0:.4f}".format(costs[4])
-            joint_str = "\n".join([str1, str2, str3, str4, str5, str6])
+            str6 = "    ent_att   : {0:.4f}".format(costs[4])
+            str7 = "    reg_term  : {0:.4f}".format(costs[5])
+            joint_str = "\n".join([str1, str2, str3, str4, str5, str6, str7])
             print(joint_str)
             out_file.write(joint_str+"\n")
             out_file.flush()
@@ -760,7 +764,8 @@ def test_seq_cond_gen_s_sequence(step_type='add', obj_list=['circle'], glimpse_c
             str2 = "    va_nll_term  : {0:.4f}".format(va_costs[1])
             str3 = "    va_kld_q2p   : {0:.4f}".format(va_costs[2])
             str4 = "    va_kld_p2q   : {0:.4f}".format(va_costs[3])
-            joint_str = "\n".join([str1, str2, str3, str4])
+            str5 = "    va_ent_att   : {0:.4f}".format(va_costs[4])
+            joint_str = "\n".join([str1, str2, str3, str4, str5])
             print(joint_str)
             out_file.write(joint_str+"\n")
             out_file.flush()
