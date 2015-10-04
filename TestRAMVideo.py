@@ -43,10 +43,10 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0]):
     ##############################
     # File tag, for output stuff #
     ##############################
-    result_tag = "{}VID_SCGX_MO".format(RESULT_PATH)
+    result_tag = "{}VID_SCGX_DN".format(RESULT_PATH)
 
     batch_size = 192
-    traj_len = 15
+    traj_len = 20
     im_dim = 32
     obs_dim = im_dim*im_dim
 
@@ -143,7 +143,7 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0]):
     total_steps = traj_len
     init_steps = 5
     exit_rate = 0.0
-    nll_weight = 0.6
+    nll_weight = 0.25
     x_dim = obs_dim
     y_dim = obs_dim
     z_dim = 128
@@ -323,7 +323,10 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0]):
     compile_minutes = (compile_end_time - compile_start_time) / 60.0
     print("THEANO COMPILE TIME (MIN): {}".format(compile_minutes))
 
-    #SCG.load_model_params(f_name="SCG_params.pkl")
+    # TEST SAVE/LOAD FUNCTIONALITY
+    param_save_file = "{}_params.pkl".format(result_tag)
+    SCG.save_model_params(param_save_file)
+    SCG.load_model_params(param_save_file)
 
     ################################################################
     # Apply some updates, to check that they aren't totally broken #
@@ -1109,8 +1112,8 @@ def test_seq_cond_gen_sl_sequence(step_type='add', obj_list=['circle'], glimpse_
             visualize_attention(result, pre_tag=result_tag, post_tag=post_tag)
 
 if __name__=="__main__":
-    #test_seq_cond_gen_sequence(step_type='add', x_objs=['cross', 'circle', 'circle'], y_objs=[0])
-    test_seq_cond_gen_sequence(step_type='add', x_objs=['cross', 'circle'], y_objs=[0,1])
+    test_seq_cond_gen_sequence(step_type='add', x_objs=['cross', 'circle', 'circle'], y_objs=[0])
+    #test_seq_cond_gen_sequence(step_type='add', x_objs=['cross', 'circle'], y_objs=[0,1])
     #test_seq_cond_gen_s_sequence(step_type='add', obj_list=['cross', 'circle', 'circle'], \
     #                             glimpse_count=1)
     #test_seq_cond_gen_sl_sequence(step_type='add', obj_list=['circle','circle'], \

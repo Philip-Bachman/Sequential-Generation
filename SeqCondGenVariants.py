@@ -22,7 +22,8 @@ from blocks.roles import add_role, WEIGHT, BIAS, PARAMETER, AUXILIARY
 
 from DKCode import get_adam_updates
 from HelperFuncs import constFX, to_fX
-from LogPDFs import log_prob_bernoulli, gaussian_kld, gaussian_ent
+from LogPDFs import log_prob_bernoulli, gaussian_kld, gaussian_ent, \
+                    gaussian_logvar_kld
 
 
 ############################################################
@@ -2134,8 +2135,14 @@ class SeqCondGenX(BaseRecurrent, Initializable, Random):
         # grab handles for shared read/write models
         self.reader_mlp = reader_mlp
         self.writer_mlp = writer_mlp
-        # dimension for attention specification (i.e. location, scale, etc.)
-        self.att_spec_dim = 5
+        # set up stuff for dealing with stochastic attention placement
+        self.att_spec_dim = 5 # dimension for attention specification
+        init_ary = numpy.zeros((5,))
+        init_ary[0] = 1.0 # use stochastic y coords
+        init_ary[1] = 1.0 # use stochastic x coords
+        init_ary[2] = 1.0 # use stochastic grid scale
+        self.att_noise_mask = shared_floatx_nans((5,), name='att_noise_mask')
+        self.att_noise_mask.set_value(init_ary.astype(theano.config.floatX))
         # grab handles for sequential read/write models
         self.con_mlp_in = con_mlp_in
         self.con_rnn = con_rnn
@@ -2364,7 +2371,9 @@ class SeqCondGenX(BaseRecurrent, Initializable, Random):
         nll = -nll_scale * tensor.flatten(log_prob_bernoulli(y, c_as_y))
         # compute KL(q || p) and KL(p || q) for this step
         kl_q2p = tensor.sum(gaussian_kld(q_z_mean, q_z_logvar, \
-                            p_z_mean, p_z_logvar), axis=1)
+                            p_z_mean, p_z_logvar), axis=1) + \
+                 tensor.sum(gaussian_logvar_kld(as_mean, as_logvar, \
+                            0., 0.), axis=1)
         kl_p2q = tensor.sum(gaussian_kld(p_z_mean, p_z_logvar, \
                             q_z_mean, q_z_logvar), axis=1)
         return c, h_con, c_con, h_gen, c_gen, h_var, c_var, c_as_y, nll, kl_q2p, kl_p2q, att_map, read_img
@@ -2410,9 +2419,10 @@ class SeqCondGenX(BaseRecurrent, Initializable, Random):
                     size=(self.total_steps, batch_size, z_dim),
                     avg=0., std=1.)
 
-        u_att = self.att_noise * self.theano_rng.normal(
+        u_all = self.att_noise * self.theano_rng.normal(
                         size=(self.total_steps, batch_size, as_dim),
                         avg=0., std=1.)
+        u_att = self.att_noise_mask.dimshuffle('x','x',0) * u_all
 
         # run the multi-stage guided generative process
         cs, h_cons, _, _, _, _, _, c_as_ys, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs = \

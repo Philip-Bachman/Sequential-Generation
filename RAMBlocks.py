@@ -305,7 +305,8 @@ class GridAttentionCore2d(Initializable):
         self.sigma_scale = shared_floatx_nans((1,), name='sigma_scale')
         self.sigma_scale.set_value(init_ary.astype(theano.config.floatX))
         add_role(self.sigma_scale, PARAMETER)
-        self.att_spec_dim = 5   # dimension of an attention specification
+
+        self.att_spec_dim = 5  # dimension of an attention specification
 
         # get a localized reader mechanism and a controller decoder
         self.zoomer = ZoomableAttention2d(height, width, N, img_scale, att_scale)

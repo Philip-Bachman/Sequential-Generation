@@ -107,15 +107,13 @@ def gaussian_ent(mu, logvar):
 	ent = (0.5 * logvar) + 17.0795
 	return ent
 
-def gaussian_kld_BN(logvar_left, logvar_right):
+def gaussian_logvar_kld(mu_left, logvar_left, mu_right, logvar_right):
     """
     Compute KL divergence between a bunch of univariate Gaussian distributions
-    with the given means and log-variances.
-    We do KL(N(mu_left, logvar_left) || N(mu_right, logvar_right)).
+    with the given means and log-variances. DON'T COMPARE MEANS!
     """
     gauss_klds = 0.5 * (logvar_right - logvar_left + \
-            (T.exp(logvar_left) / T.exp(logvar_right)) + \
-            (1.0 / T.exp(logvar_right)) - 1.0)
+            (T.exp(logvar_left) / T.exp(logvar_right)))
     return gauss_klds
 
 #################################
