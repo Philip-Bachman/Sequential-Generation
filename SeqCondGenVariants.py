@@ -2064,9 +2064,9 @@ class SeqCondGen2dSL(BaseRecurrent, Initializable, Random):
 ############################################################
 ############################################################
 
-class SeqCondGen(BaseRecurrent, Initializable, Random):
+class SeqCondGenX(BaseRecurrent, Initializable, Random):
     """
-    SeqCondGen -- constructs conditional densities under time constraints.
+    SeqCondGenX -- constructs conditional densities under time constraints.
 
     This model sequentially constructs a conditional density estimate by taking
     repeated glimpses at the input x, and constructing a hypothesis about the
@@ -2097,7 +2097,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         writer_mlp: used for writing to the output prediction
         con_mlp_in: preprocesses input to the "controller" LSTM
         con_rnn: the "controller" LSTM
-        con_mlp_out: CondNet for distribution over z given con_rnn
+        con_mlp_out: CondNet for distribution over att spec given con_rnn
         gen_mlp_in: preprocesses input to the "generator" LSTM
         gen_rnn: the "generator" LSTM
         gen_mlp_out: CondNet for distribution over z given gen_rnn
@@ -2114,7 +2114,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
                     gen_mlp_in, gen_rnn, gen_mlp_out,
                     var_mlp_in, var_rnn, var_mlp_out,
                     **kwargs):
-        super(SeqCondGen, self).__init__(**kwargs)
+        super(SeqCondGenX, self).__init__(**kwargs)
         if not ((step_type == 'add') or (step_type == 'jump')):
             raise ValueError('step_type must be jump or add')
         # record basic structural parameters
@@ -2134,6 +2134,8 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         # grab handles for shared read/write models
         self.reader_mlp = reader_mlp
         self.writer_mlp = writer_mlp
+        # dimension for attention specification (i.e. location, scale, etc.)
+        self.att_spec_dim = 5
         # grab handles for sequential read/write models
         self.con_mlp_in = con_mlp_in
         self.con_rnn = con_rnn
@@ -2156,8 +2158,8 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         self.mom_1 = theano.shared(value=0.9*ones_ary, name='mom_1')
         self.mom_2 = theano.shared(value=0.99*ones_ary, name='mom_2')
 
-        # set noise scale for the controller
-        self.con_noise = 0.05
+        # set noise scale for the attention placement
+        self.att_noise = 0.1
 
         # setup a "null pointer" that will point to the computation graph
         # for this model, which can be built by self.build_model_funcs()...
@@ -2270,12 +2272,14 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
     def get_dim(self, name):
         if name == 'x':
             return self.x_dim
+        elif name == 'nll_scale':
+            return 1
         elif name in ['c', 'c0', 'y']:
             return self.y_dim
         elif name in ['u', 'z']:
             return self.gen_mlp_out.get_dim('output')
-        elif name == 'nll_scale':
-            return 1
+        elif name in ['u_att']:
+            return self.att_spec_dim
         elif name in ['h_con', 'hc0']:
             return self.con_rnn.get_dim('states')
         elif name == 'c_con':
@@ -2291,15 +2295,15 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         elif name in ['nll', 'kl_q2p', 'kl_p2q']:
             return 0
         else:
-            super(SeqCondGen, self).get_dim(name)
+            super(SeqCondGenX, self).get_dim(name)
         return
 
     #------------------------------------------------------------------------
 
-    @recurrent(sequences=['x', 'y', 'u', 'u_hc', 'nll_scale'], contexts=[],
+    @recurrent(sequences=['x', 'y', 'u', 'u_att', 'nll_scale'], contexts=[],
                states=['c', 'h_con', 'c_con', 'h_gen', 'c_gen', 'h_var', 'c_var'],
                outputs=['c', 'h_con', 'c_con', 'h_gen', 'c_gen', 'h_var', 'c_var', 'c_as_y', 'nll', 'kl_q2p', 'kl_p2q', 'att_map', 'read_img'])
-    def iterate(self, x, y, u, u_hc, nll_scale, c, h_con, c_con, h_gen, c_gen, h_var, c_var):
+    def iterate(self, x, y, u, u_att, nll_scale, c, h_con, c_con, h_gen, c_gen, h_var, c_var):
         if self.step_type == 'add':
             # additive steps use c as a "direct workspace", which means it's
             # already directly comparable to y.
@@ -2308,20 +2312,25 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
             # non-additive steps use c_con as a "latent workspace", which means
             # it needs to be transformed before being comparable to y.
             c_as_y = tensor.nnet.sigmoid(self.writer_mlp.apply(c_con))
+
+        # estimate conditional over attention spec given h_con (from time t-1)
+        as_mean, as_logvar, att_spec = \
+                self.con_mlp_out.apply(h_con, u_att)
+
         # apply the attention-based reader to the input in x
-        read_out = self.reader_mlp.apply(x, x, h_con)
-        att_map = self.reader_mlp.att_map(h_con)
-        read_img = self.reader_mlp.write(read_out, h_con)
+        read_out = self.reader_mlp.apply(x, x, att_spec)
+        att_map = self.reader_mlp.att_map(att_spec)
+        read_img = self.reader_mlp.write(read_out, att_spec)
 
         # update the primary RNN state
         i_gen = self.gen_mlp_in.apply( \
-                tensor.concatenate([read_out, h_con], axis=1))
+                tensor.concatenate([read_out, att_spec, h_con], axis=1))
         h_gen, c_gen = self.gen_rnn.apply(states=h_gen, cells=c_gen,
                                           inputs=i_gen, iterate=False)
         # update the guide RNN state
         nll_grad = y - c_as_y # condition on NLL gradient information
         i_var = self.var_mlp_in.apply( \
-                tensor.concatenate([nll_grad, read_out, h_con], axis=1))
+                tensor.concatenate([nll_grad, read_out, att_spec, h_con], axis=1))
         h_var, c_var = self.var_rnn.apply(states=h_var, cells=c_var,
                                           inputs=i_var, iterate=False)
 
@@ -2331,26 +2340,23 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         # estimate guide conditional over z given h_var
         q_z_mean, q_z_logvar, q_z = \
                 self.var_mlp_out.apply(h_var, u)
-        # estimate controller conditional over z given h_con (from time t-1)
-        g_z_mean, g_z_logvar, g_z = \
-                self.con_mlp_out.apply(h_con, u)
 
         # mix samples from p/q based on value of self.train_switch
         z = (self.train_switch[0] * q_z) + \
             ((1.0 - self.train_switch[0]) * p_z)
 
         # update the controller RNN state, using the sampled z values
-        i_con = self.con_mlp_in.apply(tensor.concatenate([z], axis=1))
+        #i_con = self.con_mlp_in.apply(tensor.concatenate([z], axis=1))
+        i_con = self.con_mlp_in.apply(z)
         h_con, c_con = self.con_rnn.apply(states=h_con, cells=c_con, \
                                           inputs=i_con, iterate=False)
-        # add a bit of noise to h_con
-        h_con = h_con + u_hc
 
         # update the "workspace" (stored in c)
         if self.step_type == 'add':
             c = c + self.writer_mlp.apply(h_con)
         else:
             c = self.writer_mlp.apply(c_con)
+
         # compute the NLL of the reconstruction as of this step. the NLL at
         # each step is rescaled by a factor such that the sum of the factors
         # for all steps is 1, and all factors are non-negative.
@@ -2361,14 +2367,12 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
                             p_z_mean, p_z_logvar), axis=1)
         kl_p2q = tensor.sum(gaussian_kld(p_z_mean, p_z_logvar, \
                             q_z_mean, q_z_logvar), axis=1)
-        kl_p2g = tensor.sum(gaussian_kld(p_z_mean, p_z_logvar, \
-                            g_z_mean, g_z_logvar), axis=1)
         return c, h_con, c_con, h_gen, c_gen, h_var, c_var, c_as_y, nll, kl_q2p, kl_p2q, att_map, read_img
 
     #------------------------------------------------------------------------
 
     @application(inputs=['x', 'y'],
-                 outputs=['cs', 'h_cons', 'c_as_ys', 'nlls', 'kl_q2ps', 'kl_p2qs', 'att_maps', 'read_imgs'])
+                 outputs=['xs', 'cs', 'h_cons', 'c_as_ys', 'nlls', 'kl_q2ps', 'kl_p2qs', 'att_maps', 'read_imgs'])
     def process_inputs(self, x, y):
         # get important size and shape information
 
@@ -2379,6 +2383,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         hc_dim = self.get_dim('h_con')
         hg_dim = self.get_dim('h_gen')
         hv_dim = self.get_dim('h_var')
+        as_dim = self.att_spec_dim
 
         if self.x_and_y_are_seqs:
             batch_size = x.shape[1]
@@ -2392,7 +2397,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         # get initial states for all model components
         c0 = self.c_0.repeat(batch_size, axis=0)
         cc0 = self.cc_0.repeat(batch_size, axis=0)
-        u_hc0 = self.con_noise * self.theano_rng.normal( \
+        u_hc0 = 0.05 * self.theano_rng.normal( \
                         size=(batch_size, hc_dim), avg=0., std=1.)
         hc0 = self.hc_0.repeat(batch_size, axis=0) + u_hc0
         cg0 = self.cg_0.repeat(batch_size, axis=0)
@@ -2405,13 +2410,13 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
                     size=(self.total_steps, batch_size, z_dim),
                     avg=0., std=1.)
 
-        u_hc = self.con_noise * self.theano_rng.normal(
-                        size=(self.total_steps, batch_size, hc_dim),
+        u_att = self.att_noise * self.theano_rng.normal(
+                        size=(self.total_steps, batch_size, as_dim),
                         avg=0., std=1.)
 
         # run the multi-stage guided generative process
-        cs, h_cons, _, _, _, _, _, nlls, kl_q2ps, kl_p2qs, kl_p2gs, att_maps, read_imgs = \
-                self.iterate(x=x, y=y, u=u, u_hc=u_hc,
+        cs, h_cons, _, _, _, _, _, c_as_ys, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
+                self.iterate(x=x, y=y, u=u, u_att=u_att,
                              nll_scale=self.nll_scales,
                              c=c0,
                              h_con=hc0, c_con=cc0,
@@ -2419,14 +2424,17 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
                              h_var=hv0, c_var=cv0)
 
         # add name tags to the constructed values
+        xs = x
+        xs.name = "xs"
         cs.name = "cs"
         h_cons.name = "h_cons"
+        c_as_ys.name = "c_as_ys"
         nlls.name = "nlls"
         kl_q2ps.name = "kl_q2ps"
         kl_p2qs.name = "kl_p2qs"
         att_maps.name = "att_maps"
         read_imgs.name = "read_imgs"
-        return cs, h_cons, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs
+        return xs, cs, h_cons, c_as_ys, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs
 
     def build_model_funcs(self):
         """
@@ -2441,7 +2449,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
             y_sym = tensor.matrix('y_sym')
 
         # collect estimates of y given x produced by this model
-        cs, h_cons, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
+        xs, cs, h_cons, c_as_ys, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
                 self.process_inputs(x_sym, y_sym)
 
         # get the expected NLL part of the VFE bound
@@ -2487,7 +2495,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
                 mom2_init=1e-3, smoothing=1e-5, max_grad_norm=10.0)
 
         # collect the outputs to return from this function
-        outputs = [self.joint_cost, self.nll_bound, self.nll_term, \
+        outputs = [self.joint_cost, self.nll_term, \
                    self.kld_q2p_term, self.kld_p2q_term, self.reg_term]
         # collect the required inputs
         inputs = [x_sym, y_sym]
@@ -2497,7 +2505,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         self.train_joint = theano.function(inputs=inputs, \
                                            outputs=outputs, \
                                            updates=self.joint_updates)
-        print("Compiling NLL bound estimator function...")
+        print("Compiling model cost estimator function...")
         self.compute_nll_bound = theano.function(inputs=inputs, \
                                                  outputs=outputs)
         return
@@ -2505,7 +2513,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
     def build_attention_funcs(self):
         """
         Build functions for visualizing the behavior of this model, assuming
-        self.reader_mlp is FovAttentionReader2d.
+        self.reader_mlp is SimpleAttentionReader2d or SimpleAttentionReader1d.
         """
         # some symbolic vars to represent various inputs/outputs
         if self.x_and_y_are_seqs:
@@ -2515,12 +2523,12 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
             x_sym = tensor.matrix('x_sym_att_funcs')
             y_sym = tensor.matrix('y_sym_att_funcs')
         # collect estimates of y given x produced by this model
-        cs, h_cons, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
+        xs, cs, h_cons, c_as_ys, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
                 self.process_inputs(x_sym, y_sym)
         # build the function for computing the attention trajectories
         print("Compiling attention tracker...")
         inputs = [x_sym, y_sym]
-        outputs = [tensor.nnet.sigmoid(cs), att_maps, read_imgs]
+        outputs = [c_as_ys, att_maps, read_imgs, xs]
         sample_func = theano.function(inputs=inputs, \
                                       outputs=outputs)
         def switchy_sampler(x, y, sample_source='q'):
@@ -2536,9 +2544,35 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
                 self.train_switch.set_value(ones_ary)
             # sample prediction and attention trajectories
             outs = sample_func(x, y)
+            xs = outs[-1]
             # set sample source switch back to previous value
             self.train_switch.set_value(old_switch)
-            return outs
+            # grab prediction values
+            y_preds = outs[0]
+            # aggregate sequential attention maps
+            obs_dim = self.x_dim
+            seq_len = self.total_steps
+            samp_count = outs[1].shape[1]
+            att_count = 1
+            a_maps = numpy.zeros((outs[1].shape[0], outs[1].shape[1], obs_dim))
+            for a_num in range(att_count):
+                start_idx = a_num * obs_dim
+                end_idx = (a_num + 1) * obs_dim
+                for s1 in range(samp_count):
+                    for s2 in range(seq_len):
+                        a_maps[s2,s1,:] = a_maps[s2,s1,:] + \
+                                          outs[1][s2,s1,start_idx:end_idx]
+            # aggregate sequential attention read-outs
+            r_outs = numpy.zeros((outs[2].shape[0], outs[2].shape[1], obs_dim))
+            for a_num in range(att_count):
+                start_idx = a_num * obs_dim
+                end_idx = (a_num + 1) * obs_dim
+                for s1 in range(samp_count):
+                    for s2 in range(seq_len):
+                        r_outs[s2,s1,:] = r_outs[s2,s1,:] + \
+                                          outs[2][s2,s1,start_idx:end_idx]
+            result = [y_preds, a_maps, r_outs, xs]
+            return result
         self.sample_attention = switchy_sampler
         return
 
