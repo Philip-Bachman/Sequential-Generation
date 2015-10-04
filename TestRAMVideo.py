@@ -413,7 +413,7 @@ def test_seq_cond_gen_s_sequence(step_type='add', obj_list=['circle'], glimpse_c
     ##############################
     # File tag, for output stuff #
     ##############################
-    result_tag = "{}VID_SCGS_ENT".format(RESULT_PATH)
+    result_tag = "{}VID_SCGS".format(RESULT_PATH)
 
     batch_size = 192
     traj_len = 12
@@ -570,7 +570,7 @@ def test_seq_cond_gen_s_sequence(step_type='add', obj_list=['circle'], glimpse_c
     read_N = 3      # use NxN grid for reader
     reader_mlp = GridAttentionReader2d(x_dim=obs_dim,
                                       width=im_dim, height=im_dim, N=read_N,
-                                      img_scale=img_scale, att_scale=0.33,
+                                      img_scale=img_scale, att_scale=0.5,
                                       **inits)
     glimpse_dim = reader_mlp.read_dim # total number of "pixels" read by reader
     read_dim = glimpse_count * glimpse_dim
@@ -580,24 +580,24 @@ def test_seq_cond_gen_s_sequence(step_type='add', obj_list=['circle'], glimpse_c
                      name="writer_mlp", **inits)
 
     # mlps for processing inputs to things
-    con_mlp_in = MLP([Rectifier(), Rectifier(), Identity()], \
-                     [(z_slf_dim + read_dim + all_spec_dim), mlp_dim, mlp_dim, 4*rnn_dim], \
+    con_mlp_in = MLP([Rectifier(), Identity()], \
+                     [(z_slf_dim + read_dim + all_spec_dim), mlp_dim, 4*rnn_dim], \
                      name="con_mlp_in", **inits)
-    rav_mlp_in = MLP([Rectifier(), Rectifier(), Identity()], \
-                     [(rnn_dim + y_dim), mlp_dim, mlp_dim, 4*rnn_dim], \
+    rav_mlp_in = MLP([Rectifier(), Identity()], \
+                     [(rnn_dim + y_dim), mlp_dim, 4*rnn_dim], \
                      name="rav_mlp_in", **inits)
 
     # mlps for converting controller states into an attention specification
-    con_mlp_out = CondNet([Rectifier(), Rectifier()],
-                          [rnn_dim, mlp_dim, mlp_dim, z_dim], \
+    con_mlp_out = CondNet([Rectifier()],
+                          [rnn_dim, mlp_dim, z_dim], \
                           name="con_mlp_out", **inits)
-    rav_mlp_out = CondNet([Rectifier(), Rectifier()], \
-                          [rnn_dim, mlp_dim, mlp_dim, z_dim], \
+    rav_mlp_out = CondNet([Rectifier()], \
+                          [rnn_dim, mlp_dim, z_dim], \
                           name="rav_mlp_out", **inits)
 
     # mlp for converting z_att into actual attention specs
-    att_mlp_in = CondNet([Rectifier(), Rectifier()], \
-                     [z_att_dim, mlp_dim, mlp_dim, all_spec_dim], \
+    att_mlp_in = CondNet([Rectifier()], \
+                     [z_att_dim, mlp_dim, all_spec_dim], \
                      name="att_mlp_in", **inits)
 
     # LSTMs for the actual LSTMs (obviously, perhaps)
@@ -721,7 +721,7 @@ def test_seq_cond_gen_s_sequence(step_type='add', obj_list=['circle'], glimpse_c
     learn_rate = 0.0001
     momentum = 0.9
     for i in range(250000):
-        scale = min(1.0, ((i+1) / 2000.0))
+        scale = min(1.0, ((i+1) / 5000.0))
         if (((i + 1) % 10000) == 0):
             learn_rate = learn_rate * 0.95
         if (i > 5000):
@@ -731,7 +731,7 @@ def test_seq_cond_gen_s_sequence(step_type='add', obj_list=['circle'], glimpse_c
         # set sgd and objective function hyperparams for this update
         SCG.set_sgd_params(lr=scale*learn_rate, mom_1=momentum, mom_2=0.99)
         SCG.set_lam_kld(lam_kld_q2p=0.95, lam_kld_p2q=0.05)
-        SCG.set_lam_ent(lam_ent_att=0.02)
+        SCG.set_lam_ent(lam_ent_att=0.00)
         # perform a minibatch update and record the cost for this batch
         Xb, Yb, Cb = generate_batch_multi(samp_count, objs=obj_list, \
                                           img_scale=img_scale)
@@ -755,20 +755,6 @@ def test_seq_cond_gen_s_sequence(step_type='add', obj_list=['circle'], glimpse_c
             costs = [0.0 for v in costs]
         if ((i % 500) == 0):
             SCG.save_model_params("{}_params.pkl".format(result_tag))
-            # compute a small-sample estimate of NLL bound on validation set
-            samp_count = 128
-            Xb, Yb, Cb = generate_batch_multi(samp_count, objs=obj_list, \
-                                              img_scale=img_scale)
-            va_costs = SCG.compute_nll_bound(Xb, Yb)
-            str1 = "    va_total_cost: {0:.4f}".format(va_costs[0])
-            str2 = "    va_nll_term  : {0:.4f}".format(va_costs[1])
-            str3 = "    va_kld_q2p   : {0:.4f}".format(va_costs[2])
-            str4 = "    va_kld_p2q   : {0:.4f}".format(va_costs[3])
-            str5 = "    va_ent_att   : {0:.4f}".format(va_costs[4])
-            joint_str = "\n".join([str1, str2, str3, str4, str5])
-            print(joint_str)
-            out_file.write(joint_str+"\n")
-            out_file.flush()
             ###########################################
             # Sample and draw attention trajectories. #
             ###########################################
@@ -942,7 +928,7 @@ def test_seq_cond_gen_sl_sequence(step_type='add', obj_list=['circle'], glimpse_
         'biases_init': Constant(0.),
     }
     inits = {
-        'weights_init': IsotropicGaussian(0.02),
+        'weights_init': IsotropicGaussian(0.01),
         'biases_init': Constant(0.),
     }
 
@@ -951,7 +937,7 @@ def test_seq_cond_gen_sl_sequence(step_type='add', obj_list=['circle'], glimpse_
     read_N = 3      # use NxN grid for reader
     reader_mlp = GridAttentionReader2d(x_dim=obs_dim,
                                       width=im_dim, height=im_dim, N=read_N,
-                                      img_scale=img_scale, att_scale=0.33,
+                                      img_scale=img_scale, att_scale=0.5,
                                       **inits)
     glimpse_dim = reader_mlp.read_dim # total number of "pixels" read by reader
     read_dim = glimpse_count * glimpse_dim
@@ -1102,7 +1088,7 @@ def test_seq_cond_gen_sl_sequence(step_type='add', obj_list=['circle'], glimpse_
     learn_rate = 0.0001
     momentum = 0.9
     for i in range(250000):
-        scale = min(1.0, ((i+1) / 2000.0))
+        scale = min(1.0, ((i+1) / 5000.0))
         if (((i + 1) % 10000) == 0):
             learn_rate = learn_rate * 0.95
         if (i > 5000):
@@ -1136,20 +1122,6 @@ def test_seq_cond_gen_sl_sequence(step_type='add', obj_list=['circle'], glimpse_
             costs = [0.0 for v in costs]
         if ((i % 500) == 0):
             SCG.save_model_params("{}_params.pkl".format(result_tag))
-            # compute a small-sample estimate of NLL bound on validation set
-            samp_count = 128
-            Xb, Yb, Cb = generate_batch_multi(samp_count, objs=obj_list, \
-                                              img_scale=img_scale)
-            va_costs = SCG.compute_nll_bound(Xb, Xb, Cb)
-            str1 = "    va_all_cost  : {0:.4f}".format(va_costs[0])
-            str2 = "    va_nll_term  : {0:.4f}".format(va_costs[1])
-            str3 = "    va_att_term  : {0:.4f}".format(va_costs[2])
-            str4 = "    va_kld_q2p   : {0:.4f}".format(va_costs[3])
-            str5 = "    va_kld_p2q   : {0:.4f}".format(va_costs[4])
-            joint_str = "\n".join([str1, str2, str3, str4, str5])
-            print(joint_str)
-            out_file.write(joint_str+"\n")
-            out_file.flush()
             ###########################################
             # Sample and draw attention trajectories. #
             ###########################################
@@ -1163,7 +1135,7 @@ def test_seq_cond_gen_sl_sequence(step_type='add', obj_list=['circle'], glimpse_
 if __name__=="__main__":
     #test_seq_cond_gen_sequence(step_type='add', obj_list=['cross','circle'], \
     #                           glimpse_count=1)
-    #test_seq_cond_gen_s_sequence(step_type='add', obj_list=['cross', 'circle', 'circle'], \
-    #                             glimpse_count=1)
-    test_seq_cond_gen_sl_sequence(step_type='add', obj_list=['circle','circle'], \
-                                  glimpse_count=1)
+    test_seq_cond_gen_s_sequence(step_type='add', obj_list=['cross', 'circle', 'circle'], \
+                                 glimpse_count=1)
+    #test_seq_cond_gen_sl_sequence(step_type='add', obj_list=['circle','circle'], \
+    #                              glimpse_count=1)

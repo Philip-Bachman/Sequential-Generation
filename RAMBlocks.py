@@ -962,6 +962,7 @@ class OISeqCondGen(BaseRecurrent, Initializable, Random):
         return
 
 
+
 ############################################################
 ############################################################
 ## ATTENTION-BASED PERCEPTION UNDER TIME CONSTRAINTS      ##
@@ -1009,7 +1010,8 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         var_rnn: the "variational" LSTM
         var_mlp_out: CondNet for distribution over z given gen_rnn
     """
-    def __init__(self, x_and_y_are_seqs, total_steps, init_steps,
+    def __init__(self, x_and_y_are_seqs,
+                    total_steps, init_steps,
                     exit_rate, nll_weight,
                     step_type, x_dim, y_dim,
                     reader_mlp, writer_mlp,
@@ -1053,8 +1055,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         # create shared variables for controlling KLd terms
         self.lam_kld_q2p = theano.shared(value=ones_ary, name='lam_kld_q2p')
         self.lam_kld_p2q = theano.shared(value=ones_ary, name='lam_kld_p2q')
-        self.lam_kld_p2g = theano.shared(value=ones_ary, name='lam_kld_p2g')
-        self.set_lam_kld(lam_kld_q2p=0.95, lam_kld_p2q=0.05, lam_kld_p2g=0.0)
+        self.set_lam_kld(lam_kld_q2p=0.95, lam_kld_p2q=0.05)
         # create shared variables for controlling optimization/updates
         self.lr = theano.shared(value=0.0001*ones_ary, name='lr')
         self.mom_1 = theano.shared(value=0.9*ones_ary, name='mom_1')
@@ -1089,21 +1090,18 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         self.mom_2.set_value(to_fX(new_mom_2))
         return
 
-    def set_lam_kld(self, lam_kld_q2p=0.0, lam_kld_p2q=1.0, lam_kld_p2g=0.0):
+    def set_lam_kld(self, lam_kld_q2p=0.0, lam_kld_p2q=1.0):
         """
         Set the relative weight of various KL-divergence terms.
 
         kld_q2p: KLd between guide reader and primary reader. KL(q||p)
         kld_p2q: KLd between primary reader and guide reader. KL(p||q)
-        kld_p2g: KLd between primary reader and primary controller. KL(p||g)
         """
         zero_ary = numpy.zeros((1,))
         new_lam = zero_ary + lam_kld_q2p
         self.lam_kld_q2p.set_value(to_fX(new_lam))
         new_lam = zero_ary + lam_kld_p2q
         self.lam_kld_p2q.set_value(to_fX(new_lam))
-        new_lam = zero_ary + lam_kld_p2g
-        self.lam_kld_p2g.set_value(to_fX(new_lam))
         return
 
     def _construct_nll_scales(self):
@@ -1205,7 +1203,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
 
     @recurrent(sequences=['x', 'y', 'u', 'u_hc', 'nll_scale'], contexts=[],
                states=['c', 'h_con', 'c_con', 'h_gen', 'c_gen', 'h_var', 'c_var'],
-               outputs=['c', 'h_con', 'c_con', 'h_gen', 'c_gen', 'h_var', 'c_var', 'nll', 'kl_q2p', 'kl_p2q', 'kl_p2g', 'att_map', 'read_img'])
+               outputs=['c', 'h_con', 'c_con', 'h_gen', 'c_gen', 'h_var', 'c_var', 'nll', 'kl_q2p', 'kl_p2q', 'att_map', 'read_img'])
     def iterate(self, x, y, u, u_hc, nll_scale, c, h_con, c_con, h_gen, c_gen, h_var, c_var):
         if self.step_type == 'add':
             # additive steps use c as a "direct workspace", which means it's
@@ -1270,12 +1268,12 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
                             q_z_mean, q_z_logvar), axis=1)
         kl_p2g = tensor.sum(gaussian_kld(p_z_mean, p_z_logvar, \
                             g_z_mean, g_z_logvar), axis=1)
-        return c, h_con, c_con, h_gen, c_gen, h_var, c_var, nll, kl_q2p, kl_p2q, kl_p2g, att_map, read_img
+        return c, h_con, c_con, h_gen, c_gen, h_var, c_var, nll, kl_q2p, kl_p2q, att_map, read_img
 
     #------------------------------------------------------------------------
 
     @application(inputs=['x', 'y'],
-                 outputs=['cs', 'h_cons', 'nlls', 'kl_q2ps', 'kl_p2qs', 'kl_p2gs', 'att_maps', 'read_imgs'])
+                 outputs=['cs', 'h_cons', 'nlls', 'kl_q2ps', 'kl_p2qs', 'att_maps', 'read_imgs'])
     def process_inputs(self, x, y):
         # get important size and shape information
 
@@ -1331,10 +1329,9 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         nlls.name = "nlls"
         kl_q2ps.name = "kl_q2ps"
         kl_p2qs.name = "kl_p2qs"
-        kl_p2gs.name = "kl_p2gs"
         att_maps.name = "att_maps"
         read_imgs.name = "read_imgs"
-        return cs, h_cons, nlls, kl_q2ps, kl_p2qs, kl_p2gs, att_maps, read_imgs
+        return cs, h_cons, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs
 
     def build_model_funcs(self):
         """
@@ -1349,7 +1346,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
             y_sym = tensor.matrix('y_sym')
 
         # collect estimates of y given x produced by this model
-        cs, h_cons, nlls, kl_q2ps, kl_p2qs, kl_p2gs, att_maps, read_imgs = \
+        cs, h_cons, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
                 self.process_inputs(x_sym, y_sym)
 
         # get the expected NLL part of the VFE bound
@@ -1361,8 +1358,6 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         self.kld_q2p_term.name = "kld_q2p_term"
         self.kld_p2q_term = kl_p2qs.sum(axis=0).mean()
         self.kld_p2q_term.name = "kld_p2q_term"
-        self.kld_p2g_term = kl_p2gs.sum(axis=0).mean()
-        self.kld_p2g_term.name = "kld_p2g_term"
 
         # get the proper VFE bound on NLL
         self.nll_bound = self.nll_term + self.kld_q2p_term
@@ -1380,7 +1375,6 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         self.joint_cost = self.nll_term + \
                           (self.lam_kld_q2p[0] * self.kld_q2p_term) + \
                           (self.lam_kld_p2q[0] * self.kld_p2q_term) + \
-                          (self.lam_kld_p2g[0] * self.kld_p2g_term) + \
                           self.reg_term
         self.joint_cost.name = "joint_cost"
 
@@ -1399,8 +1393,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
 
         # collect the outputs to return from this function
         outputs = [self.joint_cost, self.nll_bound, self.nll_term, \
-                   self.kld_q2p_term, self.kld_p2q_term, self.kld_p2g_term, \
-                   self.reg_term]
+                   self.kld_q2p_term, self.kld_p2q_term, self.reg_term]
         # collect the required inputs
         inputs = [x_sym, y_sym]
 
@@ -1412,9 +1405,6 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
         print("Compiling NLL bound estimator function...")
         self.compute_nll_bound = theano.function(inputs=inputs, \
                                                  outputs=outputs)
-        print("Compiling trajectory sampler...")
-        self.sample_trajectories = theano.function(inputs=inputs, \
-                                                   outputs=[cs, h_cons])
         return
 
     def build_attention_funcs(self):
@@ -1430,7 +1420,7 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
             x_sym = tensor.matrix('x_sym_att_funcs')
             y_sym = tensor.matrix('y_sym_att_funcs')
         # collect estimates of y given x produced by this model
-        cs, h_cons, nlls, kl_q2ps, kl_p2qs, kl_p2gs, att_maps, read_imgs = \
+        cs, h_cons, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
                 self.process_inputs(x_sym, y_sym)
         # build the function for computing the attention trajectories
         print("Compiling attention tracker...")
@@ -1455,18 +1445,6 @@ class SeqCondGen(BaseRecurrent, Initializable, Random):
             self.train_switch.set_value(old_switch)
             return outs
         self.sample_attention = switchy_sampler
-
-
-        ##############
-        # TEMP STUFF #
-        ##############
-        nll_term = nlls.sum(axis=0).mean()
-        kld_q2p_term = kl_q2ps.sum(axis=0).mean()
-        # get the proper VFE bound on NLL
-        nll_bound = nll_term + kld_q2p_term
-        print("Compiling simple NLL bound estimator function...")
-        self.simple_nll_bound = theano.function(inputs=[x_sym, y_sym], \
-                                outputs=[nll_bound, nll_term, kld_q2p_term])
         return
 
     def get_model_params(self, ary_type='numpy'):
