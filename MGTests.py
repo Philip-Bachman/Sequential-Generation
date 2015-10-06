@@ -46,7 +46,7 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     ##############################
     result_tag = "{}VID_SCGX_{}".format(RESULT_PATH, res_tag)
 
-    batch_size = 64
+    batch_size = 128
     traj_len = 15
     im_dim = 32
     obs_dim = im_dim*im_dim
@@ -213,7 +213,7 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     read_dim = reader_mlp.read_dim # total number of "pixels" read by reader
 
     # MLP for updating belief state based on con_rnn
-    writer_mlp = MLP([None, None], [rnn_dim, write_dim, obs_dim], \
+    writer_mlp = MLP([None, None], [rnn_dim, mlp_dim, obs_dim], \
                      name="writer_mlp", **inits)
 
     # mlps for processing inputs to LSTMs
@@ -228,10 +228,10 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
                      name="gen_mlp_in", **inits)
 
     # mlps for turning LSTM outputs into conditionals over z_gen
-    con_mlp_out = CondNet([], [rnn_dim, att_spec_dim], \
+    con_mlp_out = CondNet([Rectifier()], [rnn_dim, mlp_dim, att_spec_dim], \
                           name="con_mlp_out", **inits)
-    gen_mlp_out = CondNet([], [rnn_dim, z_dim], name="gen_mlp_out", **inits)
-    var_mlp_out = CondNet([], [rnn_dim, z_dim], name="var_mlp_out", **inits)
+    gen_mlp_out = CondNet([Rectifier()], [rnn_dim, mlp_dim, z_dim], name="gen_mlp_out", **inits)
+    var_mlp_out = CondNet([Rectifier()], [rnn_dim, mlp_dim, z_dim], name="var_mlp_out", **inits)
 
     # LSTMs for the actual LSTMs (obviously, perhaps)
     con_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
@@ -382,6 +382,9 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
 
 
 if __name__=="__main__":
-    #test_seq_cond_gen_sequence(step_type='add', x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1")
-    test_seq_cond_gen_sequence(step_type='add', x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2b64")
-    #test_seq_cond_gen_sequence(step_type='add', x_objs=['cross', 'cross', 'circle'], y_objs=[0,1], res_tag="T3")
+    INSTRUCTIONS = """
+    # Run once with one of these lines uncommented and once with the other
+    # uncommented. That's all!
+    """
+    test_seq_cond_gen_sequence(step_type='add', x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1")
+    #test_seq_cond_gen_sequence(step_type='add', x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2")
