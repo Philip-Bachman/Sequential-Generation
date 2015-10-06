@@ -23,7 +23,7 @@ from blocks.roles import add_role, WEIGHT, BIAS, PARAMETER, AUXILIARY
 from DKCode import get_adam_updates
 from HelperFuncs import constFX, to_fX
 from LogPDFs import log_prob_bernoulli, gaussian_kld, gaussian_ent, \
-                    gaussian_logvar_kld
+                    gaussian_logvar_kld, gaussian_mean_kld
 
 
 ############################################################
@@ -2159,14 +2159,17 @@ class SeqCondGenX(BaseRecurrent, Initializable, Random):
         # create shared variables for controlling KLd terms
         self.lam_kld_q2p = theano.shared(value=ones_ary, name='lam_kld_q2p')
         self.lam_kld_p2q = theano.shared(value=ones_ary, name='lam_kld_p2q')
-        self.set_lam_kld(lam_kld_q2p=0.95, lam_kld_p2q=0.05)
+        self.lam_kld_amu = theano.shared(value=ones_ary, name='lam_kld_amu')
+        self.lam_kld_alv = theano.shared(value=ones_ary, name='lam_kld_alv')
+        self.set_lam_kld(lam_kld_q2p=0.95, lam_kld_p2q=0.05, \
+                         lam_kld_amu=0.0, lam_kld_alv=0.0)
         # create shared variables for controlling optimization/updates
         self.lr = theano.shared(value=0.0001*ones_ary, name='lr')
         self.mom_1 = theano.shared(value=0.9*ones_ary, name='mom_1')
         self.mom_2 = theano.shared(value=0.99*ones_ary, name='mom_2')
 
         # set noise scale for the attention placement
-        self.att_noise = 0.1
+        self.att_noise = 0.05
 
         # setup a "null pointer" that will point to the computation graph
         # for this model, which can be built by self.build_model_funcs()...
@@ -2194,7 +2197,8 @@ class SeqCondGenX(BaseRecurrent, Initializable, Random):
         self.mom_2.set_value(to_fX(new_mom_2))
         return
 
-    def set_lam_kld(self, lam_kld_q2p=0.0, lam_kld_p2q=1.0):
+    def set_lam_kld(self, lam_kld_q2p=0.0, lam_kld_p2q=1.0, \
+                    lam_kld_amu=0.0, lam_kld_alv=0.0):
         """
         Set the relative weight of various KL-divergence terms.
 
@@ -2206,6 +2210,10 @@ class SeqCondGenX(BaseRecurrent, Initializable, Random):
         self.lam_kld_q2p.set_value(to_fX(new_lam))
         new_lam = zero_ary + lam_kld_p2q
         self.lam_kld_p2q.set_value(to_fX(new_lam))
+        new_lam = zero_ary + lam_kld_amu
+        self.lam_kld_amu.set_value(to_fX(new_lam))
+        new_lam = zero_ary + lam_kld_alv
+        self.lam_kld_alv.set_value(to_fX(new_lam))
         return
 
     def _construct_nll_scales(self):
@@ -2299,7 +2307,7 @@ class SeqCondGenX(BaseRecurrent, Initializable, Random):
             return self.var_rnn.get_dim('states')
         elif name == 'c_var':
             return self.var_rnn.get_dim('cells')
-        elif name in ['nll', 'kl_q2p', 'kl_p2q']:
+        elif name in ['nll', 'kl_q2p', 'kl_p2q', 'kld_amu', 'kld_alv']:
             return 0
         else:
             super(SeqCondGenX, self).get_dim(name)
@@ -2309,7 +2317,7 @@ class SeqCondGenX(BaseRecurrent, Initializable, Random):
 
     @recurrent(sequences=['x', 'y', 'u', 'u_att', 'nll_scale'], contexts=[],
                states=['c', 'h_con', 'c_con', 'h_gen', 'c_gen', 'h_var', 'c_var'],
-               outputs=['c', 'h_con', 'c_con', 'h_gen', 'c_gen', 'h_var', 'c_var', 'c_as_y', 'nll', 'kl_q2p', 'kl_p2q', 'att_map', 'read_img'])
+               outputs=['c', 'h_con', 'c_con', 'h_gen', 'c_gen', 'h_var', 'c_var', 'c_as_y', 'nll', 'kl_q2p', 'kl_p2q', 'kl_amu', 'kl_alv', 'att_map', 'read_img'])
     def iterate(self, x, y, u, u_att, nll_scale, c, h_con, c_con, h_gen, c_gen, h_var, c_var):
         if self.step_type == 'add':
             # additive steps use c as a "direct workspace", which means it's
@@ -2371,17 +2379,20 @@ class SeqCondGenX(BaseRecurrent, Initializable, Random):
         nll = -nll_scale * tensor.flatten(log_prob_bernoulli(y, c_as_y))
         # compute KL(q || p) and KL(p || q) for this step
         kl_q2p = tensor.sum(gaussian_kld(q_z_mean, q_z_logvar, \
-                            p_z_mean, p_z_logvar), axis=1) + \
-                 tensor.sum(gaussian_logvar_kld(as_mean, as_logvar, \
-                            0., 0.), axis=1)
+                            p_z_mean, p_z_logvar), axis=1)
         kl_p2q = tensor.sum(gaussian_kld(p_z_mean, p_z_logvar, \
                             q_z_mean, q_z_logvar), axis=1)
-        return c, h_con, c_con, h_gen, c_gen, h_var, c_var, c_as_y, nll, kl_q2p, kl_p2q, att_map, read_img
+        # compute attention module KLd terms for this step
+        kl_amu = tensor.sum(gaussian_mean_kld(as_mean, as_logvar, \
+                            0., 0.), axis=1)
+        kl_alv = tensor.sum(gaussian_logvar_kld(as_mean, as_logvar, \
+                            0., 0.), axis=1)
+        return c, h_con, c_con, h_gen, c_gen, h_var, c_var, c_as_y, nll, kl_q2p, kl_p2q, kl_amu, kl_alv, att_map, read_img
 
     #------------------------------------------------------------------------
 
     @application(inputs=['x', 'y'],
-                 outputs=['xs', 'cs', 'h_cons', 'c_as_ys', 'nlls', 'kl_q2ps', 'kl_p2qs', 'att_maps', 'read_imgs'])
+                 outputs=['xs', 'cs', 'c_as_ys', 'nlls', 'kl_q2ps', 'kl_p2qs', 'kl_amus', 'kl_alvs', 'att_maps', 'read_imgs'])
     def process_inputs(self, x, y):
         # get important size and shape information
 
@@ -2425,7 +2436,7 @@ class SeqCondGenX(BaseRecurrent, Initializable, Random):
         u_att = self.att_noise_mask.dimshuffle('x','x',0) * u_all
 
         # run the multi-stage guided generative process
-        cs, h_cons, _, _, _, _, _, c_as_ys, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
+        cs, _, _, _, _, _, _, c_as_ys, nlls, kl_q2ps, kl_p2qs, kl_amus, kl_alvs, att_maps, read_imgs = \
                 self.iterate(x=x, y=y, u=u, u_att=u_att,
                              nll_scale=self.nll_scales,
                              c=c0,
@@ -2437,14 +2448,15 @@ class SeqCondGenX(BaseRecurrent, Initializable, Random):
         xs = x
         xs.name = "xs"
         cs.name = "cs"
-        h_cons.name = "h_cons"
         c_as_ys.name = "c_as_ys"
         nlls.name = "nlls"
         kl_q2ps.name = "kl_q2ps"
         kl_p2qs.name = "kl_p2qs"
+        kl_amus.name = "kl_amus"
+        kl_alvs.name = "kl_alvs"
         att_maps.name = "att_maps"
         read_imgs.name = "read_imgs"
-        return xs, cs, h_cons, c_as_ys, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs
+        return xs, cs, c_as_ys, nlls, kl_q2ps, kl_p2qs, kl_amus, kl_alvs, att_maps, read_imgs
 
     def build_model_funcs(self):
         """
@@ -2459,7 +2471,7 @@ class SeqCondGenX(BaseRecurrent, Initializable, Random):
             y_sym = tensor.matrix('y_sym')
 
         # collect estimates of y given x produced by this model
-        xs, cs, h_cons, c_as_ys, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
+        xs, cs, c_as_ys, nlls, kl_q2ps, kl_p2qs, kl_amus, kl_alvs, att_maps, read_imgs = \
                 self.process_inputs(x_sym, y_sym)
 
         # get the expected NLL part of the VFE bound
@@ -2471,13 +2483,15 @@ class SeqCondGenX(BaseRecurrent, Initializable, Random):
         self.kld_q2p_term.name = "kld_q2p_term"
         self.kld_p2q_term = kl_p2qs.sum(axis=0).mean()
         self.kld_p2q_term.name = "kld_p2q_term"
-
-        # get the proper VFE bound on NLL
-        self.nll_bound = self.nll_term + self.kld_q2p_term
-        self.nll_bound.name = "nll_bound"
+        # get KLd terms on attention placement
+        self.kld_amu_term = kl_amus.sum(axis=0).mean()
+        self.kld_amu_term.name = "kld_amu_term"
+        self.kld_alv_term = kl_alvs.sum(axis=0).mean()
+        self.kld_alv_term.name = "kld_alv_term"
 
         # grab handles for all the optimizable parameters in our cost
-        self.cg = ComputationGraph([self.nll_bound])
+        dummy_cost = self.nll_term + self.kld_q2p_term + self.kld_amu_term
+        self.cg = ComputationGraph([dummy_cost])
         self.joint_params = self.get_model_params(ary_type='theano')
 
         # apply some l2 regularization to the model parameters
@@ -2488,6 +2502,8 @@ class SeqCondGenX(BaseRecurrent, Initializable, Random):
         self.joint_cost = self.nll_term + \
                           (self.lam_kld_q2p[0] * self.kld_q2p_term) + \
                           (self.lam_kld_p2q[0] * self.kld_p2q_term) + \
+                          (self.lam_kld_amu[0] * self.kld_amu_term) + \
+                          (self.lam_kld_alv[0] * self.kld_alv_term) + \
                           self.reg_term
         self.joint_cost.name = "joint_cost"
 
@@ -2506,7 +2522,9 @@ class SeqCondGenX(BaseRecurrent, Initializable, Random):
 
         # collect the outputs to return from this function
         outputs = [self.joint_cost, self.nll_term, \
-                   self.kld_q2p_term, self.kld_p2q_term, self.reg_term]
+                   self.kld_q2p_term, self.kld_p2q_term, \
+                   self.kld_amu_term, self.kld_alv_term, \
+                   self.reg_term]
         # collect the required inputs
         inputs = [x_sym, y_sym]
 
@@ -2533,7 +2551,7 @@ class SeqCondGenX(BaseRecurrent, Initializable, Random):
             x_sym = tensor.matrix('x_sym_att_funcs')
             y_sym = tensor.matrix('y_sym_att_funcs')
         # collect estimates of y given x produced by this model
-        xs, cs, h_cons, c_as_ys, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
+        xs, cs, c_as_ys, nlls, kl_q2ps, kl_p2qs, kl_amus, kl_alvs, att_maps, read_imgs = \
                 self.process_inputs(x_sym, y_sym)
         # build the function for computing the attention trajectories
         print("Compiling attention tracker...")
