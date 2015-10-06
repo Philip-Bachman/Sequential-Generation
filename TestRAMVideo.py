@@ -46,8 +46,8 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     ##############################
     result_tag = "{}VID_SCGX_{}".format(RESULT_PATH, res_tag)
 
-    batch_size = 128
-    traj_len = 25
+    batch_size = 64
+    traj_len = 15
     im_dim = 32
     obs_dim = im_dim*im_dim
 
@@ -341,13 +341,13 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     for i in range(250000):
         lr_scale = min(1.0, ((i+1) / 5000.0))
         mom_scale = min(1.0, ((i+1) / 10000.0))
-        lam_kld_amu = 1.0 - min(1.0, ((i+1) / 20000.0))
+        lam_kld_amu = 0.1 * (1.0 - min(1.0, ((i+1) / 20000.0)))
         if (((i + 1) % 10000) == 0):
             learn_rate = learn_rate * 0.95
         # set sgd and objective function hyperparams for this update
         SCG.set_sgd_params(lr=lr_scale*learn_rate, mom_1=mom_scale*momentum, mom_2=0.99)
         SCG.set_lam_kld(lam_kld_q2p=0.95, lam_kld_p2q=0.05, \
-                        lam_kld_amu=lam_kld_amu, lam_kld_alv=1.0)
+                        lam_kld_amu=lam_kld_amu, lam_kld_alv=0.1)
         # perform a minibatch update and record the cost for this batch
         Xb, Yb, Cb = generate_batch_multi(samp_count, xobjs=x_objs, yobjs=y_objs, img_scale=img_scale)
         result = SCG.train_joint(Xb, Yb)
@@ -383,6 +383,6 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
 
 
 if __name__=="__main__":
-    #test_seq_cond_gen_sequence(step_type='add', x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1")
-    test_seq_cond_gen_sequence(step_type='add', x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2")
+    test_seq_cond_gen_sequence(step_type='add', x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1")
+    #test_seq_cond_gen_sequence(step_type='add', x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2")
     #test_seq_cond_gen_sequence(step_type='add', x_objs=['cross', 'cross', 'circle'], y_objs=[0,1], res_tag="T3")
