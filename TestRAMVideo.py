@@ -46,8 +46,8 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     ##############################
     result_tag = "{}VID_SCGX_{}".format(RESULT_PATH, res_tag)
 
-    batch_size = 64
-    traj_len = 15
+    batch_size = 128
+    traj_len = 10
     im_dim = 32
     obs_dim = im_dim*im_dim
 
@@ -150,7 +150,6 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     z_dim = 128
     att_spec_dim = 5
     rnn_dim = 512
-    write_dim = 512
     mlp_dim = 512
 
     def visualize_attention(result, pre_tag="AAA", post_tag="AAA"):
@@ -213,7 +212,7 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     read_dim = reader_mlp.read_dim # total number of "pixels" read by reader
 
     # MLP for updating belief state based on con_rnn
-    writer_mlp = MLP([None, None], [rnn_dim, write_dim, obs_dim], \
+    writer_mlp = MLP([None, None], [rnn_dim, mlp_dim, obs_dim], \
                      name="writer_mlp", **inits)
 
     # mlps for processing inputs to LSTMs
@@ -382,6 +381,6 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
 
 
 if __name__=="__main__":
-    #test_seq_cond_gen_sequence(step_type='add', x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1")
-    test_seq_cond_gen_sequence(step_type='add', x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2b64")
+    test_seq_cond_gen_sequence(step_type='add', x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1")
+    #test_seq_cond_gen_sequence(step_type='add', x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2")
     #test_seq_cond_gen_sequence(step_type='add', x_objs=['cross', 'cross', 'circle'], y_objs=[0,1], res_tag="T3")
