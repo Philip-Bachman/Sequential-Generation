@@ -46,8 +46,8 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     ##############################
     result_tag = "{}VID_SCGX_{}".format(RESULT_PATH, res_tag)
 
-    batch_size = 128
-    traj_len = 10
+    batch_size = 192
+    traj_len = 25
     im_dim = 32
     obs_dim = im_dim*im_dim
 
@@ -144,7 +144,7 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     total_steps = traj_len
     init_steps = 5
     exit_rate = 0.0
-    nll_weight = 0.25
+    nll_weight = 0.3
     x_dim = obs_dim
     y_dim = obs_dim
     z_dim = 128
@@ -340,7 +340,7 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     for i in range(250000):
         lr_scale = min(1.0, ((i+1) / 5000.0))
         mom_scale = min(1.0, ((i+1) / 10000.0))
-        lam_kld_amu = 0.1 * (1.0 - min(1.0, ((i+1) / 20000.0)))
+        lam_kld_amu = 0.0 * (1.0 - min(1.0, ((i+1) / 25000.0)))
         if (((i + 1) % 10000) == 0):
             learn_rate = learn_rate * 0.95
         # set sgd and objective function hyperparams for this update

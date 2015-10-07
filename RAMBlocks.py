@@ -13,7 +13,7 @@ from blocks.filter import VariableFilter
 from blocks.bricks.base import application, _Brick, Brick, lazy
 from blocks.bricks.recurrent import BaseRecurrent, recurrent
 from blocks.initialization import Constant, IsotropicGaussian, Orthogonal
-from blocks.bricks import Random, MLP, Linear, Tanh, Softmax, Sigmoid, Initializable
+from blocks.bricks import Random, MLP, Linear, Tanh, Softmax, Initializable
 from blocks.bricks import Tanh, Identity, Activation, Feedforward
 from blocks.bricks.cost import BinaryCrossEntropy
 from blocks.utils import shared_floatx_nans

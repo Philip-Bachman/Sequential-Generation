@@ -13,7 +13,7 @@ from blocks.filter import VariableFilter
 from blocks.bricks.base import application, _Brick, Brick, lazy
 from blocks.bricks.recurrent import BaseRecurrent, recurrent
 from blocks.initialization import Constant, IsotropicGaussian, Orthogonal
-from blocks.bricks import Random, MLP, Linear, Tanh, Softmax, Sigmoid, Initializable
+from blocks.bricks import Random, MLP, Linear, Tanh, Softmax, Initializable
 from blocks.bricks import Tanh, Identity, Activation, Feedforward
 from blocks.bricks.cost import BinaryCrossEntropy
 from blocks.utils import shared_floatx_nans
@@ -169,6 +169,7 @@ class SeqCondGen2d(BaseRecurrent, Initializable, Random):
         self.cg = None
 
         # record the sub-models around which this model is built
+        self.params = []
         self.children = [self.reader_mlp, self.writer_mlp,
                          self.con_mlp_in, self.con_rnn, self.con_mlp_out,
                          self.rav_mlp_in, self.rav_rnn, self.rav_mlp_out,
@@ -320,7 +321,7 @@ class SeqCondGen2d(BaseRecurrent, Initializable, Random):
     @recurrent(sequences=['x', 'y', 'u_o2c', 'u_c2o', 'nll_scale'], contexts=[],
                states=['c', 'h_con', 'c_con', 'h_rav', 'c_rav', 'h_obs', 'c_obs', 'h_var', 'c_var', 'z_o2c'],
                outputs=['c', 'h_con', 'c_con', 'h_rav', 'c_rav', 'h_obs', 'c_obs', 'h_var', 'c_var', 'z_o2c', 'c_as_y', 'nll', 'kl_q2p', 'kl_p2q', 'att_map', 'read_img'])
-    def iterate(self, x, y, u_o2c, u_c2o, nll_scale, c, h_con, c_con, h_rav, c_rav, h_obs, c_obs, h_var, c_var, z_o2c):
+    def apply(self, x, y, u_o2c, u_c2o, nll_scale, c, h_con, c_con, h_rav, c_rav, h_obs, c_obs, h_var, c_var, z_o2c):
         # Get the current prediction for y
         if self.step_type == 'jump':
             # Controller hidden state tracks belief state (for jump steps)
@@ -541,7 +542,7 @@ class SeqCondGen2d(BaseRecurrent, Initializable, Random):
 
         # run the multi-stage guided generative process
         cs, _, _, _, _, _, _, _, _, _, c_as_ys, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
-                self.iterate(x=x, y=y, u_o2c=u_o2c, u_c2o=u_c2o,
+                self.apply(x=x, y=y, u_o2c=u_o2c, u_c2o=u_c2o,
                              nll_scale=self.nll_scales,
                              c=c0,
                              h_con=hc0, c_con=cc0,
@@ -886,6 +887,7 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
         self.cg = None
 
         # record the sub-models around which this model is built
+        self.params = []
         self.children = [self.reader_mlp, self.writer_mlp,
                          self.con_mlp_in, self.con_rnn, self.con_mlp_out,
                          self.rav_mlp_in, self.rav_rnn, self.rav_mlp_out,
@@ -1025,7 +1027,7 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
     @recurrent(sequences=['x', 'y', 'u', 'u_att', 'nll_scale'], contexts=[],
                states=['c', 'h_con', 'c_con', 'h_rav', 'c_rav'],
                outputs=['c', 'h_con', 'c_con', 'h_rav', 'c_rav', 'c_as_y', 'nll', 'kl_q2p', 'kl_p2q', 'ent_att', 'att_map', 'read_img'])
-    def iterate(self, x, y, u, u_att, nll_scale, c, h_con, c_con, h_rav, c_rav):
+    def apply(self, x, y, u, u_att, nll_scale, c, h_con, c_con, h_rav, c_rav):
         # Get the current prediction for y
         if self.step_type == 'jump':
             # Controller hidden state tracks belief state (for jump steps)
@@ -1190,7 +1192,7 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
 
         # run the multi-stage guided generative process
         cs, _, _, _, _, c_as_ys, nlls, kl_q2ps, kl_p2qs, ent_atts, att_maps, read_imgs = \
-                self.iterate(x=x, y=y, u=u, u_att=u_att,
+                self.apply(x=x, y=y, u=u, u_att=u_att,
                              nll_scale=self.nll_scales, c=c0,
                              h_con=hc0, c_con=cc0, h_rav=hr0, c_rav=cr0)
 
@@ -1541,6 +1543,7 @@ class SeqCondGen2dSL(BaseRecurrent, Initializable, Random):
         self.cg = None
 
         # record the sub-models around which this model is built
+        self.params = []
         self.children = [self.reader_mlp, self.writer_mlp,
                          self.con_mlp_in, self.con_rnn, self.con_mlp_out,
                          self.rav_mlp_in, self.rav_rnn, self.rav_mlp_out,
@@ -1682,7 +1685,7 @@ class SeqCondGen2dSL(BaseRecurrent, Initializable, Random):
     @recurrent(sequences=['x', 'y', 'y_att', 'u', 'u_att', 'nll_scale'], contexts=[],
                states=['c', 'h_con', 'c_con', 'h_rav', 'c_rav'],
                outputs=['c', 'h_con', 'c_con', 'h_rav', 'c_rav', 'c_as_y', 'nll', 'nll_att', 'kl_q2p', 'kl_p2q', 'att_map', 'read_img'])
-    def iterate(self, x, y, y_att, u, u_att, nll_scale, c, h_con, c_con, h_rav, c_rav):
+    def apply(self, x, y, y_att, u, u_att, nll_scale, c, h_con, c_con, h_rav, c_rav):
         # Get the current prediction for y
         if self.step_type == 'jump':
             # Controller hidden state tracks belief state (for jump steps)
@@ -1848,7 +1851,7 @@ class SeqCondGen2dSL(BaseRecurrent, Initializable, Random):
 
         # run the multi-stage guided generative process
         cs, _, _, _, _, c_as_ys, nlls, nll_atts, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
-                self.iterate(x=x, y=y, y_att=y_att, u=u, u_att=u_att,
+                self.apply(x=x, y=y, y_att=y_att, u=u, u_att=u_att,
                              nll_scale=self.nll_scales, c=c0,
                              h_con=hc0, c_con=cc0, h_rav=hr0, c_rav=cr0)
 
@@ -2176,6 +2179,7 @@ class SeqCondGenX(BaseRecurrent, Initializable, Random):
         self.cg = None
 
         # record the sub-models around which this model is built
+        self.params = []
         self.children = [self.reader_mlp, self.writer_mlp,
                          self.con_mlp_in, self.con_rnn, self.con_mlp_out,
                          self.gen_mlp_in, self.gen_rnn, self.gen_mlp_out,
@@ -2318,7 +2322,7 @@ class SeqCondGenX(BaseRecurrent, Initializable, Random):
     @recurrent(sequences=['x', 'y', 'u', 'u_att', 'nll_scale'], contexts=[],
                states=['c', 'h_con', 'c_con', 'h_gen', 'c_gen', 'h_var', 'c_var'],
                outputs=['c', 'h_con', 'c_con', 'h_gen', 'c_gen', 'h_var', 'c_var', 'c_as_y', 'nll', 'kl_q2p', 'kl_p2q', 'kl_amu', 'kl_alv', 'att_map', 'read_img'])
-    def iterate(self, x, y, u, u_att, nll_scale, c, h_con, c_con, h_gen, c_gen, h_var, c_var):
+    def apply(self, x, y, u, u_att, nll_scale, c, h_con, c_con, h_gen, c_gen, h_var, c_var):
         if self.step_type == 'add':
             # additive steps use c as a "direct workspace", which means it's
             # already directly comparable to y.
@@ -2437,7 +2441,7 @@ class SeqCondGenX(BaseRecurrent, Initializable, Random):
 
         # run the multi-stage guided generative process
         cs, _, _, _, _, _, _, c_as_ys, nlls, kl_q2ps, kl_p2qs, kl_amus, kl_alvs, att_maps, read_imgs = \
-                self.iterate(x=x, y=y, u=u, u_att=u_att,
+                self.apply(x=x, y=y, u=u, u_att=u_att,
                              nll_scale=self.nll_scales,
                              c=c0,
                              h_con=hc0, c_con=cc0,
