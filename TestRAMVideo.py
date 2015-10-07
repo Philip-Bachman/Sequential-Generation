@@ -227,10 +227,10 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
                      name="gen_mlp_in", **inits)
 
     # mlps for turning LSTM outputs into conditionals over z_gen
-    con_mlp_out = CondNet([], [rnn_dim, att_spec_dim], \
+    con_mlp_out = CondNet([Tanh()], [rnn_dim, mlp_dim, att_spec_dim], \
                           name="con_mlp_out", **inits)
-    gen_mlp_out = CondNet([], [rnn_dim, z_dim], name="gen_mlp_out", **inits)
-    var_mlp_out = CondNet([], [rnn_dim, z_dim], name="var_mlp_out", **inits)
+    gen_mlp_out = CondNet([Tanh()], [rnn_dim, mlp_dim, z_dim], name="gen_mlp_out", **inits)
+    var_mlp_out = CondNet([Tanh()], [rnn_dim, mlp_dim, z_dim], name="var_mlp_out", **inits)
 
     # LSTMs for the actual LSTMs (obviously, perhaps)
     con_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
@@ -381,6 +381,6 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
 
 
 if __name__=="__main__":
-    test_seq_cond_gen_sequence(step_type='add', x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1")
-    #test_seq_cond_gen_sequence(step_type='add', x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2")
+    #test_seq_cond_gen_sequence(step_type='add', x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1")
+    test_seq_cond_gen_sequence(step_type='add', x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2")
     #test_seq_cond_gen_sequence(step_type='add', x_objs=['cross', 'cross', 'circle'], y_objs=[0,1], res_tag="T3")

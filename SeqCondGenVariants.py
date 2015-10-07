@@ -2172,7 +2172,7 @@ class SeqCondGenX(BaseRecurrent, Initializable, Random):
         self.mom_2 = theano.shared(value=0.99*ones_ary, name='mom_2')
 
         # set noise scale for the attention placement
-        self.att_noise = 0.05
+        self.att_noise = 0.025
 
         # setup a "null pointer" that will point to the computation graph
         # for this model, which can be built by self.build_model_funcs()...
