@@ -217,7 +217,7 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
 
     # mlps for processing inputs to LSTMs
     con_mlp_in = MLP([Identity()], \
-                     [                       z_dim, 4*rnn_dim], \
+                     [                       (rnn_dim + z_dim), 4*rnn_dim], \
                      name="con_mlp_in", **inits)
     var_mlp_in = MLP([Identity()], \
                      [(y_dim + read_dim + att_spec_dim + rnn_dim), 4*rnn_dim], \

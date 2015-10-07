@@ -2172,7 +2172,7 @@ class SeqCondGenX(BaseRecurrent, Initializable, Random):
         self.mom_2 = theano.shared(value=0.99*ones_ary, name='mom_2')
 
         # set noise scale for the attention placement
-        self.att_noise = 0.025
+        self.att_noise = 0.03
 
         # setup a "null pointer" that will point to the computation graph
         # for this model, which can be built by self.build_model_funcs()...
@@ -2365,8 +2365,8 @@ class SeqCondGenX(BaseRecurrent, Initializable, Random):
             ((1.0 - self.train_switch[0]) * p_z)
 
         # update the controller RNN state, using the sampled z values
-        #i_con = self.con_mlp_in.apply(tensor.concatenate([z], axis=1))
-        i_con = self.con_mlp_in.apply(z)
+        i_con = self.con_mlp_in.apply(tensor.concatenate([z, h_gen], axis=1))
+        #i_con = self.con_mlp_in.apply(z)
         h_con, c_con = self.con_rnn.apply(states=h_con, cells=c_con, \
                                           inputs=i_con, iterate=False)
 
