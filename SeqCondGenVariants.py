@@ -2976,13 +2976,14 @@ class SeqCondGenIMP(BaseRecurrent, Initializable, Random):
             c = c + self.writer_mlp.apply(h_con)
         else:
             c = self.writer_mlp.apply(c_con)
-        # make input comprising known values and predictions for unknown values
-        c_as_y = (m * x) + ((1. - m) * tensor.nnet.sigmoid(c))
+        c_as_y = tensor.nnet.sigmoid(c)
 
         # compute the NLL of the reconstruction as of this step. the NLL at
         # each step is rescaled by a factor such that the sum of the factors
         # for all steps is 1, and all factors are non-negative.
-        nll = -nll_scale * tensor.flatten(log_prob_bernoulli(x, c_as_y))
+        m_inv = 1.0 - 0.0*m
+        nll = -nll_scale * tensor.flatten(log_prob_bernoulli(x, c_as_y, mask=m_inv))
+        c_as_y = (m * x) + ((1. - m) * tensor.nnet.sigmoid(c))
         # compute KL(q || p) and KL(p || q) for this step
         kl_q2p = tensor.sum(gaussian_kld(q_z_mean, q_z_logvar, \
                             p_z_mean, p_z_logvar), axis=1)
