@@ -677,7 +677,7 @@ class SeqCondGen2d(BaseRecurrent, Initializable, Random):
             obs_dim = self.x_dim
             seq_len = self.total_steps
             samp_count = outs[1].shape[1]
-            att_count = outs[1].shape[2]
+            att_count = int(outs[1].shape[2] / obs_dim)
             a_maps = numpy.zeros((outs[1].shape[0], outs[1].shape[1], obs_dim))
             for a_num in range(att_count):
                 start_idx = a_num * obs_dim
@@ -1330,7 +1330,7 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
             obs_dim = self.x_dim
             seq_len = self.total_steps
             samp_count = outs[1].shape[1]
-            att_count = outs[1].shape[2] / obs_dim
+            att_count = int(outs[1].shape[2] / obs_dim)
             a_maps = numpy.zeros((outs[1].shape[0], outs[1].shape[1], obs_dim))
             for a_num in range(att_count):
                 start_idx = a_num * obs_dim
@@ -1990,7 +1990,7 @@ class SeqCondGen2dSL(BaseRecurrent, Initializable, Random):
             obs_dim = self.x_dim
             seq_len = self.total_steps
             samp_count = outs[1].shape[1]
-            att_count = outs[1].shape[2] / obs_dim
+            att_count = int(outs[1].shape[2] / obs_dim)
             a_maps = numpy.zeros((outs[1].shape[0], outs[1].shape[1], obs_dim))
             for a_num in range(att_count):
                 start_idx = a_num * obs_dim
@@ -2585,7 +2585,7 @@ class SeqCondGenX(BaseRecurrent, Initializable, Random):
             obs_dim = self.x_dim
             seq_len = self.total_steps
             samp_count = outs[1].shape[1]
-            map_count = outs[1].shape[2] / obs_dim
+            map_count = int(outs[1].shape[2] / obs_dim)
             a_maps = numpy.zeros((outs[1].shape[0], outs[1].shape[1], obs_dim))
             for m_num in range(map_count):
                 start_idx = m_num * obs_dim
@@ -2976,14 +2976,13 @@ class SeqCondGenIMP(BaseRecurrent, Initializable, Random):
             c = c + self.writer_mlp.apply(h_con)
         else:
             c = self.writer_mlp.apply(c_con)
-        c_as_y = tensor.nnet.sigmoid(c)
         # make input comprising known values and predictions for unknown values
-        x_m = (m * x) + ((1. - m) * c_as_y)
+        c_as_y = (m * x) + ((1. - m) * tensor.nnet.sigmoid(c))
 
         # compute the NLL of the reconstruction as of this step. the NLL at
         # each step is rescaled by a factor such that the sum of the factors
         # for all steps is 1, and all factors are non-negative.
-        nll = -nll_scale * tensor.flatten(log_prob_bernoulli(x, x_m))
+        nll = -nll_scale * tensor.flatten(log_prob_bernoulli(x, c_as_y))
         # compute KL(q || p) and KL(p || q) for this step
         kl_q2p = tensor.sum(gaussian_kld(q_z_mean, q_z_logvar, \
                             p_z_mean, p_z_logvar), axis=1)
@@ -3052,7 +3051,7 @@ class SeqCondGenIMP(BaseRecurrent, Initializable, Random):
                              h_var=hv0, c_var=cv0)
 
         # add name tags to the constructed values
-        xs = x
+        xs = (m * x) + ((1.-m) * tensor.mean(x))
         xs.name = "xs"
         cs.name = "cs"
         c_as_ys.name = "c_as_ys"
@@ -3188,7 +3187,7 @@ class SeqCondGenIMP(BaseRecurrent, Initializable, Random):
             obs_dim = self.x_dim
             seq_len = self.total_steps
             samp_count = outs[1].shape[1]
-            map_count = outs[1].shape[2] / obs_dim
+            map_count = int(outs[1].shape[2] / obs_dim)
             a_maps = numpy.zeros((outs[1].shape[0], outs[1].shape[1], obs_dim))
             for m_num in range(map_count):
                 start_idx = m_num * obs_dim
@@ -3786,7 +3785,7 @@ class SeqCondGenRAM(BaseRecurrent, Initializable, Random):
             obs_dim = self.x_dim
             seq_len = self.total_steps
             samp_count = outs[1].shape[1]
-            map_count = outs[1].shape[2] / obs_dim
+            map_count = int(outs[1].shape[2] / obs_dim)
             a_maps = numpy.zeros((outs[1].shape[0], outs[1].shape[1], obs_dim))
             for m_num in range(map_count):
                 start_idx = m_num * obs_dim

@@ -141,6 +141,27 @@ def construct_masked_data(xi, \
     xm = to_fX(xm)
     return xi, xo, xm
 
+def sample_data_masks(xi, drop_prob=0.0, occ_dim=None):
+    """
+    Construct random masks for observations in xi.
+    """
+    im_dim = int(xi.shape[1]**0.5) # images should be square
+    if drop_prob > 0.0:
+        # apply fully-random occlusion
+        xm_rand = sample_masks(xi, drop_prob=drop_prob)
+    else:
+        # don't apply fully-random occlusion
+        xm_rand = np.ones(xi.shape)
+    if occ_dim is None:
+        # don't apply rectangular occlusion
+        xm_patch = np.ones(xi.shape)
+    else:
+        # apply rectangular occlusion
+        xm_patch = sample_patch_masks(xi, (im_dim,im_dim), (occ_dim,occ_dim))
+    xm = xm_rand * xm_patch
+    xm = to_fX(xm)
+    return xm
+
 def shift_and_scale_into_01(X):
     X = X - np.min(X, axis=1, keepdims=True)
     X = X / np.max(X, axis=1, keepdims=True)
