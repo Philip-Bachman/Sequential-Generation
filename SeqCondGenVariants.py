@@ -2365,8 +2365,8 @@ class SeqCondGenX(BaseRecurrent, Initializable, Random):
             ((1.0 - self.train_switch[0]) * p_z)
 
         # update the controller RNN state, using the sampled z values
-        i_con = self.con_mlp_in.apply(tensor.concatenate([z, h_gen], axis=1))
-        #i_con = self.con_mlp_in.apply(z)
+        #i_con = self.con_mlp_in.apply(tensor.concatenate([z, h_gen], axis=1))
+        i_con = self.con_mlp_in.apply(z)
         h_con, c_con = self.con_rnn.apply(states=h_con, cells=c_con, \
                                           inputs=i_con, iterate=False)
 
