@@ -389,7 +389,7 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
             costs = [0.0 for v in costs]
         if ((i % 500) == 0):
             post_save_file = "{}_params.pkl".format(result_tag)
-            SCG.save_model_params("{}_params.pkl".format(post_save_file))
+            SCG.save_model_params(post_save_file)
             ###########################################
             # Sample and draw attention trajectories. #
             ###########################################
