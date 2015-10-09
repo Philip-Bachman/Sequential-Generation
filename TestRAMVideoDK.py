@@ -456,7 +456,8 @@ def test_seq_cond_gen_impute(step_type='add', res_tag="AAA"):
                 gen_rnn=gen_rnn,
                 var_mlp_in=var_mlp_in,
                 var_mlp_out=var_mlp_out,
-                var_rnn=var_rnn)
+                var_rnn=var_rnn,
+                att_noise=0.1)
     SCG.initialize()
 
     compile_start_time = time.time()

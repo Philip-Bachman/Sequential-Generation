@@ -650,6 +650,19 @@ class SeqCondGen2d(BaseRecurrent, Initializable, Random):
         # collect estimates of y given x produced by this model
         cs, c_as_ys, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
                 self.process_inputs(x_sym, y_sym)
+                
+        # get the expected NLL part of the VFE bound
+        self.nll_term = nlls.sum(axis=0).mean()
+        self.nll_term.name = "nll_term"
+        # get KL(q || p) and KL(p || q) and KL(p || g)
+        self.kld_q2p_term = kl_q2ps.sum(axis=0).mean()
+        self.kld_q2p_term.name = "kld_q2p_term"
+        self.kld_p2q_term = kl_p2qs.sum(axis=0).mean()
+        self.kld_p2q_term.name = "kld_p2q_term"
+        # grab handles for all the optimizable parameters in our cost
+        dummy_cost = self.nll_term + self.kld_q2p_term
+        self.cg = ComputationGraph([dummy_cost])
+
         # build the function for computing the attention trajectories
         print("Compiling attention tracker...")
         inputs = [x_sym, y_sym]
@@ -1303,6 +1316,19 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
         # collect estimates of y given x produced by this model
         cs, c_as_ys, nlls, kl_q2ps, kl_p2qs, ent_atts, att_maps, read_imgs = \
                 self.process_inputs(x_sym, y_sym)
+
+        # get the expected NLL part of the VFE bound
+        self.nll_term = nlls.sum(axis=0).mean()
+        self.nll_term.name = "nll_term"
+        # get KL(q || p) and KL(p || q) and KL(p || g)
+        self.kld_q2p_term = kl_q2ps.sum(axis=0).mean()
+        self.kld_q2p_term.name = "kld_q2p_term"
+        self.kld_p2q_term = kl_p2qs.sum(axis=0).mean()
+        self.kld_p2q_term.name = "kld_p2q_term"
+        # grab handles for all the optimizable parameters in our cost
+        dummy_cost = self.nll_term + self.kld_q2p_term
+        self.cg = ComputationGraph([dummy_cost])
+
         # build the function for computing the attention trajectories
         print("Compiling attention tracker...")
         inputs = [x_sym, y_sym]
@@ -1963,6 +1989,18 @@ class SeqCondGen2dSL(BaseRecurrent, Initializable, Random):
         cs, c_as_ys, nlls, nll_atts, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
                 self.process_inputs(x_sym, y_sym, y_att_sym)
 
+        # get the expected NLL part of the VFE bound
+        self.nll_term = nlls.sum(axis=0).mean()
+        self.nll_term.name = "nll_term"
+        # get KL(q || p) and KL(p || q) and KL(p || g)
+        self.kld_q2p_term = kl_q2ps.sum(axis=0).mean()
+        self.kld_q2p_term.name = "kld_q2p_term"
+        self.kld_p2q_term = kl_p2qs.sum(axis=0).mean()
+        self.kld_p2q_term.name = "kld_p2q_term"
+        # grab handles for all the optimizable parameters in our cost
+        dummy_cost = self.nll_term + self.kld_q2p_term
+        self.cg = ComputationGraph([dummy_cost])
+
         # build the function for computing the attention trajectories
         print("Compiling attention tracker...")
         inputs = [x_sym, y_sym, y_att_sym]
@@ -2557,6 +2595,24 @@ class SeqCondGenX(BaseRecurrent, Initializable, Random):
         # collect estimates of y given x produced by this model
         xs, cs, c_as_ys, nlls, kl_q2ps, kl_p2qs, kl_amus, kl_alvs, att_maps, read_imgs = \
                 self.process_inputs(x_sym, y_sym)
+
+        # get the expected NLL part of the VFE bound
+        self.nll_term = nlls.sum(axis=0).mean()
+        self.nll_term.name = "nll_term"
+        # get KL(q || p) and KL(p || q) and KL(p || g)
+        self.kld_q2p_term = kl_q2ps.sum(axis=0).mean()
+        self.kld_q2p_term.name = "kld_q2p_term"
+        self.kld_p2q_term = kl_p2qs.sum(axis=0).mean()
+        self.kld_p2q_term.name = "kld_p2q_term"
+        # get KLd terms on attention placement
+        self.kld_amu_term = kl_amus.sum(axis=0).mean()
+        self.kld_amu_term.name = "kld_amu_term"
+        self.kld_alv_term = kl_alvs.sum(axis=0).mean()
+        self.kld_alv_term.name = "kld_alv_term"
+        # grab handles for all the optimizable parameters in our cost
+        dummy_cost = self.nll_term + self.kld_q2p_term + self.kld_amu_term
+        self.cg = ComputationGraph([dummy_cost])
+
         # build the function for computing the attention trajectories
         print("Compiling attention tracker...")
         inputs = [x_sym, y_sym]
@@ -2712,6 +2768,7 @@ class SeqCondGenIMP(BaseRecurrent, Initializable, Random):
                     con_mlp_in, con_rnn, con_mlp_out,
                     gen_mlp_in, gen_rnn, gen_mlp_out,
                     var_mlp_in, var_rnn, var_mlp_out,
+                    att_noise=0.05,
                     **kwargs):
         super(SeqCondGenIMP, self).__init__(**kwargs)
         if not ((step_type == 'add') or (step_type == 'jump')):
@@ -2769,7 +2826,7 @@ class SeqCondGenIMP(BaseRecurrent, Initializable, Random):
         self.mom_2 = theano.shared(value=0.99*ones_ary, name='mom_2')
 
         # set noise scale for the attention placement
-        self.att_noise = 0.03
+        self.att_noise = att_noise
 
         # setup a "null pointer" that will point to the computation graph
         # for this model, which can be built by self.build_model_funcs()...
@@ -3160,6 +3217,24 @@ class SeqCondGenIMP(BaseRecurrent, Initializable, Random):
         # collect estimates of y given x produced by this model
         xs, cs, c_as_ys, nlls, kl_q2ps, kl_p2qs, kl_amus, kl_alvs, att_maps, read_imgs = \
                 self.process_inputs(x_sym, m_sym)
+
+        # get the expected NLL part of the VFE bound
+        self.nll_term = nlls.sum(axis=0).mean()
+        self.nll_term.name = "nll_term"
+        # get KL(q || p) and KL(p || q) and KL(p || g)
+        self.kld_q2p_term = kl_q2ps.sum(axis=0).mean()
+        self.kld_q2p_term.name = "kld_q2p_term"
+        self.kld_p2q_term = kl_p2qs.sum(axis=0).mean()
+        self.kld_p2q_term.name = "kld_p2q_term"
+        # get KLd terms on attention placement
+        self.kld_amu_term = kl_amus.sum(axis=0).mean()
+        self.kld_amu_term.name = "kld_amu_term"
+        self.kld_alv_term = kl_alvs.sum(axis=0).mean()
+        self.kld_alv_term.name = "kld_alv_term"
+        # grab handles for all the optimizable parameters in our cost
+        dummy_cost = self.nll_term + self.kld_q2p_term + self.kld_amu_term
+        self.cg = ComputationGraph([dummy_cost])
+
         # build the function for computing the attention trajectories
         print("Compiling attention tracker...")
         inputs = [x_sym, m_sym]
@@ -3315,6 +3390,7 @@ class SeqCondGenRAM(BaseRecurrent, Initializable, Random):
                     con_mlp_in, con_rnn, con_mlp_out,
                     gen_mlp_in, gen_rnn, gen_mlp_out,
                     var_mlp_in, var_rnn, var_mlp_out,
+                    att_noise=0.05,
                     **kwargs):
         super(SeqCondGenRAM, self).__init__(**kwargs)
         if not ((step_type == 'add') or (step_type == 'jump')):
@@ -3371,7 +3447,7 @@ class SeqCondGenRAM(BaseRecurrent, Initializable, Random):
         self.mom_2 = theano.shared(value=0.99*ones_ary, name='mom_2')
 
         # set noise scale for the attention placement
-        self.att_noise = 0.03
+        self.att_noise = att_noise
 
         # setup a "null pointer" that will point to the computation graph
         # for this model, which can be built by self.build_model_funcs()...
@@ -3758,6 +3834,24 @@ class SeqCondGenRAM(BaseRecurrent, Initializable, Random):
         # collect estimates of y given x produced by this model
         xs, cs, c_as_ys, nlls, kl_q2ps, kl_p2qs, kl_amus, kl_alvs, att_maps, read_imgs = \
                 self.process_inputs(x_sym, y_sym)
+
+        # get the expected NLL part of the VFE bound
+        self.nll_term = nlls.sum(axis=0).mean()
+        self.nll_term.name = "nll_term"
+        # get KL(q || p) and KL(p || q) and KL(p || g)
+        self.kld_q2p_term = kl_q2ps.sum(axis=0).mean()
+        self.kld_q2p_term.name = "kld_q2p_term"
+        self.kld_p2q_term = kl_p2qs.sum(axis=0).mean()
+        self.kld_p2q_term.name = "kld_p2q_term"
+        # get KLd terms on attention placement
+        self.kld_amu_term = kl_amus.sum(axis=0).mean()
+        self.kld_amu_term.name = "kld_amu_term"
+        self.kld_alv_term = kl_alvs.sum(axis=0).mean()
+        self.kld_alv_term.name = "kld_alv_term"
+        # grab handles for all the optimizable parameters in our cost
+        dummy_cost = self.nll_term + self.kld_q2p_term + self.kld_amu_term
+        self.cg = ComputationGraph([dummy_cost])
+
         # build the function for computing the attention trajectories
         print("Compiling attention tracker...")
         inputs = [x_sym, y_sym]

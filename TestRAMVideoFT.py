@@ -44,10 +44,11 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     ##############################
     # File tag, for output stuff #
     ##############################
+    pre_result_tag = "{}VID_SCGRAM_{}".format(RESULT_PATH, res_tag[:-2])
     result_tag = "{}VID_SCGRAM_{}".format(RESULT_PATH, res_tag)
 
     batch_size = 192
-    traj_len = 10
+    traj_len = 30
     im_dim = 32
     obs_dim = im_dim*im_dim
 
@@ -193,6 +194,26 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
         utils.visualize_samples(seq_samps, file_name, num_rows=samp_count)
         return
 
+    def visualize_attention_joint(result, pre_tag="AAA", post_tag="AAA"):
+        seq_len = result[0].shape[0]
+        samp_count = result[0].shape[1]
+        # get generated predictions
+        seq_samps = np.zeros((3*seq_len*samp_count, obs_dim))
+        idx = 0
+        for s1 in range(samp_count):
+            for s2 in range(seq_len):
+                seq_samps[idx] = result[3][s2,s1,:]
+                idx += 1
+            for s2 in range(seq_len):
+                seq_samps[idx] = result[0][s2,s1,:]
+                idx += 1
+            for s2 in range(seq_len):
+                seq_samps[idx] = result[1][s2,s1,:]
+                idx += 1
+        file_name = "{0:s}_traj_joint_{1:s}.png".format(pre_tag, post_tag)
+        utils.visualize_samples(seq_samps, file_name, num_rows=(3*samp_count))
+        return
+
     rnninits = {
         'weights_init': IsotropicGaussian(0.01),
         'biases_init': Constant(0.),
@@ -309,11 +330,17 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     # build the attention trajectory sampler
     SCG.build_attention_funcs()
 
+    # TEST SAVE/LOAD FUNCTIONALITY
+    pre_save_file = "{}_params.pkl".format(pre_result_tag)
+    SCG.load_model_params(pre_save_file)
+
+    print("SAMPLING ATTENTION! (result_tag: {})".format(result_tag))
     # quick test of attention trajectory sampler
     samp_count = 32
     Xb, Yb, Cb = generate_batch_multi(samp_count, xobjs=x_objs, yobjs=y_objs, img_scale=img_scale)
     result = SCG.sample_attention(Xb, Yb)
     visualize_attention(result, pre_tag=result_tag, post_tag="b0")
+    visualize_attention_joint(result, pre_tag=result_tag, post_tag="b0")
 
     # build the main model functions (i.e. training and cost functions)
     SCG.build_model_funcs()
@@ -322,11 +349,6 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     compile_minutes = (compile_end_time - compile_start_time) / 60.0
     print("THEANO COMPILE TIME (MIN): {}".format(compile_minutes))
 
-    # TEST SAVE/LOAD FUNCTIONALITY
-    param_save_file = "{}_params.pkl".format(result_tag)
-    SCG.save_model_params(param_save_file)
-    SCG.load_model_params(param_save_file)
-
     ################################################################
     # Apply some updates, to check that they aren't totally broken #
     ################################################################
@@ -334,13 +356,13 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     out_file = open("{}_results.txt".format(result_tag), 'wb')
     out_file.flush()
     costs = [0. for i in range(10)]
-    learn_rate = 0.0001
+    learn_rate = 0.00005
     momentum = 0.95
     for i in range(250000):
         lr_scale = min(1.0, ((i+1) / 5000.0))
-        mom_scale = min(1.0, ((i+1) / 10000.0))
+        mom_scale = 1.0
         if (((i + 1) % 10000) == 0):
-            learn_rate = learn_rate * 0.95
+            learn_rate = learn_rate * 0.9
         # set sgd and objective function hyperparams for this update
         SCG.set_sgd_params(lr=lr_scale*learn_rate, mom_1=mom_scale*momentum, mom_2=0.99)
         SCG.set_lam_kld(lam_kld_q2p=0.95, lam_kld_p2q=0.05, \
@@ -366,7 +388,8 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
             out_file.flush()
             costs = [0.0 for v in costs]
         if ((i % 500) == 0):
-            SCG.save_model_params("{}_params.pkl".format(result_tag))
+            post_save_file = "{}_params.pkl".format(result_tag)
+            SCG.save_model_params("{}_params.pkl".format(post_save_file))
             ###########################################
             # Sample and draw attention trajectories. #
             ###########################################
@@ -379,6 +402,6 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
 
 
 if __name__=="__main__":
-    #test_seq_cond_gen_sequence(step_type='jump', x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1")
-    test_seq_cond_gen_sequence(step_type='jump', x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2")
-    #test_seq_cond_gen_sequence(step_type='jump', x_objs=['cross', 'cross', 'circle'], y_objs=[0,1], res_tag="T3")
+    #test_seq_cond_gen_sequence(step_type='jump', x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1FT")
+    test_seq_cond_gen_sequence(step_type='jump', x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2FT")
+    #test_seq_cond_gen_sequence(step_type='jump', x_objs=['cross', 'cross', 'circle'], y_objs=[0,1], res_tag="T3FT")
