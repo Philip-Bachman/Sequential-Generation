@@ -145,54 +145,13 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     total_steps = traj_len
     init_steps = 5
     exit_rate = 0.0
-    nll_weight = 0.3
+    nll_weight = 0.2
     x_dim = obs_dim
     y_dim = obs_dim
     z_dim = 128
     att_spec_dim = 5
     rnn_dim = 768
     mlp_dim = 768
-
-    def visualize_attention(result, pre_tag="AAA", post_tag="AAA"):
-        seq_len = result[0].shape[0]
-        samp_count = result[0].shape[1]
-        # get generated predictions
-        x_samps = np.zeros((seq_len*samp_count, obs_dim))
-        idx = 0
-        for s1 in range(samp_count):
-            for s2 in range(seq_len):
-                x_samps[idx] = result[0][s2,s1,:]
-                idx += 1
-        file_name = "{0:s}_traj_xs_{1:s}.png".format(pre_tag, post_tag)
-        utils.visualize_samples(x_samps, file_name, num_rows=samp_count)
-        # get sequential attention maps
-        seq_samps = np.zeros((seq_len*samp_count, obs_dim))
-        idx = 0
-        for s1 in range(samp_count):
-            for s2 in range(seq_len):
-                seq_samps[idx] = result[1][s2,s1,:]
-                idx += 1
-        file_name = "{0:s}_traj_att_maps_{1:s}.png".format(pre_tag, post_tag)
-        utils.visualize_samples(seq_samps, file_name, num_rows=samp_count)
-        # get sequential attention maps (read out values)
-        seq_samps = np.zeros((seq_len*samp_count, obs_dim))
-        idx = 0
-        for s1 in range(samp_count):
-            for s2 in range(seq_len):
-                seq_samps[idx] = result[2][s2,s1,:]
-                idx += 1
-        file_name = "{0:s}_traj_read_outs_{1:s}.png".format(pre_tag, post_tag)
-        utils.visualize_samples(seq_samps, file_name, num_rows=samp_count)
-        # get original input sequences
-        seq_samps = np.zeros((seq_len*samp_count, obs_dim))
-        idx = 0
-        for s1 in range(samp_count):
-            for s2 in range(seq_len):
-                seq_samps[idx] = result[3][s2,s1,:]
-                idx += 1
-        file_name = "{0:s}_traj_xs_in_{1:s}.png".format(pre_tag, post_tag)
-        utils.visualize_samples(seq_samps, file_name, num_rows=samp_count)
-        return
 
     def visualize_attention_joint(result, pre_tag="AAA", post_tag="AAA"):
         seq_len = result[0].shape[0]
@@ -322,7 +281,8 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
                 gen_rnn=gen_rnn,
                 var_mlp_in=var_mlp_in,
                 var_mlp_out=var_mlp_out,
-                var_rnn=var_rnn)
+                var_rnn=var_rnn,
+                att_noise=0.02)
     SCG.initialize()
 
     compile_start_time = time.time()
@@ -339,7 +299,6 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     samp_count = 32
     Xb, Yb, Cb = generate_batch_multi(samp_count, xobjs=x_objs, yobjs=y_objs, img_scale=img_scale)
     result = SCG.sample_attention(Xb, Yb)
-    visualize_attention(result, pre_tag=result_tag, post_tag="b0")
     visualize_attention_joint(result, pre_tag=result_tag, post_tag="b0")
 
     # build the main model functions (i.e. training and cost functions)
@@ -365,15 +324,15 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
             learn_rate = learn_rate * 0.9
         # set sgd and objective function hyperparams for this update
         SCG.set_sgd_params(lr=lr_scale*learn_rate, mom_1=mom_scale*momentum, mom_2=0.99)
-        SCG.set_lam_kld(lam_kld_q2p=0.95, lam_kld_p2q=0.05, \
+        SCG.set_lam_kld(lam_kld_q2p=1.0, lam_kld_p2q=0.1, \
                         lam_kld_amu=0.0, lam_kld_alv=0.1)
         # perform a minibatch update and record the cost for this batch
         Xb, Yb, Cb = generate_batch_multi(samp_count, xobjs=x_objs, yobjs=y_objs, img_scale=img_scale)
         result = SCG.train_joint(Xb, Yb)
         costs = [(costs[j] + result[j]) for j in range(len(result))]
         # output diagnostic information and checkpoint parameters, etc.
-        if ((i % 250) == 0):
-            costs = [(v / 250.0) for v in costs]
+        if ((i % 500) == 0):
+            costs = [(v / 500.0) for v in costs]
             str1 = "-- batch {0:d} --".format(i)
             str2 = "    total_cost: {0:.4f}".format(costs[0])
             str3 = "    nll_term  : {0:.4f}".format(costs[1])
@@ -387,7 +346,7 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
             out_file.write(joint_str+"\n")
             out_file.flush()
             costs = [0.0 for v in costs]
-        if ((i % 500) == 0):
+        if ((i % 1000) == 0):
             post_save_file = "{}_params.pkl".format(result_tag)
             SCG.save_model_params(post_save_file)
             ###########################################
@@ -397,7 +356,7 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
             Xb, Yb, Cb = generate_batch_multi(samp_count, xobjs=x_objs, yobjs=y_objs, img_scale=img_scale)
             result = SCG.sample_attention(Xb, Yb)
             post_tag = "b{0:d}".format(i)
-            visualize_attention(result, pre_tag=result_tag, post_tag=post_tag)
+            visualize_attention_joint(result, pre_tag=result_tag, post_tag=post_tag)
 
 
 

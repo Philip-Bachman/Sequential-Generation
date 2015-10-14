@@ -37,36 +37,24 @@ def test_mnist(step_type='add',
     # Format the result tag more thoroughly #
     #########################################
     dp_int = int(100.0 * drop_prob)
-    result_tag = "{}RELU_GPSI_OD{}_DP{}_IS{}_{}_NA".format(RESULT_PATH, occ_dim, dp_int, imp_steps, step_type)
-
+    result_tag = "{}GPSI_OD{}_DP{}_IS{}_{}_NA".format(RESULT_PATH, occ_dim, dp_int, imp_steps, step_type)
 
     ##########################
     # Get some training data #
     ##########################
     rng = np.random.RandomState(1234)
-    Xtr, Xva, Xte = load_binarized_mnist(data_path='./data/')
-    Xtr = np.vstack((Xtr, Xva))
+    dataset = 'data/mnist.pkl.gz'
+    datasets = load_udm(dataset, as_shared=False, zero_mean=False)
+    Xtr = datasets[0][0]
+    Xva = datasets[1][0]
+    Xte = datasets[2][0]
+    # Merge validation set and training set, and test on test set.
+    Xtr = np.concatenate((Xtr, Xva), axis=0)
     Xva = Xte
-    #del Xte
+    Xtr = to_fX(shift_and_scale_into_01(Xtr))
+    Xva = to_fX(shift_and_scale_into_01(Xva))
     tr_samples = Xtr.shape[0]
     va_samples = Xva.shape[0]
-
-    ##########################
-    # Get some training data #
-    ##########################
-    # rng = np.random.RandomState(1234)
-    # dataset = 'data/mnist.pkl.gz'
-    # datasets = load_udm(dataset, as_shared=False, zero_mean=False)
-    # Xtr = datasets[0][0]
-    # Xva = datasets[1][0]
-    # Xte = datasets[2][0]
-    # # Merge validation set and training set, and test on test set.
-    # #Xtr = np.concatenate((Xtr, Xva), axis=0)
-    # #Xva = Xte
-    # Xtr = to_fX(shift_and_scale_into_01(Xtr))
-    # Xva = to_fX(shift_and_scale_into_01(Xva))
-    # tr_samples = Xtr.shape[0]
-    # va_samples = Xva.shape[0]
     batch_size = 200
     batch_reps = 1
     all_pix_mean = np.mean(np.mean(Xtr, axis=1))
@@ -89,7 +77,7 @@ def test_mnist(step_type='add',
     # p_zi_given_xi #
     #################
     params = {}
-    shared_config = [(x_dim + x_dim), 500, 500]
+    shared_config = [x_dim, 500, 500]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
@@ -121,7 +109,7 @@ def test_mnist(step_type='add',
     params['build_theano_funcs'] = False
     p_sip1_given_zi = HydraNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
-    p_sip1_given_zi.init_biases(0.0)
+    p_sip1_given_zi.init_biases(0.2)
     ################
     # p_x_given_si #
     ################
@@ -139,7 +127,7 @@ def test_mnist(step_type='add',
     params['build_theano_funcs'] = False
     p_x_given_si = HydraNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
-    p_x_given_si.init_biases(0.0)
+    p_x_given_si.init_biases(0.2)
     #################
     # q_zi_given_xi #
     #################
@@ -158,7 +146,7 @@ def test_mnist(step_type='add',
     params['build_theano_funcs'] = False
     q_zi_given_xi = InfNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
-    q_zi_given_xi.init_biases(0.0)
+    q_zi_given_xi.init_biases(0.2)
 
     ###########################################################
     # Define parameters for the GPSImputer, and initialize it #
@@ -189,18 +177,16 @@ def test_mnist(step_type='add',
     log_name = "{}_RESULTS.txt".format(result_tag)
     out_file = open(log_name, 'wb')
     costs = [0. for i in range(10)]
-    learn_rate = 0.0002
-    momentum = 0.5
+    learn_rate = 0.0001
     batch_idx = np.arange(batch_size) + tr_samples
     for i in range(250000):
         scale = min(1.0, ((i+1) / 5000.0))
-        lam_scale = 1.0 - min(1.0, ((i+1) / 100000.0)) # decays from 1.0->0.0
         if (((i + 1) % 15000) == 0):
             learn_rate = learn_rate * 0.93
         if (i > 10000):
-            momentum = 0.90
+            momentum = 0.95
         else:
-            momentum = 0.75
+            momentum = 0.80
         # get the indices of training samples for this batch update
         batch_idx += batch_size
         if (np.max(batch_idx) >= tr_samples):
@@ -212,7 +198,7 @@ def test_mnist(step_type='add',
                             mom_1=scale*momentum, mom_2=0.98)
         GPSI.set_train_switch(1.0)
         GPSI.set_lam_nll(lam_nll=1.0)
-        GPSI.set_lam_kld(lam_kld_p=0.05, lam_kld_q=0.95, lam_kld_g=(0.1 * lam_scale))
+        GPSI.set_lam_kld(lam_kld_p=0.1, lam_kld_q=0.9, lam_kld_g=0.0)
         GPSI.set_lam_l2w(1e-5)
         # perform a minibatch update and record the cost for this batch
         xb = to_fX( Xtr.take(batch_idx, axis=0) )
@@ -221,8 +207,8 @@ def test_mnist(step_type='add',
         result = GPSI.train_joint(xi, xo, xm, batch_reps)
         # do diagnostics and general training tracking
         costs = [(costs[j] + result[j]) for j in range(len(result)-1)]
-        if ((i % 250) == 0):
-            costs = [(v / 250.0) for v in costs]
+        if ((i % 500) == 0):
+            costs = [(v / 500.0) for v in costs]
             str1 = "-- batch {0:d} --".format(i)
             str2 = "    joint_cost: {0:.4f}".format(costs[0])
             str3 = "    nll_bound : {0:.4f}".format(costs[1])
@@ -269,19 +255,6 @@ def test_mnist(step_type='add',
                     idx += 1
             file_name = "{0:s}_samples_ng_b{1:d}.png".format(result_tag, i)
             utils.visualize_samples(seq_samps, file_name, num_rows=20)
-            # get visualizations of policy parameters
-            # file_name = "{0:s}_gen_step_weights_b{1:d}.png".format(result_tag, i)
-            # W = GPSI.gen_step_weights.get_value(borrow=False)
-            # utils.visualize_samples(W[:,:x_dim], file_name, num_rows=20)
-            # file_name = "{0:s}_gen_write_gate_weights_b{1:d}.png".format(result_tag, i)
-            # W = GPSI.gen_write_gate_weights.get_value(borrow=False)
-            # utils.visualize_samples(W[:,:x_dim], file_name, num_rows=20)
-            # file_name = "{0:s}_gen_erase_gate_weights_b{1:d}.png".format(result_tag, i)
-            # W = GPSI.gen_erase_gate_weights.get_value(borrow=False)
-            # utils.visualize_samples(W[:,:x_dim], file_name, num_rows=20)
-            # file_name = "{0:s}_gen_inf_weights_b{1:d}.png".format(result_tag, i)
-            # W = GPSI.gen_inf_weights.get_value(borrow=False).T
-            # utils.visualize_samples(W[:,:x_dim], file_name, num_rows=20)
 
 #################################
 #################################

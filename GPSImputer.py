@@ -101,7 +101,6 @@ class GPSImputer(object):
         self.x_mask = x_mask
         self.zi_zmuv = T.tensor3()
 
-
         # setup switching variable for changing between sampling/training
         zero_ary = to_fX( np.zeros((1,)) )
         self.train_switch = theano.shared(value=zero_ary, name='msm_train_switch')
@@ -142,8 +141,7 @@ class GPSImputer(object):
             grad_masked = self.x_mask * grad_unmasked
             # get samples of next zi, according to the global policy
             zi_p_mean, zi_p_logvar = self.p_zi_given_xi.apply( \
-                    T.horizontal_stack(xi_masked, grad_masked), \
-                    do_samples=False)
+                    xi_masked, do_samples=False)
             zi_p = zi_p_mean + (T.exp(0.5 * zi_p_logvar) * zi_zmuv)
             # get samples of next zi, according to the guide policy
             zi_q_mean, zi_q_logvar = self.q_zi_given_xi.apply( \
@@ -170,8 +168,8 @@ class GPSImputer(object):
                 sip1 = si_step
             else:
                 # additive steps update the current guesses like an LSTM
-                write_gate = T.nnet.sigmoid(2.0 + hydra_out[1])
-                erase_gate = T.nnet.sigmoid(2.0 + hydra_out[2])
+                write_gate = 1.1 * T.nnet.sigmoid(1.0 + hydra_out[1])
+                erase_gate = 1.1 * T.nnet.sigmoid(1.0 + hydra_out[2])
                 sip1 = (erase_gate * si) + (write_gate * si_step)
             # compute NLL for the current imputation
             nlli = self._construct_nll_costs(sip1, self.x_out, self.x_mask)
@@ -212,7 +210,7 @@ class GPSImputer(object):
         self.lam_kld_p = theano.shared(value=zero_ary, name='gpsi_lam_kld_p')
         self.lam_kld_q = theano.shared(value=zero_ary, name='gpsi_lam_kld_q')
         self.lam_kld_g = theano.shared(value=zero_ary, name='gpsi_lam_kld_g')
-        self.set_lam_kld(lam_kld_p=0.05, lam_kld_q=0.95, lam_kld_g=0.1)
+        self.set_lam_kld(lam_kld_p=0.05, lam_kld_q=0.95, lam_kld_g=0.0)
         # init shared var for controlling l2 regularization on params
         self.lam_l2w = theano.shared(value=zero_ary, name='msm_lam_l2w')
         self.set_lam_l2w(1e-5)

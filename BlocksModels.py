@@ -500,7 +500,7 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
     @recurrent(sequences=['u', 'u_enc', 'u_dec'], contexts=['x'],
                states=['c', 'h_enc', 'c_enc', 'h_dec', 'c_dec', 'nll', 'kl_q2p', 'kl_p2q'],
                outputs=['c', 'h_enc', 'c_enc', 'h_dec', 'c_dec', 'nll', 'kl_q2p', 'kl_p2q'])
-    def iterate(self, u, u_enc, u_dec, c, h_enc, c_enc, h_dec, c_dec, nll, kl_q2p, kl_p2q, x):
+    def apply(self, u, u_enc, u_dec, c, h_enc, c_enc, h_dec, c_dec, nll, kl_q2p, kl_p2q, x):
 
 
         # get current prediction
@@ -629,7 +629,7 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
 
         # run the multi-stage guided generative process
         c, _, _, _, _, step_nlls, kl_q2p_gen, kl_p2q_gen = \
-                self.iterate(u=u_gen, u_enc=u_enc, u_dec=u_dec, \
+                self.apply(u=u_gen, u_enc=u_enc, u_dec=u_dec, \
                              c=c0, h_enc=he0, c_enc=ce0, \
                              h_dec=hd0, c_dec=cd0, x=x_out)
 
@@ -957,7 +957,7 @@ class IMoCLDrawModels(BaseRecurrent, Initializable, Random):
     @recurrent(sequences=['u'], contexts=['x', 'm'],
                states=['c', 'h_enc', 'c_enc', 'h_dec', 'c_dec', 'h_var', 'c_var', 'nll', 'kl_q2p', 'kl_p2q'],
                outputs=['c', 'h_enc', 'c_enc', 'h_dec', 'c_dec', 'h_var', 'c_var', 'nll', 'kl_q2p', 'kl_p2q'])
-    def iterate(self, u, c, h_enc, c_enc, h_dec, c_dec, h_var, c_var, nll, kl_q2p, kl_p2q, x, m):
+    def apply(self, u, c, h_enc, c_enc, h_dec, c_dec, h_var, c_var, nll, kl_q2p, kl_p2q, x, m):
         if self.step_type == 'add':
             # additive steps use c as a "direct workspace", which means it's
             # already directly comparable to x.
@@ -1002,7 +1002,7 @@ class IMoCLDrawModels(BaseRecurrent, Initializable, Random):
             c = self.writer_mlp.apply(c_dec)
         # compute the NLL of the reconstruction as of this step
         c_as_x = tensor.nnet.sigmoid(c)
-        m_inv = 1.0 - 0.0*m
+        m_inv = 1.0 - m
         nll = -1.0 * tensor.flatten(log_prob_bernoulli(x, c_as_x, mask=m_inv))
         # compute KL(q || p) and KL(p || q) for this step
         kl_q2p = tensor.sum(gaussian_kld(q_zg_mean, q_zg_logvar, \
@@ -1096,7 +1096,7 @@ class IMoCLDrawModels(BaseRecurrent, Initializable, Random):
 
         # run the multi-stage guided generative process
         c, _, _, _, _, _, _, step_nlls, kl_q2p_gen, kl_p2q_gen = \
-                self.iterate(u=u_gen, c=c0, \
+                self.apply(u=u_gen, c=c0, \
                              h_enc=he0, c_enc=ce0, \
                              h_dec=hd0, c_dec=cd0, \
                              h_var=hv0, c_var=cv0, \

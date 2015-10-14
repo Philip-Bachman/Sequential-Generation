@@ -72,6 +72,26 @@ class ObjectPainter(object):
                       (1, 0), (2, 0), (3, 0), (0, -1), \
                       (0, -2), (0, -3), (-1, 0), (-2, 0), \
                       (-3, 0)]
+        elif obj_type == 't-up':
+            coords = [(-3, 3), (-2, 3), (-1, 3), (0, 3), \
+                      (1, 3), (2, 3), (3, 3), (0, 2), \
+                      (0, 1), (0, 0), (0, -1), (0, -2), \
+                      (0, -3)]
+        elif obj_type == 't-down':
+            coords = [(-3, -3), (-2, -3), (-1, -3), (0, 3), \
+                      (1, -3), (2, -3), (3, -3), (0, 2), \
+                      (0, 1), (0, 0), (0, -1), (0, -2), \
+                      (0, -3)]
+        elif obj_type == 't-left':
+            coords = [(-3, 3), (-3, 2), (-3, 1), (-3, 0), \
+                      (-3, -1), (-3, -2), (-3, -3), (-2, 0), \
+                      (-1, 0), (0, 0), (1, 0), (2, 0), \
+                      (3, 0)]
+        elif obj_type == 't-right':
+            coords = [(3, 3), (3, 2), (3, 1), (-3, 0), \
+                      (3, -1), (3, -2), (3, -3), (-2, 0), \
+                      (-1, 0), (0, 0), (1, 0), (2, 0), \
+                      (3, 0)]
         else:
             coords = [(-1, 1), (0, 1), (1, 1), (1, 0), \
                       (1, -1), (0, -1), (-1, -1), (-1, 0)]
@@ -171,6 +191,26 @@ class ObjectPainter(object):
         I_raw = T.sum(FI, axis=1)
         I = I_raw / T.max(I_raw)
         return I
+
+def get_object_painters(im_dim=None, obj_types=None):
+    """
+    Get a dict, keyed by object type, of all available object painters.
+    """
+    # configure object renderers for the desired object types...
+    OPTRS = {}
+    for obj in obj_types:
+        # configure an object renderer
+        optr = ObjectPainter(im_dim, im_dim, obj_type=obj, obj_scale=0.2)
+        # get a Theano function for doing the rendering
+        _center_x = T.vector()
+        _center_y = T.vector()
+        _delta = T.vector()
+        _sigma = T.vector()
+        _W = optr.write(_center_y, _center_x, _delta, _sigma)
+        paint_obj = theano.function(inputs=[_center_y, _center_x, _delta, _sigma], \
+                                    outputs=_W)
+        OPTRS[obj] = paint_obj
+    return OPTRS
 
 ####################################################################
 ####################################################################

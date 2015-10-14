@@ -35,7 +35,7 @@ from DKCode import get_adam_updates, get_adadelta_updates
 from load_data import load_udm, load_tfd, load_svhn_gray, load_binarized_mnist
 from HelperFuncs import construct_masked_data, shift_and_scale_into_01, \
                         row_shuffle, to_fX, one_hot_np
-from MotionRenderers import TrajectoryGenerator, ObjectPainter
+from MotionRenderers import TrajectoryGenerator, get_object_painters
 
 RESULT_PATH = "RAM_TEST_RESULTS/"
 
@@ -57,26 +57,10 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     max_speed = 0.15
     TRAJ = TrajectoryGenerator(x_range=x_range, y_range=y_range, \
                                max_speed=max_speed)
-    # configure an object renderer
-    OPTR1 = ObjectPainter(im_dim, im_dim, obj_type='circle', obj_scale=0.2)
-    # get a Theano function for doing the rendering
-    _center_x = T.vector()
-    _center_y = T.vector()
-    _delta = T.vector()
-    _sigma = T.vector()
-    _W = OPTR1.write(_center_y, _center_x, _delta, _sigma)
-    paint_circle = theano.function(inputs=[_center_y, _center_x, _delta, _sigma], \
-                                   outputs=_W)
-    # configure an object renderer
-    OPTR2 = ObjectPainter(im_dim, im_dim, obj_type='cross', obj_scale=0.2)
-    # get a Theano function for doing the rendering
-    _center_x = T.vector()
-    _center_y = T.vector()
-    _delta = T.vector()
-    _sigma = T.vector()
-    _W = OPTR2.write(_center_y, _center_x, _delta, _sigma)
-    paint_cross = theano.function(inputs=[_center_y, _center_x, _delta, _sigma], \
-                                  outputs=_W)
+    # configure object renderers for the allowed object types...
+    obj_types = ['circle', 'cross', 'square', 't-up', 't-down',
+                 't-left', 't-right']
+    OPTRS = get_object_painters(im_dim=im_dim, obj_types=obj_types)
 
     def generate_batch(num_samples, obj_type='circle'):
         # generate a minibatch of trajectories
@@ -88,10 +72,8 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
         center_y = to_fX( traj_y.T.ravel() )
         delta = to_fX( np.ones(center_x.shape) )
         sigma = to_fX( np.ones(center_x.shape) )
-        if obj_type == 'circle':
-            W = paint_circle(center_y, center_x, delta, 0.05*sigma)
-        else:
-            W = paint_cross(center_y, center_x, delta, 0.05*sigma)
+        paint_obj = OPTRS[obj_type]
+        W = paint_obj(center_y, center_x, delta, 0.05*sigma)
         # shape trajectories into a batch for passing to the model
         batch_imgs = np.zeros((num_samples, traj_len, obs_dim))
         batch_coords = np.zeros((num_samples, traj_len, 2))
@@ -144,7 +126,7 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     total_steps = traj_len
     init_steps = 5
     exit_rate = 0.0
-    nll_weight = 0.3
+    nll_weight = 0.5
     x_dim = obs_dim
     y_dim = obs_dim
     z_dim = 128
@@ -193,6 +175,26 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
         utils.visualize_samples(seq_samps, file_name, num_rows=samp_count)
         return
 
+    def visualize_attention_joint(result, pre_tag="AAA", post_tag="AAA"):
+        seq_len = result[0].shape[0]
+        samp_count = result[0].shape[1]
+        # get generated predictions
+        seq_samps = np.zeros((3*seq_len*samp_count, obs_dim))
+        idx = 0
+        for s1 in range(samp_count):
+            for s2 in range(seq_len):
+                seq_samps[idx] = result[3][s2,s1,:]
+                idx += 1
+            for s2 in range(seq_len):
+                seq_samps[idx] = result[0][s2,s1,:]
+                idx += 1
+            for s2 in range(seq_len):
+                seq_samps[idx] = result[1][s2,s1,:]
+                idx += 1
+        file_name = "{0:s}_traj_joint_{1:s}.png".format(pre_tag, post_tag)
+        utils.visualize_samples(seq_samps, file_name, num_rows=(3*samp_count))
+        return
+
     rnninits = {
         'weights_init': IsotropicGaussian(0.01),
         'biases_init': Constant(0.),
@@ -207,7 +209,7 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     read_N = 2      # use NxN grid for reader
     reader_mlp = FovAttentionReader2d(x_dim=obs_dim,
                                       width=im_dim, height=im_dim, N=read_N,
-                                      img_scale=img_scale, att_scale=0.5,
+                                      img_scale=img_scale, att_scale=0.33,
                                       **inits)
     read_dim = reader_mlp.read_dim # total number of "pixels" read by reader
 
@@ -233,11 +235,11 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     var_mlp_out = CondNet([], [rnn_dim, z_dim], name="var_mlp_out", **inits)
 
     # LSTMs for the actual LSTMs (obviously, perhaps)
-    con_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
+    con_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=1.0, fg_bias=1.0, \
                          name="con_rnn", **rnninits)
-    gen_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
+    gen_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=1.0, fg_bias=1.0, \
                          name="gen_rnn", **rnninits)
-    var_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
+    var_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=1.0, fg_bias=1.0, \
                          name="var_rnn", **rnninits)
 
     SeqCondGenRAM_doc_str = \
@@ -301,7 +303,8 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
                 gen_rnn=gen_rnn,
                 var_mlp_in=var_mlp_in,
                 var_mlp_out=var_mlp_out,
-                var_rnn=var_rnn)
+                var_rnn=var_rnn,
+                att_noise=0.02)
     SCG.initialize()
 
     compile_start_time = time.time()
@@ -309,11 +312,16 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     # build the attention trajectory sampler
     SCG.build_attention_funcs()
 
+    # TEST SAVE/LOAD FUNCTIONALITY
+    param_save_file = "{}_params.pkl".format(result_tag)
+    #SCG.save_model_params(param_save_file)
+    #SCG.load_model_params(param_save_file)
+
     # quick test of attention trajectory sampler
     samp_count = 32
     Xb, Yb, Cb = generate_batch_multi(samp_count, xobjs=x_objs, yobjs=y_objs, img_scale=img_scale)
     result = SCG.sample_attention(Xb, Yb)
-    visualize_attention(result, pre_tag=result_tag, post_tag="b0")
+    visualize_attention_joint(result, pre_tag=result_tag, post_tag="b0")
 
     # build the main model functions (i.e. training and cost functions)
     SCG.build_model_funcs()
@@ -322,11 +330,6 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     compile_minutes = (compile_end_time - compile_start_time) / 60.0
     print("THEANO COMPILE TIME (MIN): {}".format(compile_minutes))
 
-    # TEST SAVE/LOAD FUNCTIONALITY
-    param_save_file = "{}_params.pkl".format(result_tag)
-    SCG.save_model_params(param_save_file)
-    SCG.load_model_params(param_save_file)
-
     ################################################################
     # Apply some updates, to check that they aren't totally broken #
     ################################################################
@@ -334,24 +337,25 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     out_file = open("{}_results.txt".format(result_tag), 'wb')
     out_file.flush()
     costs = [0. for i in range(10)]
+    #learn_rate = 0.0001
     learn_rate = 0.0001
     momentum = 0.95
     for i in range(250000):
         lr_scale = min(1.0, ((i+1) / 5000.0))
-        mom_scale = min(1.0, ((i+1) / 10000.0))
+        mom_scale = min(1.0, ((i+1) / 5000.0))
         if (((i + 1) % 10000) == 0):
             learn_rate = learn_rate * 0.95
         # set sgd and objective function hyperparams for this update
         SCG.set_sgd_params(lr=lr_scale*learn_rate, mom_1=mom_scale*momentum, mom_2=0.99)
-        SCG.set_lam_kld(lam_kld_q2p=0.95, lam_kld_p2q=0.05, \
+        SCG.set_lam_kld(lam_kld_q2p=2.0, lam_kld_p2q=0.2, \
                         lam_kld_amu=0.0, lam_kld_alv=0.1)
         # perform a minibatch update and record the cost for this batch
         Xb, Yb, Cb = generate_batch_multi(samp_count, xobjs=x_objs, yobjs=y_objs, img_scale=img_scale)
         result = SCG.train_joint(Xb, Yb)
         costs = [(costs[j] + result[j]) for j in range(len(result))]
         # output diagnostic information and checkpoint parameters, etc.
-        if ((i % 250) == 0):
-            costs = [(v / 250.0) for v in costs]
+        if ((i % 500) == 0):
+            costs = [(v / 500.0) for v in costs]
             str1 = "-- batch {0:d} --".format(i)
             str2 = "    total_cost: {0:.4f}".format(costs[0])
             str3 = "    nll_term  : {0:.4f}".format(costs[1])
@@ -365,7 +369,7 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
             out_file.write(joint_str+"\n")
             out_file.flush()
             costs = [0.0 for v in costs]
-        if ((i % 500) == 0):
+        if ((i % 1000) == 0):
             SCG.save_model_params("{}_params.pkl".format(result_tag))
             ###########################################
             # Sample and draw attention trajectories. #
@@ -374,11 +378,12 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
             Xb, Yb, Cb = generate_batch_multi(samp_count, xobjs=x_objs, yobjs=y_objs, img_scale=img_scale)
             result = SCG.sample_attention(Xb, Yb)
             post_tag = "b{0:d}".format(i)
-            visualize_attention(result, pre_tag=result_tag, post_tag=post_tag)
+            #visualize_attention(result, pre_tag=result_tag, post_tag=post_tag)
+            visualize_attention_joint(result, pre_tag=result_tag, post_tag=post_tag)
 
 
 
 if __name__=="__main__":
     #test_seq_cond_gen_sequence(step_type='jump', x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1")
-    test_seq_cond_gen_sequence(step_type='jump', x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2")
-    #test_seq_cond_gen_sequence(step_type='jump', x_objs=['cross', 'cross', 'circle'], y_objs=[0,1], res_tag="T3")
+    #test_seq_cond_gen_sequence(step_type='jump', x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2")
+    test_seq_cond_gen_sequence(step_type='jump', x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], res_tag="T3")
