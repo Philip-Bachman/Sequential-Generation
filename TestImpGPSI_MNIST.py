@@ -276,29 +276,18 @@ def test_mnist_results(step_type='add',
     # Get some training data #
     ##########################
     rng = np.random.RandomState(1234)
-    Xtr, Xva, Xte = load_binarized_mnist(data_path='./data/')
-    Xtr = np.vstack((Xtr, Xva))
+    dataset = 'data/mnist.pkl.gz'
+    datasets = load_udm(dataset, as_shared=False, zero_mean=False)
+    Xtr = datasets[0][0]
+    Xva = datasets[1][0]
+    Xte = datasets[2][0]
+    # Merge validation set and training set, and test on test set.
+    Xtr = np.concatenate((Xtr, Xva), axis=0)
     Xva = Xte
-    #del Xte
+    Xtr = to_fX(shift_and_scale_into_01(Xtr))
+    Xva = to_fX(shift_and_scale_into_01(Xva))
     tr_samples = Xtr.shape[0]
     va_samples = Xva.shape[0]
-
-    ##########################
-    # Get some training data #
-    ##########################
-    # rng = np.random.RandomState(1234)
-    # dataset = 'data/mnist.pkl.gz'
-    # datasets = load_udm(dataset, as_shared=False, zero_mean=False)
-    # Xtr = datasets[0][0]
-    # Xva = datasets[1][0]
-    # Xte = datasets[2][0]
-    # # Merge validation set and training set, and test on test set.
-    # #Xtr = np.concatenate((Xtr, Xva), axis=0)
-    # #Xva = Xte
-    # Xtr = to_fX(shift_and_scale_into_01(Xtr))
-    # Xva = to_fX(shift_and_scale_into_01(Xva))
-    # tr_samples = Xtr.shape[0]
-    # va_samples = Xva.shape[0]
     batch_size = 250
     batch_reps = 1
     all_pix_mean = np.mean(np.mean(Xtr, axis=1))
@@ -373,7 +362,7 @@ if __name__=="__main__":
     #test_mnist(step_type='jump', occ_dim=0, drop_prob=0.8)
     #test_mnist(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
     #test_mnist(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
-    test_mnist(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
+    #test_mnist(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
     #test_mnist(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
     #test_mnist(step_type='add', imp_steps=15, occ_dim=0, drop_prob=0.9)
 

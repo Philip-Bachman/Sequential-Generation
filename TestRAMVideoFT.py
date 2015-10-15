@@ -361,6 +361,6 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
 
 
 if __name__=="__main__":
-    #test_seq_cond_gen_sequence(step_type='jump', x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1FT")
-    test_seq_cond_gen_sequence(step_type='jump', x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2FT")
+    test_seq_cond_gen_sequence(step_type='jump', x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1FT")
+    #test_seq_cond_gen_sequence(step_type='jump', x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2FT")
     #test_seq_cond_gen_sequence(step_type='jump', x_objs=['cross', 'cross', 'circle'], y_objs=[0,1], res_tag="T3FT")
