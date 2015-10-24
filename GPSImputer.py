@@ -170,7 +170,8 @@ class GPSImputer(object):
                 # additive steps update the current guesses like an LSTM
                 write_gate = 1.1 * T.nnet.sigmoid(1.0 + hydra_out[1])
                 erase_gate = 1.1 * T.nnet.sigmoid(1.0 + hydra_out[2])
-                sip1 = (erase_gate * si) + (write_gate * si_step)
+                #sip1 = (erase_gate * si) + (write_gate * si_step)
+                sip1 = si + si_step
             # compute NLL for the current imputation
             nlli = self._construct_nll_costs(sip1, self.x_out, self.x_mask)
             return sip1, nlli, kldi_q2p, kldi_p2q, kldi_p2g
