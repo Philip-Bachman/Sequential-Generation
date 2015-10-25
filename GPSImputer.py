@@ -43,7 +43,7 @@ class GPSImputer(object):
                 s_dim: dimension of space for hypothesis construction
                 use_p_x_given_si: boolean for whether to use ----
                 imp_steps: number of reconstruction steps to perform
-                step_type: either "add" or "jump"
+                step_type: either "add", "jump", or "lstm"
                 x_type: can be "bernoulli" or "gaussian"
                 obs_transform: can be 'none' or 'sigmoid'
     """
@@ -86,7 +86,8 @@ class GPSImputer(object):
             self.obs_transform = lambda x: T.nnet.sigmoid(x)
         self.shared_param_dicts = shared_param_dicts
 
-        assert((self.step_type == 'add') or (self.step_type == 'jump'))
+        assert((self.step_type == 'add') or (self.step_type == 'jump') \
+               or (self.step_type == 'lstm'))
 
         # grab handles to the relevant InfNets
         self.p_zi_given_xi = p_zi_given_xi
@@ -166,12 +167,14 @@ class GPSImputer(object):
             if (self.step_type == 'jump'):
                 # jump steps always completely overwrite the current guesses
                 sip1 = si_step
-            else:
-                # additive steps update the current guesses like an LSTM
-                write_gate = 1.1 * T.nnet.sigmoid(1.0 + hydra_out[1])
-                erase_gate = 1.1 * T.nnet.sigmoid(1.0 + hydra_out[2])
-                #sip1 = (erase_gate * si) + (write_gate * si_step)
+            elif (self.step_type == 'add'):
+                # add steps just update the guesses additively
                 sip1 = si + si_step
+            else:
+                # LSTM-style updates with write and erase gates
+                write_gate = 1.2 * T.nnet.sigmoid(1.0 + hydra_out[1])
+                erase_gate = 1.2 * T.nnet.sigmoid(1.0 + hydra_out[2])
+                sip1 = (erase_gate * si) + (write_gate * si_step)
             # compute NLL for the current imputation
             nlli = self._construct_nll_costs(sip1, self.x_out, self.x_mask)
             return sip1, nlli, kldi_q2p, kldi_p2q, kldi_p2g
