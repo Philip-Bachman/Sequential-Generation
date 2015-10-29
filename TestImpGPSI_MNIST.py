@@ -67,7 +67,7 @@ def test_mnist(step_type='add',
     s_dim = x_dim
     #s_dim = 300
     z_dim = 100
-    init_scale = 0.6
+    init_scale = 0.8
 
     x_in_sym = T.matrix('x_in_sym')
     x_out_sym = T.matrix('x_out_sym')
@@ -77,7 +77,7 @@ def test_mnist(step_type='add',
     # p_zi_given_xi #
     #################
     params = {}
-    shared_config = [x_dim, 500, 500]
+    shared_config = [x_dim, 800, 800]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
@@ -91,12 +91,12 @@ def test_mnist(step_type='add',
     params['build_theano_funcs'] = False
     p_zi_given_xi = InfNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
-    p_zi_given_xi.init_biases(0.0)
+    p_zi_given_xi.init_biases(0.2)
     ###################
     # p_sip1_given_zi #
     ###################
     params = {}
-    shared_config = [z_dim, 500, 500]
+    shared_config = [z_dim, 800, 800]
     output_config = [s_dim, s_dim, s_dim]
     params['shared_config'] = shared_config
     params['output_config'] = output_config
@@ -132,7 +132,7 @@ def test_mnist(step_type='add',
     # q_zi_given_xi #
     #################
     params = {}
-    shared_config = [(x_dim + x_dim), 500, 500]
+    shared_config = [(x_dim + x_dim), 800, 800]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
@@ -178,15 +178,12 @@ def test_mnist(step_type='add',
     out_file = open(log_name, 'wb')
     costs = [0. for i in range(10)]
     learn_rate = 0.0001
+    momentum = 0.90
     batch_idx = np.arange(batch_size) + tr_samples
     for i in range(200000):
         scale = min(1.0, ((i+1) / 5000.0))
         if (((i + 1) % 15000) == 0):
-            learn_rate = learn_rate * 0.93
-        if (i > 10000):
-            momentum = 0.95
-        else:
-            momentum = 0.80
+            learn_rate = learn_rate * 0.95
         # get the indices of training samples for this batch update
         batch_idx += batch_size
         if (np.max(batch_idx) >= tr_samples):
@@ -198,7 +195,7 @@ def test_mnist(step_type='add',
                             mom_1=scale*momentum, mom_2=0.98)
         GPSI.set_train_switch(1.0)
         GPSI.set_lam_nll(lam_nll=1.0)
-        GPSI.set_lam_kld(lam_kld_p=0.95, lam_kld_q=0.95, lam_kld_g=0.0)
+        GPSI.set_lam_kld(lam_kld_p=1.0, lam_kld_q=0.1, lam_kld_g=0.0)
         GPSI.set_lam_l2w(1e-5)
         # perform a minibatch update and record the cost for this batch
         xb = to_fX( Xtr.take(batch_idx, axis=0) )
@@ -360,21 +357,21 @@ if __name__=="__main__":
     #test_mnist(step_type='jump', occ_dim=16, drop_prob=0.0)
     #test_mnist(step_type='jump', occ_dim=0, drop_prob=0.6)
     #test_mnist(step_type='jump', occ_dim=0, drop_prob=0.8)
-    # test_mnist(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
-    # test_mnist(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
-    # test_mnist(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
-    # test_mnist(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
-    # test_mnist(step_type='add', imp_steps=15, occ_dim=0, drop_prob=0.9)
-    #test_mnist(step_type='jump', imp_steps=1, occ_dim=0, drop_prob=0.9)
-    #test_mnist(step_type='jump', imp_steps=2, occ_dim=0, drop_prob=0.9)
-    #test_mnist(step_type='jump', imp_steps=5, occ_dim=0, drop_prob=0.9)
-    #test_mnist(step_type='jump', imp_steps=10, occ_dim=0, drop_prob=0.9)
-    #test_mnist(step_type='jump', imp_steps=15, occ_dim=0, drop_prob=0.9)
-    test_mnist(step_type='lstm', imp_steps=1, occ_dim=0, drop_prob=0.9)
-    test_mnist(step_type='lstm', imp_steps=2, occ_dim=0, drop_prob=0.9)
-    test_mnist(step_type='lstm', imp_steps=5, occ_dim=0, drop_prob=0.9)
-    test_mnist(step_type='lstm', imp_steps=10, occ_dim=0, drop_prob=0.9)
-    test_mnist(step_type='lstm', imp_steps=15, occ_dim=0, drop_prob=0.9)
+    test_mnist(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
+    test_mnist(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
+    test_mnist(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
+    test_mnist(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
+    test_mnist(step_type='add', imp_steps=15, occ_dim=0, drop_prob=0.9)
+    # test_mnist(step_type='jump', imp_steps=5, occ_dim=0, drop_prob=0.9)
+    # test_mnist(step_type='jump', imp_steps=2, occ_dim=0, drop_prob=0.9)
+    # test_mnist(step_type='jump', imp_steps=1, occ_dim=0, drop_prob=0.9)
+    # test_mnist(step_type='jump', imp_steps=10, occ_dim=0, drop_prob=0.9)
+    # test_mnist(step_type='jump', imp_steps=15, occ_dim=0, drop_prob=0.9)
+    # test_mnist(step_type='lstm', imp_steps=5, occ_dim=0, drop_prob=0.9)
+    # test_mnist(step_type='lstm', imp_steps=2, occ_dim=0, drop_prob=0.9)
+    # test_mnist(step_type='lstm', imp_steps=1, occ_dim=0, drop_prob=0.9)
+    # test_mnist(step_type='lstm', imp_steps=10, occ_dim=0, drop_prob=0.9)
+    # test_mnist(step_type='lstm', imp_steps=15, occ_dim=0, drop_prob=0.9)
 
     # RESULTS
     # test_mnist_results(step_type='add', occ_dim=14, drop_prob=0.0)
@@ -389,18 +386,18 @@ if __name__=="__main__":
     # test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.7)
     # test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.8)
     # test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.9)
-    # test_mnist_results(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
-    # test_mnist_results(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
-    # test_mnist_results(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
-    # test_mnist_results(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
-    # test_mnist_results(step_type='add', imp_steps=15, occ_dim=0, drop_prob=0.9)
-    #test_mnist_results(step_type='jump', imp_steps=1, occ_dim=0, drop_prob=0.9)
-    #test_mnist_results(step_type='jump', imp_steps=2, occ_dim=0, drop_prob=0.9)
-    #test_mnist_results(step_type='jump', imp_steps=5, occ_dim=0, drop_prob=0.9)
-    #test_mnist_results(step_type='jump', imp_steps=10, occ_dim=0, drop_prob=0.9)
-    #test_mnist_results(step_type='jump', imp_steps=15, occ_dim=0, drop_prob=0.9)
-    test_mnist_results(step_type='lstm', imp_steps=1, occ_dim=0, drop_prob=0.9)
-    test_mnist_results(step_type='lstm', imp_steps=2, occ_dim=0, drop_prob=0.9)
-    test_mnist_results(step_type='lstm', imp_steps=5, occ_dim=0, drop_prob=0.9)
-    test_mnist_results(step_type='lstm', imp_steps=10, occ_dim=0, drop_prob=0.9)
-    test_mnist_results(step_type='lstm', imp_steps=15, occ_dim=0, drop_prob=0.9)
+    test_mnist_results(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
+    test_mnist_results(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
+    test_mnist_results(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
+    test_mnist_results(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
+    test_mnist_results(step_type='add', imp_steps=15, occ_dim=0, drop_prob=0.9)
+    # test_mnist_results(step_type='jump', imp_steps=1, occ_dim=0, drop_prob=0.9)
+    # test_mnist_results(step_type='jump', imp_steps=2, occ_dim=0, drop_prob=0.9)
+    # test_mnist_results(step_type='jump', imp_steps=5, occ_dim=0, drop_prob=0.9)
+    # test_mnist_results(step_type='jump', imp_steps=10, occ_dim=0, drop_prob=0.9)
+    # test_mnist_results(step_type='jump', imp_steps=15, occ_dim=0, drop_prob=0.9)
+    # test_mnist_results(step_type='lstm', imp_steps=1, occ_dim=0, drop_prob=0.9)
+    # test_mnist_results(step_type='lstm', imp_steps=2, occ_dim=0, drop_prob=0.9)
+    # test_mnist_results(step_type='lstm', imp_steps=5, occ_dim=0, drop_prob=0.9)
+    # test_mnist_results(step_type='lstm', imp_steps=10, occ_dim=0, drop_prob=0.9)
+    # test_mnist_results(step_type='lstm', imp_steps=15, occ_dim=0, drop_prob=0.9)

@@ -2926,7 +2926,7 @@ class SeqCondGenRAM(BaseRecurrent, Initializable, Random):
         else:
             # non-additive steps use c_con as a "latent workspace", which means
             # it needs to be transformed before being comparable to y.
-            c_as_y = tensor.nnet.sigmoid(self.writer_mlp.apply(c_con))
+            c_as_y = tensor.nnet.sigmoid(self.writer_mlp.apply(h_con))
         # compute difference between current prediction and target value
         y_d = y - c_as_y
 
@@ -2936,7 +2936,8 @@ class SeqCondGenRAM(BaseRecurrent, Initializable, Random):
 
         # apply the attention-based reader to the input in x
         read_out = self.reader_mlp.apply(x, x, att_spec)
-        diff_out = self.reader_mlp.apply(y_d, y_d, att_spec)
+        #diff_out = self.reader_mlp.apply(y_d, y_d, att_spec)
+        true_out = self.reader_mlp.apply(y, y, att_spec)
         att_map = self.reader_mlp.att_map(att_spec)
         read_img = self.reader_mlp.write(read_out, att_spec)
 
@@ -2947,7 +2948,7 @@ class SeqCondGenRAM(BaseRecurrent, Initializable, Random):
                                           inputs=i_gen, iterate=False)
         # update the guide RNN state
         i_var = self.var_mlp_in.apply( \
-                tensor.concatenate([diff_out, read_out, att_spec, h_con], axis=1))
+                tensor.concatenate([true_out, read_out, att_spec, h_con], axis=1))
         h_var, c_var = self.var_rnn.apply(states=h_var, cells=c_var,
                                           inputs=i_var, iterate=False)
 
@@ -2972,7 +2973,7 @@ class SeqCondGenRAM(BaseRecurrent, Initializable, Random):
         if self.step_type == 'add':
             c = c + self.writer_mlp.apply(h_con)
         else:
-            c = self.writer_mlp.apply(c_con)
+            c = self.writer_mlp.apply(h_con)
 
         # compute the NLL of the reconstruction as of this step. the NLL at
         # each step is rescaled by a factor such that the sum of the factors
