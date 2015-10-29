@@ -47,7 +47,7 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     result_tag = "{}VID_SCGRAM_{}".format(RESULT_PATH, res_tag)
 
     batch_size = 192
-    traj_len = 10
+    traj_len = 15
     im_dim = 32
     obs_dim = im_dim*im_dim
 
@@ -124,15 +124,15 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     # Setup some parameters for the Iterative Refinement Model #
     ############################################################
     total_steps = traj_len
-    init_steps = 5
+    init_steps = 10
     exit_rate = 0.0
     nll_weight = 0.5
     x_dim = obs_dim
     y_dim = obs_dim
-    z_dim = 128
+    z_dim = 256
     att_spec_dim = 5
-    rnn_dim = 768
-    mlp_dim = 768
+    rnn_dim = 1024
+    mlp_dim = 1024
 
     def visualize_attention(result, pre_tag="AAA", post_tag="AAA"):
         seq_len = result[0].shape[0]
@@ -340,11 +340,11 @@ def test_seq_cond_gen_sequence(step_type='add', x_objs=['circle'], y_objs=[0], \
     #learn_rate = 0.0001
     learn_rate = 0.0001
     momentum = 0.95
-    for i in range(250000):
+    for i in range(500000):
         lr_scale = min(1.0, ((i+1) / 5000.0))
         mom_scale = min(1.0, ((i+1) / 5000.0))
         if (((i + 1) % 10000) == 0):
-            learn_rate = learn_rate * 0.95
+            learn_rate = learn_rate * 0.96
         # set sgd and objective function hyperparams for this update
         SCG.set_sgd_params(lr=lr_scale*learn_rate, mom_1=mom_scale*momentum, mom_2=0.99)
         SCG.set_lam_kld(lam_kld_q2p=2.0, lam_kld_p2q=0.2, \

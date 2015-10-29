@@ -75,7 +75,7 @@ def img_grid(arr, global_scale=True):
 
         offset_y, offset_x = r*height, c*width
         I[offset_y:(offset_y+height), offset_x:(offset_x+width)] = this
-    
+
     I = (255*I).astype(np.uint8)
     return Image.fromarray(I)
 
@@ -96,8 +96,8 @@ def test_imocld_imp_mnist(step_type='add', occ_dim=14, drop_prob=0.0, attention=
     Xva = datasets[1][0]
     Xte = datasets[2][0]
     # Merge validation set and training set, and test on test set.
-    #Xtr = np.concatenate((Xtr, Xva), axis=0)
-    #Xva = Xte
+    Xtr = np.concatenate((Xtr, Xva), axis=0)
+    Xva = Xte
     Xtr = to_fX(shift_and_scale_into_01(Xtr))
     Xva = to_fX(shift_and_scale_into_01(Xva))
     tr_samples = Xtr.shape[0]
@@ -113,9 +113,9 @@ def test_imocld_imp_mnist(step_type='add', occ_dim=14, drop_prob=0.0, attention=
     dec_dim = 300
     mix_dim = 20
     z_dim = 100
-    n_iter = 20
+    n_iter = 25
     dp_int = int(100.0 * drop_prob)
-    
+
     rnninits = {
         'weights_init': IsotropicGaussian(0.01),
         'biases_init': Constant(0.),
@@ -132,7 +132,7 @@ def test_imocld_imp_mnist(step_type='add', occ_dim=14, drop_prob=0.0, attention=
     reader_mlp = Reader(x_dim=x_dim, dec_dim=dec_dim, **inits)
     writer_mlp = MLP([None, None], [dec_dim, write_dim, x_dim], \
                      name="writer_mlp", **inits)
-    
+
     # mlps for setting conditionals over z_mix
     mix_var_mlp = CondNet([Tanh()], [x_dim, 250, mix_dim], \
                           name="mix_var_mlp", **inits)
@@ -191,16 +191,12 @@ def test_imocld_imp_mnist(step_type='add', occ_dim=14, drop_prob=0.0, attention=
     out_file.flush()
     costs = [0. for i in range(10)]
     learn_rate = 0.0002
-    momentum = 0.5
+    momentum = 0.9
     batch_idx = np.arange(batch_size) + tr_samples
     for i in range(250000):
         scale = min(1.0, ((i+1) / 1000.0))
         if (((i + 1) % 10000) == 0):
             learn_rate = learn_rate * 0.95
-        if (i > 10000):
-            momentum = 0.90
-        else:
-            momentum = 0.50
         # get the indices of training samples for this batch update
         batch_idx += batch_size
         if (np.max(batch_idx) >= tr_samples):
@@ -293,7 +289,7 @@ def test_imocld_imp_svhn(step_type='add', occ_dim=14, drop_prob=0.0, attention=F
     z_dim = 200
     n_iter = 16
     dp_int = int(100.0 * drop_prob)
-    
+
     rnninits = {
         'weights_init': IsotropicGaussian(0.01),
         'biases_init': Constant(0.),
@@ -310,7 +306,7 @@ def test_imocld_imp_svhn(step_type='add', occ_dim=14, drop_prob=0.0, attention=F
     reader_mlp = Reader(x_dim=x_dim, dec_dim=dec_dim, **inits)
     writer_mlp = MLP([None, None], [dec_dim, write_dim, x_dim], \
                      name="writer_mlp", **inits)
-    
+
     # mlps for setting conditionals over z_mix
     mix_var_mlp = CondNet([Tanh()], [x_dim, 250, mix_dim], \
                           name="mix_var_mlp", **inits)
@@ -478,7 +474,7 @@ def test_imocld_imp_tfd(step_type='add', occ_dim=14, drop_prob=0.0, attention=Fa
     z_dim = 200
     n_iter = 16
     dp_int = int(100.0 * drop_prob)
-    
+
     rnninits = {
         'weights_init': IsotropicGaussian(0.01),
         'biases_init': Constant(0.),
@@ -495,7 +491,7 @@ def test_imocld_imp_tfd(step_type='add', occ_dim=14, drop_prob=0.0, attention=Fa
     reader_mlp = Reader(x_dim=x_dim, dec_dim=dec_dim, **inits)
     writer_mlp = MLP([None, None], [dec_dim, write_dim, x_dim], \
                      name="writer_mlp", **inits)
-    
+
     # mlps for setting conditionals over z_mix
     mix_var_mlp = CondNet([Tanh()], [x_dim, 250, mix_dim], \
                           name="mix_var_mlp", **inits)
@@ -632,8 +628,8 @@ if __name__=="__main__":
     #test_imocld_imp_mnist(step_type='jump', occ_dim=0, drop_prob=0.6)
     #test_imocld_imp_mnist(step_type='add', occ_dim=0, drop_prob=0.8)
     #test_imocld_imp_mnist(step_type='jump', occ_dim=0, drop_prob=0.8)
-    test_imocld_imp_mnist(step_type='add', occ_dim=0, drop_prob=0.9)
-    #test_imocld_imp_mnist(step_type='jump', occ_dim=0, drop_prob=0.8)
+    #test_imocld_imp_mnist(step_type='add', occ_dim=0, drop_prob=0.9)
+    test_imocld_imp_mnist(step_type='jump', occ_dim=0, drop_prob=0.9)
     #test_imocld_imp_tfd(step_type='add', occ_dim=0, drop_prob=0.8)
     #test_imocld_imp_tfd(step_type='add', occ_dim=25, drop_prob=0.0)
     #test_imocld_imp_svhn(step_type='add', occ_dim=0, drop_prob=0.8)

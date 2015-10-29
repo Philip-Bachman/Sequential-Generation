@@ -1206,8 +1206,8 @@ class IMoCLDrawModels(BaseRecurrent, Initializable, Random):
         self.reg_term.name = "reg_term"
 
         # compute the full cost w.r.t. which we will optimize
-        self.joint_cost = self.nll_term + (0.95 * self.kld_q2p_term) + \
-                          (0.05 * self.kld_p2q_term) + self.reg_term
+        self.joint_cost = self.nll_term + (0.9 * self.kld_q2p_term) + \
+                          (0.1 * self.kld_p2q_term) + self.reg_term
         self.joint_cost.name = "joint_cost"
 
         # Get the gradient of the joint cost for all optimizable parameters
