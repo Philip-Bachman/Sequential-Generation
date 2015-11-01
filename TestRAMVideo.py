@@ -772,8 +772,8 @@ if __name__=="__main__":
     # Test SeqCondGenS
     #test_seq_cond_gen_s(x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1")
     #test_seq_cond_gen_s(x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2")
-    test_seq_cond_gen_s(x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], res_tag="T3")
+    #test_seq_cond_gen_s(x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], res_tag="T3")
     # Test SeqCondGenRAM
     #test_seq_cond_gen_ram(x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1")
     #test_seq_cond_gen_ram(x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2")
-    #test_seq_cond_gen_ram(x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], res_tag="T3")
+    test_seq_cond_gen_ram(x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], res_tag="T3")
