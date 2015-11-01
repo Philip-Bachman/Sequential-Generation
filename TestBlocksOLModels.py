@@ -92,7 +92,7 @@ def test_imoold_generation(step_type='add', attention=False):
     #del Xte
     tr_samples = Xtr.shape[0]
     va_samples = Xva.shape[0]
-    batch_size = 250
+    batch_size = 200
 
     ############################################################
     # Setup some parameters for the Iterative Refinement Model #
@@ -106,7 +106,7 @@ def test_imoold_generation(step_type='add', attention=False):
     if attention:
         n_iter = 64
     else:
-        n_iter = 16
+        n_iter = 20
 
     rnninits = {
         'weights_init': IsotropicGaussian(0.01),
@@ -184,16 +184,12 @@ def test_imoold_generation(step_type='add', attention=False):
     out_file = open("TBOLM_GEN_RESULTS_{}_{}.txt".format(step_type, att_tag), 'wb')
     costs = [0. for i in range(10)]
     learn_rate = 0.0002
-    momentum = 0.5
+    momentum = 0.9
     batch_idx = np.arange(batch_size) + tr_samples
     for i in range(250000):
-        scale = min(1.0, ((i+1) / 1000.0))
+        scale = min(1.0, ((i+1) / 5000.0))
         if (((i + 1) % 10000) == 0):
             learn_rate = learn_rate * 0.95
-        if (i > 10000):
-            momentum = 0.90
-        else:
-            momentum = 0.50
         # get the indices of training samples for this batch update
         batch_idx += batch_size
         if (np.max(batch_idx) >= tr_samples):
@@ -203,12 +199,13 @@ def test_imoold_generation(step_type='add', attention=False):
 
         # set sgd and objective function hyperparams for this update
         zero_ary = np.zeros((1,))
-        draw.lr.set_value(to_fX(zero_ary + learn_rate))
-        draw.mom_1.set_value(to_fX(zero_ary + momentum))
-        draw.mom_2.set_value(to_fX(zero_ary + 0.99))
+        draw.lr.set_value(to_fX(zero_ary + scale*learn_rate))
+        draw.mom_1.set_value(to_fX(zero_ary + scale*momentum))
+        draw.mom_2.set_value(to_fX(zero_ary + 0.98))
 
         # perform a minibatch update and record the cost for this batch
         Xb = to_fX(Xtr.take(batch_idx, axis=0))
+        draw.set_rnn_noise(rnn_noise=0.02)
         result = draw.train_joint(Xb, Xb)
         costs = [(costs[j] + result[j]) for j in range(len(result))]
 
@@ -233,6 +230,7 @@ def test_imoold_generation(step_type='add', attention=False):
             # compute a small-sample estimate of NLL bound on validation set
             Xva = row_shuffle(Xva)
             Xb = to_fX(Xva[:5000])
+            draw.set_rnn_noise(rnn_noise=0.0)
             va_costs = draw.compute_nll_bound(Xb, Xb)
             str1 = "    va_nll_bound : {}".format(va_costs[1])
             str2 = "    va_nll_term  : {}".format(va_costs[2])
@@ -266,7 +264,7 @@ def test_imoold_generation_ft(step_type='add', attention=False):
     #del Xte
     tr_samples = Xtr.shape[0]
     va_samples = Xva.shape[0]
-    batch_size = 250
+    batch_size = 200
 
     ############################################################
     # Setup some parameters for the Iterative Refinement Model #
@@ -278,9 +276,9 @@ def test_imoold_generation_ft(step_type='add', attention=False):
     mix_dim = 20
     z_dim = 100
     if attention:
-        n_iter = 50
+        n_iter = 64
     else:
-        n_iter = 16
+        n_iter = 20
 
     rnninits = {
         'weights_init': IsotropicGaussian(0.01),
