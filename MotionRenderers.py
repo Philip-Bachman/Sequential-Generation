@@ -192,7 +192,7 @@ class ObjectPainter(object):
         I = I_raw / T.max(I_raw)
         return I
 
-def get_object_painters(im_dim=None, obj_types=None):
+def get_object_painters(im_dim=None, obj_types=None, obj_scale=0.2):
     """
     Get a dict, keyed by object type, of all available object painters.
     """
@@ -200,7 +200,7 @@ def get_object_painters(im_dim=None, obj_types=None):
     OPTRS = {}
     for obj in obj_types:
         # configure an object renderer
-        optr = ObjectPainter(im_dim, im_dim, obj_type=obj, obj_scale=0.2)
+        optr = ObjectPainter(im_dim, im_dim, obj_type=obj, obj_scale=obj_scale)
         # get a Theano function for doing the rendering
         _center_x = T.vector()
         _center_y = T.vector()
