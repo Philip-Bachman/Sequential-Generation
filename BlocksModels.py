@@ -502,8 +502,6 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
                states=['c', 'h_enc', 'c_enc', 'h_dec', 'c_dec', 'nll', 'kl_q2p', 'kl_p2q'],
                outputs=['c', 'h_enc', 'c_enc', 'h_dec', 'c_dec', 'nll', 'kl_q2p', 'kl_p2q'])
     def apply(self, u, u_enc, u_dec, c, h_enc, c_enc, h_dec, c_dec, nll, kl_q2p, kl_p2q, x):
-
-
         # get current prediction
         if self.step_type == 'add':
             # additive steps use c as a "direct workspace", which means it's
@@ -600,6 +598,7 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
         hd0 = mix_init[:, cd_dim:(cd_dim+hd_dim)]
         ce0 = mix_init[:, (cd_dim+hd_dim):(cd_dim+hd_dim+ce_dim)]
         he0 = mix_init[:, (cd_dim+hd_dim+ce_dim):]
+        c0 = tensor.zeros_like(x_out) + self.c_0
         # add noise to initial decoder state
         hd0 = hd0 + (self.rnn_noise * self.theano_rng.normal(
                         size=(hd0.shape[0], hd0.shape[1]),
