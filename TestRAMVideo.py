@@ -56,23 +56,25 @@ def test_seq_cond_gen_s(x_objs=['circle'], y_objs=[0], \
     ##############################
     # File tag, for output stuff #
     ##############################
-    result_tag = "{}VID_SCGS_{}".format(RESULT_PATH, res_tag)
+    result_tag = "{}AAA_VID_SCGS_{}".format(RESULT_PATH, res_tag)
 
     batch_size = 192
     traj_len = 15
-    im_dim = 32
+    im_dim = 48
     obs_dim = im_dim*im_dim
 
     # configure a trajectory generator
-    x_range = [-0.8,0.8]
-    y_range = [-0.8,0.8]
+    obj_scale = 0.15
+    im_box = 1.0 - obj_scale
+    x_range = [-im_box,im_box]
+    y_range = [-im_box,im_box]
     max_speed = 0.15
     TRAJ = TrajectoryGenerator(x_range=x_range, y_range=y_range, \
                                max_speed=max_speed)
     # configure object renderers for the allowed object types...
     obj_types = ['circle', 'cross', 'square', 't-up', 't-down',
                  't-left', 't-right']
-    OPTRS = get_object_painters(im_dim=im_dim, obj_types=obj_types)
+    OPTRS = get_object_painters(im_dim=im_dim, obj_types=obj_types, obj_scale=obj_scale)
 
     def generate_batch(num_samples, obj_type='circle'):
         # generate a minibatch of trajectories
@@ -138,7 +140,7 @@ def test_seq_cond_gen_s(x_objs=['circle'], y_objs=[0], \
     total_steps = traj_len
     init_steps = 10
     exit_rate = 0.0
-    nll_weight = 0.2
+    nll_weight = 0.5
     x_dim = obs_dim
     y_dim = obs_dim
     z_att_dim = 128
@@ -242,7 +244,7 @@ def test_seq_cond_gen_s(x_objs=['circle'], y_objs=[0], \
                      [(z_slf_dim + all_spec_dim + all_read_dim), 4*rnn_dim], \
                      name="con_mlp_in", **inits)
     rav_mlp_in = MLP([Identity()], \
-                     [(y_dim + rnn_dim + z_slf_dim + all_spec_dim + all_read_dim), 4*rnn_dim], \
+                     [(all_read_dim + rnn_dim + z_slf_dim + all_spec_dim + all_read_dim), 4*rnn_dim], \
                      name="rav_mlp_in", **inits)
 
     # mlps for turning LSTM outputs into conditionals over z_gen
@@ -369,21 +371,23 @@ def test_seq_cond_gen_s(x_objs=['circle'], y_objs=[0], \
     costs = [0. for i in range(10)]
     learn_rate = 0.0001
     momentum = 0.95
+    kl_scale = 1.0
     for i in range(500000):
-        lr_scale = min(1.0, ((i+1) / 5000.0))
-        mom_scale = min(1.0, ((i+1) / 5000.0))
+        scale = min(1.0, ((i+1) / 5000.0))
         if (((i + 1) % 10000) == 0):
             learn_rate = learn_rate * 0.96
+        if ((i > 200000) and (i % 10000)):
+            kl_scale = kl_scale * 1.1
         # set sgd and objective function hyperparams for this update
-        SCG.set_sgd_params(lr=lr_scale*learn_rate, mom_1=mom_scale*momentum, mom_2=0.99)
-        SCG.set_lam_kld(lam_kld_q2p=2.0, lam_kld_p2q=0.2)
+        SCG.set_sgd_params(lr=scale*learn_rate, mom_1=scale*momentum, mom_2=0.99)
+        SCG.set_lam_kld(lam_kld_q2p=kl_scale*2.0, lam_kld_p2q=kl_scale*0.2)
         # perform a minibatch update and record the cost for this batch
         Xb, Yb, Cb = generate_batch_multi(samp_count, xobjs=x_objs, yobjs=y_objs, img_scale=img_scale)
         result = SCG.train_joint(Xb, Yb)
         costs = [(costs[j] + result[j]) for j in range(len(result))]
         # output diagnostic information and checkpoint parameters, etc.
-        if ((i % 500) == 0):
-            costs = [(v / 500.0) for v in costs]
+        if ((i % 1000) == 0):
+            costs = [(v / 1000.0) for v in costs]
             str1 = "-- batch {0:d} --".format(i)
             str2 = "    total_cost: {0:.4f}".format(costs[0])
             str3 = "    nll_term  : {0:.4f}".format(costs[1])
@@ -395,7 +399,7 @@ def test_seq_cond_gen_s(x_objs=['circle'], y_objs=[0], \
             out_file.write(joint_str+"\n")
             out_file.flush()
             costs = [0.0 for v in costs]
-        if ((i % 1000) == 0):
+        if ((i % 5000) == 0):
             SCG.save_model_params("{}_params.pkl".format(result_tag))
             ###########################################
             # Sample and draw attention trajectories. #
@@ -424,23 +428,25 @@ def test_seq_cond_gen_ram(x_objs=['circle'], y_objs=[0], \
     ##############################
     # File tag, for output stuff #
     ##############################
-    result_tag = "{}VID_SCGRAM_{}".format(RESULT_PATH, res_tag)
+    result_tag = "{}AAA_VID_SCGRAM_{}".format(RESULT_PATH, res_tag)
 
     batch_size = 192
     traj_len = 15
-    im_dim = 32
+    im_dim = 48
     obs_dim = im_dim*im_dim
 
     # configure a trajectory generator
-    x_range = [-0.8,0.8]
-    y_range = [-0.8,0.8]
+    obj_scale = 0.15
+    im_box = 1.0 - obj_scale
+    x_range = [-im_box,im_box]
+    y_range = [-im_box,im_box]
     max_speed = 0.15
     TRAJ = TrajectoryGenerator(x_range=x_range, y_range=y_range, \
                                max_speed=max_speed)
     # configure object renderers for the allowed object types...
     obj_types = ['circle', 'cross', 'square', 't-up', 't-down',
                  't-left', 't-right']
-    OPTRS = get_object_painters(im_dim=im_dim, obj_types=obj_types)
+    OPTRS = get_object_painters(im_dim=im_dim, obj_types=obj_types, obj_scale=obj_scale)
 
     def generate_batch(num_samples, obj_type='circle'):
         # generate a minibatch of trajectories
@@ -713,25 +719,26 @@ def test_seq_cond_gen_ram(x_objs=['circle'], y_objs=[0], \
     out_file = open("{}_results.txt".format(result_tag), 'wb')
     out_file.flush()
     costs = [0. for i in range(10)]
-    #learn_rate = 0.0001
     learn_rate = 0.0001
     momentum = 0.95
+    kl_scale = 1.0
     for i in range(500000):
-        lr_scale = min(1.0, ((i+1) / 5000.0))
-        mom_scale = min(1.0, ((i+1) / 5000.0))
+        scale = min(1.0, ((i+1) / 5000.0))
         if (((i + 1) % 10000) == 0):
             learn_rate = learn_rate * 0.96
+        if ((i > 200000) and (i % 10000)):
+            kl_scale = kl_scale * 1.1
         # set sgd and objective function hyperparams for this update
-        SCG.set_sgd_params(lr=lr_scale*learn_rate, mom_1=mom_scale*momentum, mom_2=0.99)
-        SCG.set_lam_kld(lam_kld_q2p=2.0, lam_kld_p2q=0.2, \
+        SCG.set_sgd_params(lr=scale*learn_rate, mom_1=scale*momentum, mom_2=0.99)
+        SCG.set_lam_kld(lam_kld_q2p=kl_scale*2.0, lam_kld_p2q=kl_scale*0.2, \
                         lam_kld_amu=0.0, lam_kld_alv=0.1)
         # perform a minibatch update and record the cost for this batch
         Xb, Yb, Cb = generate_batch_multi(samp_count, xobjs=x_objs, yobjs=y_objs, img_scale=img_scale)
         result = SCG.train_joint(Xb, Yb)
         costs = [(costs[j] + result[j]) for j in range(len(result))]
         # output diagnostic information and checkpoint parameters, etc.
-        if ((i % 500) == 0):
-            costs = [(v / 500.0) for v in costs]
+        if ((i % 1000) == 0):
+            costs = [(v / 1000.0) for v in costs]
             str1 = "-- batch {0:d} --".format(i)
             str2 = "    total_cost: {0:.4f}".format(costs[0])
             str3 = "    nll_term  : {0:.4f}".format(costs[1])
@@ -745,7 +752,7 @@ def test_seq_cond_gen_ram(x_objs=['circle'], y_objs=[0], \
             out_file.write(joint_str+"\n")
             out_file.flush()
             costs = [0.0 for v in costs]
-        if ((i % 1000) == 0):
+        if ((i % 5000) == 0):
             SCG.save_model_params("{}_params.pkl".format(result_tag))
             ###########################################
             # Sample and draw attention trajectories. #
@@ -769,4 +776,4 @@ if __name__=="__main__":
     # Test SeqCondGenRAM
     #test_seq_cond_gen_ram(x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1")
     #test_seq_cond_gen_ram(x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2")
-    test_seq_cond_gen_ram(x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], res_tag="T3")
+    #test_seq_cond_gen_ram(x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], res_tag="T3")

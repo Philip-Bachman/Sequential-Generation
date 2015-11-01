@@ -435,8 +435,9 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
         self.dec_mlp_out = dec_mlp_out
         self.writer_mlp = writer_mlp
         # regularization noise on RNN states
-        self.rnn_noise = 0.025
+        self.rnn_noise = 0.02
 
+        self.params = []
         # record the sub-models that underlie this model
         self.children = [self.mix_enc_mlp, self.mix_dec_mlp, self.reader_mlp,
                          self.enc_mlp_in, self.enc_rnn, self.enc_mlp_out,
@@ -894,6 +895,8 @@ class IMoCLDrawModels(BaseRecurrent, Initializable, Random):
         # setup a "null pointer" that will point to the computation graph
         # for this model, which can be built by self.build_model_funcs()...
         self.cg = None
+
+        self.params = []
 
         # record the sub-models that underlie this model
         self.children = [self.mix_enc_mlp, self.mix_dec_mlp, self.mix_var_mlp,

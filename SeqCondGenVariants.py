@@ -1049,23 +1049,30 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
         #######################################################
         if self.glimpse_count == 1:
             # shortcut for single glimpse setting
-            read_out = self.reader_mlp.read(x, x, att_specs)
+            read_out = self.reader_mlp.apply(x, x, att_specs)
+            true_out = self.reader_mlp.apply(y, y, att_specs)
             att_map = self.reader_mlp.att_map(att_specs)
             read_img = self.reader_mlp.write(read_out, att_specs)
         else:
             # compute the outcomes of multiple simultaneous glimpses
             read_outs = []
+            true_outs = []
             att_maps = []
             read_imgs = []
             for g_num in range(self.glimpse_count):
                 as_start = g_num * self.att_spec_dim
                 as_end = (g_num + 1) * self.att_spec_dim
                 as_i = att_specs[:,as_start:as_end]
-                ro_i = self.reader_mlp.read(x, x, as_i)
+                ro_i = self.reader_mlp.apply(x, x, as_i)
+                to_i = self.reader_mlp.apply(y, y, as_i)
+                am_i = self.reader_mlp.att_map(as_i)
+                ri_i = self.reader_mlp.write(ro_i, as_i)
                 read_outs.append(ro_i)
-                att_maps.append(self.reader_mlp.att_map(as_i))
-                read_imgs.append(self.reader_mlp.write(ro_i, as_i))
+                true_outs.append(to_i)
+                att_maps.append(am_i)
+                read_imgs.append(ri_i)
             read_out = tensor.concatenate(read_outs, axis=1)
+            true_out = tensor.concatenate(true_outs, axis=1)
             att_map = tensor.concatenate(att_maps, axis=1)
             read_img = tensor.concatenate(read_imgs, axis=1)
 
@@ -1080,9 +1087,8 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
         #
         # Guide controller can condition on any available information.
         #
-        nll_grad = y - c_as_y # condition on NLL gradient information
         i_rav = self.rav_mlp_in.apply(tensor.concatenate( \
-                        [nll_grad, h_con, z_slf, read_out, att_specs], axis=1))
+                        [true_out, h_con, z_slf, read_out, att_specs], axis=1))
         h_rav, c_rav = self.rav_rnn.apply(states=h_rav, cells=c_rav, \
                                           inputs=i_rav, iterate=False)
 
