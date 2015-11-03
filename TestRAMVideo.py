@@ -376,7 +376,7 @@ def test_seq_cond_gen_s(x_objs=['circle'], y_objs=[0], \
         scale = min(1.0, ((i+1) / 5000.0))
         if (((i + 1) % 10000) == 0):
             learn_rate = learn_rate * 0.96
-        if ((i > 200000) and (i % 10000)):
+        if ((i > 200000) and ((i % 10000) == 0)):
             kl_scale = kl_scale * 1.1
         # set sgd and objective function hyperparams for this update
         SCG.set_sgd_params(lr=scale*learn_rate, mom_1=scale*momentum, mom_2=0.99)
@@ -697,7 +697,7 @@ def test_seq_cond_gen_ram(x_objs=['circle'], y_objs=[0], \
     # TEST SAVE/LOAD FUNCTIONALITY
     param_save_file = "{}_params.pkl".format(result_tag)
     #SCG.save_model_params(param_save_file)
-    #SCG.load_model_params(param_save_file)
+    SCG.load_model_params(param_save_file)
 
     # quick test of attention trajectory sampler
     samp_count = 32
@@ -719,14 +719,15 @@ def test_seq_cond_gen_ram(x_objs=['circle'], y_objs=[0], \
     out_file = open("{}_results.txt".format(result_tag), 'wb')
     out_file.flush()
     costs = [0. for i in range(10)]
-    learn_rate = 0.0001
+    #learn_rate = 0.0001
+    learn_rate = 0.00005
     momentum = 0.95
     kl_scale = 1.0
-    for i in range(500000):
+    for i in range(190001, 500000):
         scale = min(1.0, ((i+1) / 5000.0))
         if (((i + 1) % 10000) == 0):
             learn_rate = learn_rate * 0.96
-        if ((i > 200000) and (i % 10000)):
+        if ((i > 200000) and ((i % 10000) == 0)):
             kl_scale = kl_scale * 1.1
         # set sgd and objective function hyperparams for this update
         SCG.set_sgd_params(lr=scale*learn_rate, mom_1=scale*momentum, mom_2=0.99)
