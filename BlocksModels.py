@@ -808,7 +808,8 @@ class IMoOLDrawModels(BaseRecurrent, Initializable, Random):
         inputs = [self.x_in_sym, self.x_out_sym]
         # collect the outputs to return from this function
         outputs = [self.joint_cost, self.nll_bound, self.nll_term, \
-                   self.kld_q2p_term, self.kld_p2q_term, self.reg_term]
+                   self.kld_q2p_term, self.kld_p2q_term, self.reg_term, \
+                   self.kld_q2p_step]
 
         # compile the theano function
         print("Compiling model training/update function (for var params)...")

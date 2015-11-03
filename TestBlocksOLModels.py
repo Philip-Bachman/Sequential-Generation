@@ -98,7 +98,7 @@ def test_imoold_generation(step_type='add', attention=False):
     # Setup some parameters for the Iterative Refinement Model #
     ############################################################
     x_dim = Xtr.shape[1]
-    write_dim = 200
+    write_dim = 250
     enc_dim = 250
     dec_dim = 250
     mix_dim = 25
@@ -106,7 +106,7 @@ def test_imoold_generation(step_type='add', attention=False):
     if attention:
         n_iter = 64
     else:
-        n_iter = 20
+        n_iter = 32
 
     rnninits = {
         'weights_init': IsotropicGaussian(0.01),
@@ -183,7 +183,7 @@ def test_imoold_generation(step_type='add', attention=False):
     print("Beginning to train the model...")
     out_file = open("TBOLM_GEN_RESULTS_{}_{}.txt".format(step_type, att_tag), 'wb')
     costs = [0. for i in range(10)]
-    learn_rate = 0.0002
+    learn_rate = 0.00015
     momentum = 0.9
     batch_idx = np.arange(batch_size) + tr_samples
     for i in range(250000):
@@ -270,15 +270,15 @@ def test_imoold_generation_ft(step_type='add', attention=False):
     # Setup some parameters for the Iterative Refinement Model #
     ############################################################
     x_dim = Xtr.shape[1]
-    write_dim = 200
+    write_dim = 250
     enc_dim = 250
     dec_dim = 250
-    mix_dim = 20
+    mix_dim = 25
     z_dim = 100
     if attention:
         n_iter = 64
     else:
-        n_iter = 20
+        n_iter = 32
 
     rnninits = {
         'weights_init': IsotropicGaussian(0.01),
@@ -378,8 +378,8 @@ def test_imoold_generation_ft(step_type='add', attention=False):
         costs = [(costs[j] + result[j]) for j in range(len(result))]
 
         # diagnostics
-        if ((i % 200) == 0):
-            costs = [(v / 200.0) for v in costs]
+        if ((i % 250) == 0):
+            costs = [(v / 250.0) for v in costs]
             str1 = "-- batch {0:d} --".format(i)
             str2 = "    total_cost: {0:.4f}".format(costs[0])
             str3 = "    nll_bound : {0:.4f}".format(costs[1])
@@ -387,7 +387,8 @@ def test_imoold_generation_ft(step_type='add', attention=False):
             str5 = "    kld_q2p   : {0:.4f}".format(costs[3])
             str6 = "    kld_p2q   : {0:.4f}".format(costs[4])
             str7 = "    reg_term  : {0:.4f}".format(costs[5])
-            joint_str = "\n".join([str1, str2, str3, str4, str5, str6, str7])
+            str8 = "    step_klds : {0:s}".format(np.array_str(costs[6], precision=2))
+            joint_str = "\n".join([str1, str2, str3, str4, str5, str6, str7, str8])
             print(joint_str)
             out_file.write(joint_str+"\n")
             out_file.flush()
@@ -409,7 +410,7 @@ if __name__=="__main__":
     #######################################################################
     # Train "binarized MNIST" generative models (open loopish LSTM triad) #
     #######################################################################
-    test_imoold_generation(step_type='add', attention=False)
+    #test_imoold_generation(step_type='add', attention=False)
     #test_imoold_generation(step_type='jump', attention=False)
     #######################################################
     # Finetune parameters of the variational distribution #
