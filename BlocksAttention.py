@@ -217,9 +217,9 @@ class ZoomableAttention2d(object):
         log_gamma = l[:,4]
         # delta, sigma, and gamma are constrained to be non-negative. we'll
         # also "damp" their behavior by rescaling prior to exponential.
-        delta = T.exp(log_delta / 4.)
-        sigma = T.exp(log_sigma / 4.)
-        gamma = T.exp(log_gamma / 4.)
+        delta = T.exp(log_delta / 2.)
+        sigma = T.exp(log_sigma / 2.)
+        gamma = T.exp(log_gamma / 2.)
         return center_y, center_x, delta, sigma, gamma
 
 

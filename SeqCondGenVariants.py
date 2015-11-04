@@ -746,12 +746,6 @@ class SeqCondGenOBS(BaseRecurrent, Initializable, Random):
         self.writer_mlp = writer_mlp
         # set up stuff for dealing with stochastic attention placement
         self.att_spec_dim = 5 # dimension for attention specification
-        init_ary = numpy.zeros((5,))
-        init_ary[0] = 1.0 # use stochastic y coords
-        init_ary[1] = 1.0 # use stochastic x coords
-        init_ary[2] = 1.0 # use stochastic grid scale
-        self.att_noise_mask = shared_floatx_nans((5,), name='att_noise_mask')
-        self.att_noise_mask.set_value(init_ary.astype(theano.config.floatX))
         # grab handles for sequential read/write models
         self.con_mlp_in = con_mlp_in
         self.con_rnn = con_rnn
@@ -1030,10 +1024,9 @@ class SeqCondGenOBS(BaseRecurrent, Initializable, Random):
         u = self.theano_rng.normal(
                     size=(self.total_steps, batch_size, z_dim),
                     avg=0., std=1.)
-        u_all = self.att_noise * self.theano_rng.normal(
+        u_att = self.att_noise * self.theano_rng.normal(
                         size=(self.total_steps, batch_size, as_dim),
                         avg=0., std=1.)
-        u_att = self.att_noise_mask.dimshuffle('x','x',0) * u_all
 
         # run the multi-stage guided generative process
         cs, _, _, _, _, _, _, c_as_ys, nlls, kl_q2ps, kl_p2qs, kl_amus, kl_alvs, att_maps, read_imgs = \
@@ -1356,14 +1349,6 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
         self.writer_mlp = writer_mlp
         # set up stuff for dealing with stochastic attention placement
         self.att_spec_dim = 5 # dimension for attention specification
-        init_ary = numpy.zeros((5,))
-        init_ary[0] = 1.0 # use stochastic y coords
-        init_ary[1] = 1.0 # use stochastic x coords
-        init_ary[2] = 1.0 # use stochastic grid scale
-        init_ary[3] = 0.1 # tiny stochastic thing
-        init_ary[4] = 0.1 # tiny stochastic thing
-        self.att_noise_mask = shared_floatx_nans((5,), name='att_noise_mask')
-        self.att_noise_mask.set_value(init_ary.astype(theano.config.floatX))
         # grab handles for sequential read/write models
         self.con_mlp_in = con_mlp_in
         self.con_rnn = con_rnn
@@ -1386,7 +1371,7 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
         self.lam_kld_amu = theano.shared(value=ones_ary, name='lam_kld_amu')
         self.lam_kld_alv = theano.shared(value=ones_ary, name='lam_kld_alv')
         self.set_lam_kld(lam_kld_q2p=1.0, lam_kld_p2q=0.1, \
-                         lam_kld_amu=0.0, lam_kld_alv=0.0)
+                         lam_kld_amu=0.0, lam_kld_alv=0.1)
         # create shared variables for controlling optimization/updates
         self.lr = theano.shared(value=0.0001*ones_ary, name='lr')
         self.mom_1 = theano.shared(value=0.9*ones_ary, name='mom_1')
@@ -1568,12 +1553,16 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
                 self.con_mlp_out.apply(h_con, u_att)
         p_a_logvar = _p_a_logvar + tensor.log(self.att_noise[0])
         if self.use_rav:
-            # estimate conditional over attention spec given h_rav (from time t-1)
+            # treat attention placement as a "latent variable", and draw
+            # samples of it from the guide policy
             q_a_mean, _q_a_logvar, q_att_spec = \
                     self.rav_mlp_out.apply(h_rav, u_att)
             q_a_logvar = _q_a_logvar + tensor.log(self.att_noise[0])
         else:
+            # treat attention placement as a "deterministic action"
             q_a_mean, q_a_logvar, q_att_spec = p_a_mean, p_a_logvar, p_att_spec
+            p_att_spec = p_a_mean
+            q_att_spec = q_a_mean
         # compute KL(guide || primary) for attention control
         kl_q2p_a = tensor.sum(gaussian_kld(q_a_mean, q_a_logvar, \
                               p_a_mean, p_a_logvar), axis=1)
@@ -1600,6 +1589,9 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
         p_z_mean, p_z_logvar, p_z = \
                 self.obs_mlp_out.apply(h_obs, u)
         if self.use_var:
+            # use a "latent variable" communication channel between the
+            # observer and controller, and draw samples from the guide policy
+
             # update the guide observer RNN state
             i_var = self.var_mlp_in.apply( \
                     tensor.concatenate([true_out, read_out, att_spec, h_con], axis=1))
@@ -1609,7 +1601,7 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
             q_z_mean, q_z_logvar, q_z = \
                     self.var_mlp_out.apply(h_var, u)
         else:
-            # don't use samples form the guide observer -- don't use any noise
+            # use the observer -> controller channel as "deterministic action"
             q_z_mean, q_z_logvar, q_z = p_z_mean, p_z_logvar, p_z
             p_z = p_z_mean
             q_z = p_z_mean
