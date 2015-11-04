@@ -1566,12 +1566,12 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
         # estimate conditional over attention spec given h_con (from time t-1)
         p_a_mean, _p_a_logvar, p_att_spec = \
                 self.con_mlp_out.apply(h_con, u_att)
-        p_a_logvar = _p_a_logvar # + tensor.log(self.att_noise[0])
+        p_a_logvar = _p_a_logvar + tensor.log(self.att_noise[0])
         if self.use_rav:
             # estimate conditional over attention spec given h_rav (from time t-1)
             q_a_mean, _q_a_logvar, q_att_spec = \
                     self.rav_mlp_out.apply(h_rav, u_att)
-            q_a_logvar = _q_a_logvar # + tensor.log(self.att_noise[0])
+            q_a_logvar = _q_a_logvar + tensor.log(self.att_noise[0])
         else:
             q_a_mean, q_a_logvar, q_att_spec = p_a_mean, p_a_logvar, p_att_spec
         # compute KL(guide || primary) for attention control
@@ -1602,7 +1602,7 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
         if self.use_var:
             # update the guide observer RNN state
             i_var = self.var_mlp_in.apply( \
-                    tensor.concatenate([true_out, h_obs], axis=1))
+                    tensor.concatenate([true_out, read_out, att_spec, h_con], axis=1))
             h_var, c_var = self.var_rnn.apply(states=h_var, cells=c_var,
                                               inputs=i_var, iterate=False)
             # estimate guide conditional over z given h_var
@@ -1627,7 +1627,7 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
 
         if self.use_rav:
             # update the guide controller RNN state
-            i_rav = self.rav_mlp_in.apply(tensor.concatenate([y, h_con], axis=1))
+            i_rav = self.rav_mlp_in.apply(tensor.concatenate([y, z, h_obs], axis=1))
             h_rav, c_rav = self.rav_rnn.apply(states=h_rav, cells=c_rav, \
                                               inputs=i_rav, iterate=False)
 
