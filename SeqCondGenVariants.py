@@ -1324,7 +1324,7 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
                     total_steps, init_steps,
                     exit_rate, nll_weight,
                     x_dim, y_dim,
-                    use_var=True, use_rav=True,
+                    use_var, use_rav,
                     reader_mlp, writer_mlp,
                     con_mlp_in, con_rnn, con_mlp_out,
                     obs_mlp_in, obs_rnn, obs_mlp_out,

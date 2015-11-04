@@ -773,29 +773,42 @@ def test_seq_cond_gen_obs(x_objs=['circle'], y_objs=[0], \
 
 if __name__=="__main__":
     # TEST WITH NO GUIDE DISTRIBUTIONS
-    #test_seq_cond_gen_act(x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1")
-    #test_seq_cond_gen_act(x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2")
-    #test_seq_cond_gen_act(x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], res_tag="T3")
-    test_seq_cond_gen_all(use_var=False, use_rav=True, \
+    test_seq_cond_gen_all(use_var=False, use_rav=False, \
+                          x_objs=['cross', 'circle', 'circle'], y_objs=[0], \
+                          res_tag="T1")
+    test_seq_cond_gen_all(use_var=False, use_rav=False, \
+                          x_objs=['cross', 'circle'], y_objs=[0,1], \
+                          res_tag="T2")
+    test_seq_cond_gen_all(use_var=False, use_rav=False, \
                           x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
                           res_tag="T3")
     # TEST WITH GUIDE CONTROLLER ONLY
-    #test_seq_cond_gen_act(x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1")
-    #test_seq_cond_gen_act(x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2")
-    #test_seq_cond_gen_act(x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], res_tag="T3")
+    test_seq_cond_gen_all(use_var=False, use_rav=True, \
+                          x_objs=['cross', 'circle', 'circle'], y_objs=[0], \
+                          res_tag="T1")
+    test_seq_cond_gen_all(use_var=False, use_rav=True, \
+                          x_objs=['cross', 'circle'], y_objs=[0,1], \
+                          res_tag="T2")
     test_seq_cond_gen_all(use_var=False, use_rav=True, \
                           x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
                           res_tag="T3")
     # TEST WITH GUIDE OBSERVER ONLY
-    #test_seq_cond_gen_obs(x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1")
-    #test_seq_cond_gen_obs(x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2")
-    #test_seq_cond_gen_obs(x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], res_tag="T3")
+    test_seq_cond_gen_all(use_var=True, use_rav=False, \
+                          x_objs=['cross', 'circle', 'circle'], y_objs=[0], \
+                          res_tag="T1")
+    test_seq_cond_gen_all(use_var=True, use_rav=False, \
+                          x_objs=['cross', 'circle'], y_objs=[0,1], \
+                          res_tag="T2")
     test_seq_cond_gen_all(use_var=True, use_rav=False, \
                           x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
                           res_tag="T3")
     # TEST WITH GUIDE CONTROLLER AND OBSERVER
-    #test_seq_cond_gen_all(x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1")
-    #test_seq_cond_gen_all(x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2")
+    test_seq_cond_gen_all(use_var=True, use_rav=True, \
+                          x_objs=['cross', 'circle', 'circle'], y_objs=[0], \
+                          res_tag="T1")
+    test_seq_cond_gen_all(use_var=True, use_rav=True, \
+                          x_objs=['cross', 'circle'], y_objs=[0,1], \
+                          res_tag="T2")
     test_seq_cond_gen_all(use_var=True, use_rav=True, \
                           x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
                           res_tag="T3")
