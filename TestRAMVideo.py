@@ -51,16 +51,18 @@ BREAK_STR = """
 #############################################################################
 """
 
-def test_seq_cond_gen_s(x_objs=['circle'], y_objs=[0], \
-                               res_tag="AAA"):
+def test_seq_cond_gen_all(use_var=True, use_rav=True, \
+                          x_objs=['circle'], y_objs=[0], \
+                          res_tag="AAA"):
     ##############################
     # File tag, for output stuff #
     ##############################
-    result_tag = "{}AAA_VID_SCGS_{}".format(RESULT_PATH, res_tag)
+    var_flags = "UV{}_UR{}".format(int(use_var), int(use_rav))
+    result_tag = "{}VID_SCGALL_{}_{}".format(RESULT_PATH, var_flags, res_tag)
 
     batch_size = 192
     traj_len = 15
-    im_dim = 48
+    im_dim = 50
     obs_dim = im_dim*im_dim
 
     # configure a trajectory generator
@@ -143,11 +145,8 @@ def test_seq_cond_gen_s(x_objs=['circle'], y_objs=[0], \
     nll_weight = 0.5
     x_dim = obs_dim
     y_dim = obs_dim
-    z_att_dim = 128
-    z_slf_dim = 128
+    z_dim = 256
     att_spec_dim = 5
-    glimpse_count = 1
-    all_spec_dim = att_spec_dim * glimpse_count
     rnn_dim = 1024
     mlp_dim = 1024
 
@@ -228,59 +227,60 @@ def test_seq_cond_gen_s(x_objs=['circle'], y_objs=[0], \
                                       width=im_dim, height=im_dim, N=read_N,
                                       img_scale=img_scale, att_scale=0.33,
                                       **inits)
-    glimpse_dim = reader_mlp.read_dim # total number of "pixels" read by reader
-    all_read_dim = glimpse_count * glimpse_dim
+    read_dim = reader_mlp.read_dim # total number of "pixels" read by reader
 
     # MLP for updating belief state based on con_rnn
     writer_mlp = MLP([None, None], [rnn_dim, mlp_dim, obs_dim], \
                      name="writer_mlp", **inits)
 
-    # mlps for processing inputs to attention module
-    att_mlp_in = CondNet([Rectifier()], [z_att_dim, mlp_dim, all_spec_dim], \
-                          name="att_mlp_in", **inits)
-
     # mlps for processing inputs to LSTMs
     con_mlp_in = MLP([Identity()], \
-                     [(z_slf_dim + all_spec_dim + all_read_dim), 4*rnn_dim], \
+                     [(z_dim + rnn_dim), 4*rnn_dim], \
                      name="con_mlp_in", **inits)
+    obs_mlp_in = MLP([Identity()], \
+                     [(read_dim + att_spec_dim + rnn_dim), 4*rnn_dim], \
+                     name="obs_mlp_in", **inits)
+    var_mlp_in = MLP([Identity()], \
+                     [(read_dim + read_dim + att_spec_dim + rnn_dim), 4*rnn_dim], \
+                     name="var_mlp_in", **inits)
     rav_mlp_in = MLP([Identity()], \
-                     [(all_read_dim + rnn_dim + z_slf_dim + all_spec_dim + all_read_dim), 4*rnn_dim], \
+                     [(y_dim + z_dim + rnn_dim), 4*rnn_dim], \
                      name="rav_mlp_in", **inits)
 
     # mlps for turning LSTM outputs into conditionals over z_gen
-    con_mlp_out = CondNet([], [rnn_dim, (z_att_dim + z_slf_dim)], \
+    con_mlp_out = CondNet([Rectifier()], [rnn_dim, mlp_dim, att_spec_dim], \
                           name="con_mlp_out", **inits)
-    rav_mlp_out = CondNet([], [rnn_dim, (z_att_dim + z_slf_dim)], \
+    obs_mlp_out = CondNet([Rectifier()], [rnn_dim, mlp_dim, z_dim], \
+                          name="obs_mlp_out", **inits)
+    var_mlp_out = CondNet([Rectifier()], [rnn_dim, mlp_dim, z_dim], \
+                          name="var_mlp_out", **inits)
+    rav_mlp_out = CondNet([Rectifier()], [rnn_dim, mlp_dim, att_spec_dim], \
                           name="rav_mlp_out", **inits)
 
     # LSTMs for the actual LSTMs (obviously, perhaps)
     con_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=1.0, \
                          name="con_rnn", **rnninits)
+    obs_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=1.0, \
+                         name="obs_rnn", **rnninits)
+    var_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=1.0, \
+                         name="var_rnn", **rnninits)
     rav_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=1.0, \
                          name="rav_rnn", **rnninits)
 
-    SeqCondGen2dS_doc_str = \
+    SeqCondGenALL_doc_str = \
     """
-    SeqCondGen2dS -- develops beliefs subject to constraints on perception.
+    SeqCondGenALL -- constructs conditional densities under time constraints.
 
     This model sequentially constructs a conditional density estimate by taking
-    repeated glimpses at the input x, while formulating a hypothesis about the
+    repeated glimpses at the input x, and constructing a hypothesis about the
     output y. The objective is maximum likelihood for (x,y) pairs drawn from
-    some training set.
+    some training set. We learn a proper generative model, using variational
+    inference -- which can be interpreted as a sort of guided policy search.
 
     The input pairs (x, y) can be either "static" or "sequential". In the
     static case, the same x and y are used at every step of the hypothesis
     construction loop. In the sequential case, x and y can change at each step
     of the loop.
-
-    ***                                                                     ***
-    *** This version of the model assumes the use of a 2d attention module. ***
-    ***                                                                     ***
-    *** The attention module should accept 5d inputs for specifying the     ***
-    *** location, scale, etc. of the attention-based reader.                ***
-    ***                                                                     ***
-    *** Multiple glimpses can be taken in each processing step.             ***
-    ***                                                                     ***
 
     Parameters:
         x_and_y_are_seqs: boolean telling whether the conditioning information
@@ -293,31 +293,25 @@ def test_seq_cond_gen_s(x_objs=['circle'], y_objs=[0], \
                    **^^ THIS IS IGNORED WHEN USING STATIC INPUT ^^**
         x_dim: dimension of inputs on which to condition
         y_dim: dimension of outputs to predict
-        att_spec_dim: dimension of the specification for each glimpse
-        glimpse_dim: dimension of the read-out from each glimpse
-        glimpse_count: number of glimpses to take per step. the input and output
-                       dimensions of the relevant child networks should be set
-                       up to provide glimpse_count glimpse locations, and to
-                       receive glimpse_count attention read-outs.
+        use_var: whether to include "guide" distribution for observer
+        use_rav: whether to include "guide" distribution for controller
         reader_mlp: used for reading from the input
-                    -- this is a 2d attention module for which the attention
-                       location is specified by 5 inputs, the first two of
-                       which we will assume are (x,y) coordinates.
         writer_mlp: used for writing to the output prediction
-                    -- for "add" steps, this takes the controller's visible
-                       state as input and updates the current "belief" state.
-                       for "jump" steps, this converts the controller's memory
-                       state into the current "belief" state.
         con_mlp_in: preprocesses input to the "controller" LSTM
         con_rnn: the "controller" LSTM
-        con_mlp_out: CondNet for distribution over z given con_rnn
-        rav_mlp_in: preprocesses input to the "variational controller" LSTM
-        rav_rnn: the "variational controller" LSTM
+        con_mlp_out: CondNet for distribution over att spec given con_rnn
+        obs_mlp_in: preprocesses input to the "observer" LSTM
+        obs_rnn: the "observer" LSTM
+        obs_mlp_out: CondNet for distribution over z given gen_rnn
+        var_mlp_in: preprocesses input to the "guide observer" LSTM
+        var_rnn: the "guide observer" LSTM
+        var_mlp_out: CondNet for distribution over z given var_rnn
+        rav_mlp_in: preprocesses input to the "guide controller" LSTM
+        rav_rnn: the "guide controller" LSTM
         rav_mlp_out: CondNet for distribution over z given rav_rnn
-        att_mlp_in: CondNet to convert a subset of z into attention specs
     """
 
-    SCG = SeqCondGen2dS(
+    SCG = SeqCondGenALL(
                 x_and_y_are_seqs=True,
                 total_steps=total_steps,
                 init_steps=init_steps,
@@ -325,24 +319,34 @@ def test_seq_cond_gen_s(x_objs=['circle'], y_objs=[0], \
                 nll_weight=nll_weight,
                 x_dim=obs_dim,
                 y_dim=obs_dim,
-                att_spec_dim=att_spec_dim,
-                glimpse_dim=glimpse_dim,
-                glimpse_count=glimpse_count,
+                use_var=use_var,
+                use_rav=use_rav,
                 reader_mlp=reader_mlp,
                 writer_mlp=writer_mlp,
                 con_mlp_in=con_mlp_in,
                 con_mlp_out=con_mlp_out,
                 con_rnn=con_rnn,
+                obs_mlp_in=obs_mlp_in,
+                obs_mlp_out=obs_mlp_out,
+                obs_rnn=obs_rnn,
+                var_mlp_in=var_mlp_in,
+                var_mlp_out=var_mlp_out,
+                var_rnn=var_rnn,
                 rav_mlp_in=rav_mlp_in,
                 rav_mlp_out=rav_mlp_out,
                 rav_rnn=rav_rnn,
-                att_mlp_in=att_mlp_in)
+                att_noise=0.05)
     SCG.initialize()
 
     compile_start_time = time.time()
 
     # build the attention trajectory sampler
     SCG.build_attention_funcs()
+
+    # TEST SAVE/LOAD FUNCTIONALITY
+    param_save_file = "{}_params.pkl".format(result_tag)
+    #SCG.save_model_params(param_save_file)
+    #SCG.load_model_params(param_save_file)
 
     # quick test of attention trajectory sampler
     samp_count = 32
@@ -357,11 +361,6 @@ def test_seq_cond_gen_s(x_objs=['circle'], y_objs=[0], \
     compile_minutes = (compile_end_time - compile_start_time) / 60.0
     print("THEANO COMPILE TIME (MIN): {}".format(compile_minutes))
 
-    # TEST SAVE/LOAD FUNCTIONALITY
-    param_save_file = "{}_params.pkl".format(result_tag)
-    #SCG.save_model_params(param_save_file)
-    #SCG.load_model_params(param_save_file)
-
     ################################################################
     # Apply some updates, to check that they aren't totally broken #
     ################################################################
@@ -370,17 +369,19 @@ def test_seq_cond_gen_s(x_objs=['circle'], y_objs=[0], \
     out_file.flush()
     costs = [0. for i in range(10)]
     learn_rate = 0.0001
-    momentum = 0.95
+    #learn_rate = 0.00005
+    momentum = 0.9
     kl_scale = 1.0
     for i in range(500000):
         scale = min(1.0, ((i+1) / 5000.0))
         if (((i + 1) % 10000) == 0):
             learn_rate = learn_rate * 0.96
-        if ((i > 200000) and ((i % 10000) == 0)):
+        if ((i > 150000) and ((i % 20000) == 0)):
             kl_scale = kl_scale * 1.1
         # set sgd and objective function hyperparams for this update
         SCG.set_sgd_params(lr=scale*learn_rate, mom_1=scale*momentum, mom_2=0.99)
-        SCG.set_lam_kld(lam_kld_q2p=kl_scale*2.0, lam_kld_p2q=kl_scale*0.2)
+        SCG.set_lam_kld(lam_kld_q2p=kl_scale*2.0, lam_kld_p2q=kl_scale*0.2, \
+                        lam_kld_amu=0.0, lam_kld_alv=0.1)
         # perform a minibatch update and record the cost for this batch
         Xb, Yb, Cb = generate_batch_multi(samp_count, xobjs=x_objs, yobjs=y_objs, img_scale=img_scale)
         result = SCG.train_joint(Xb, Yb)
@@ -393,8 +394,10 @@ def test_seq_cond_gen_s(x_objs=['circle'], y_objs=[0], \
             str3 = "    nll_term  : {0:.4f}".format(costs[1])
             str4 = "    kld_q2p   : {0:.4f}".format(costs[2])
             str5 = "    kld_p2q   : {0:.4f}".format(costs[3])
-            str6 = "    reg_term  : {0:.4f}".format(costs[4])
-            joint_str = "\n".join([str1, str2, str3, str4, str5, str6])
+            str6 = "    kld_amu   : {0:.4f}".format(costs[4])
+            str7 = "    kld_alv   : {0:.4f}".format(costs[5])
+            str8 = "    reg_term  : {0:.4f}".format(costs[6])
+            joint_str = "\n".join([str1, str2, str3, str4, str5, str6, str7, str8])
             print(joint_str)
             out_file.write(joint_str+"\n")
             out_file.flush()
@@ -408,7 +411,10 @@ def test_seq_cond_gen_s(x_objs=['circle'], y_objs=[0], \
             Xb, Yb, Cb = generate_batch_multi(samp_count, xobjs=x_objs, yobjs=y_objs, img_scale=img_scale)
             result = SCG.sample_attention(Xb, Yb)
             post_tag = "b{0:d}".format(i)
+            #visualize_attention(result, pre_tag=result_tag, post_tag=post_tag)
             visualize_attention_joint(result, pre_tag=result_tag, post_tag=post_tag)
+
+
 
 
 BREAK_STR = """
@@ -423,12 +429,12 @@ BREAK_STR = """
 """
 
 
-def test_seq_cond_gen_ram(x_objs=['circle'], y_objs=[0], \
+def test_seq_cond_gen_obs(x_objs=['circle'], y_objs=[0], \
                           res_tag="AAA"):
     ##############################
     # File tag, for output stuff #
     ##############################
-    result_tag = "{}AAA_VID_SCGRAM_{}".format(RESULT_PATH, res_tag)
+    result_tag = "{}VID_SCGOBS_{}".format(RESULT_PATH, res_tag)
 
     batch_size = 192
     traj_len = 15
@@ -610,27 +616,27 @@ def test_seq_cond_gen_ram(x_objs=['circle'], y_objs=[0], \
     var_mlp_in = MLP([Identity()], \
                      [(read_dim + read_dim + att_spec_dim + rnn_dim), 4*rnn_dim], \
                      name="var_mlp_in", **inits)
-    gen_mlp_in = MLP([Identity()], \
+    obs_mlp_in = MLP([Identity()], \
                      [(read_dim + att_spec_dim + rnn_dim), 4*rnn_dim], \
-                     name="gen_mlp_in", **inits)
+                     name="obs_mlp_in", **inits)
 
     # mlps for turning LSTM outputs into conditionals over z_gen
     con_mlp_out = CondNet([Rectifier()], [rnn_dim, mlp_dim, att_spec_dim], \
                           name="con_mlp_out", **inits)
-    gen_mlp_out = CondNet([], [rnn_dim, z_dim], name="gen_mlp_out", **inits)
+    obs_mlp_out = CondNet([], [rnn_dim, z_dim], name="obs_mlp_out", **inits)
     var_mlp_out = CondNet([], [rnn_dim, z_dim], name="var_mlp_out", **inits)
 
     # LSTMs for the actual LSTMs (obviously, perhaps)
     con_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=1.0, \
                          name="con_rnn", **rnninits)
-    gen_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=1.0, \
-                         name="gen_rnn", **rnninits)
+    obs_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=1.0, \
+                         name="obs_rnn", **rnninits)
     var_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=1.0, \
                          name="var_rnn", **rnninits)
 
-    SeqCondGenRAM_doc_str = \
+    SeqCondGenOBS_doc_str = \
     """
-    SeqCondGenRAM -- constructs conditional densities under time constraints.
+    SeqCondGenOBS -- constructs conditional densities under time constraints.
 
     This model sequentially constructs a conditional density estimate by taking
     repeated glimpses at the input x, and constructing a hypothesis about the
@@ -659,15 +665,15 @@ def test_seq_cond_gen_ram(x_objs=['circle'], y_objs=[0], \
         con_mlp_in: preprocesses input to the "controller" LSTM
         con_rnn: the "controller" LSTM
         con_mlp_out: CondNet for distribution over att spec given con_rnn
-        gen_mlp_in: preprocesses input to the "generator" LSTM
-        gen_rnn: the "generator" LSTM
-        gen_mlp_out: CondNet for distribution over z given gen_rnn
+        obs_mlp_in: preprocesses input to the "observer" LSTM
+        obs_rnn: the "observer" LSTM
+        obs_mlp_out: CondNet for distribution over z given gen_rnn
         var_mlp_in: preprocesses input to the "variational" LSTM
         var_rnn: the "variational" LSTM
         var_mlp_out: CondNet for distribution over z given gen_rnn
     """
 
-    SCG = SeqCondGenRAM(
+    SCG = SeqCondGenOBS(
                 x_and_y_are_seqs=True,
                 total_steps=total_steps,
                 init_steps=init_steps,
@@ -680,9 +686,9 @@ def test_seq_cond_gen_ram(x_objs=['circle'], y_objs=[0], \
                 con_mlp_in=con_mlp_in,
                 con_mlp_out=con_mlp_out,
                 con_rnn=con_rnn,
-                gen_mlp_in=gen_mlp_in,
-                gen_mlp_out=gen_mlp_out,
-                gen_rnn=gen_rnn,
+                obs_mlp_in=obs_mlp_in,
+                obs_mlp_out=obs_mlp_out,
+                obs_rnn=obs_rnn,
                 var_mlp_in=var_mlp_in,
                 var_mlp_out=var_mlp_out,
                 var_rnn=var_rnn,
@@ -697,7 +703,7 @@ def test_seq_cond_gen_ram(x_objs=['circle'], y_objs=[0], \
     # TEST SAVE/LOAD FUNCTIONALITY
     param_save_file = "{}_params.pkl".format(result_tag)
     #SCG.save_model_params(param_save_file)
-    SCG.load_model_params(param_save_file)
+    #SCG.load_model_params(param_save_file)
 
     # quick test of attention trajectory sampler
     samp_count = 32
@@ -719,11 +725,11 @@ def test_seq_cond_gen_ram(x_objs=['circle'], y_objs=[0], \
     out_file = open("{}_results.txt".format(result_tag), 'wb')
     out_file.flush()
     costs = [0. for i in range(10)]
-    #learn_rate = 0.0001
-    learn_rate = 0.00005
+    learn_rate = 0.0001
+    #learn_rate = 0.00005
     momentum = 0.95
     kl_scale = 1.0
-    for i in range(190001, 500000):
+    for i in range(500000):
         scale = min(1.0, ((i+1) / 5000.0))
         if (((i + 1) % 10000) == 0):
             learn_rate = learn_rate * 0.96
@@ -766,15 +772,30 @@ def test_seq_cond_gen_ram(x_objs=['circle'], y_objs=[0], \
             visualize_attention_joint(result, pre_tag=result_tag, post_tag=post_tag)
 
 if __name__=="__main__":
-    # Test SeqCondGenX
-    #test_seq_cond_gen_x(x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1")
-    #test_seq_cond_gen_x(x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2")
-    #test_seq_cond_gen_x(x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], res_tag="T3")
-    # Test SeqCondGenS
-    #test_seq_cond_gen_s(x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1")
-    #test_seq_cond_gen_s(x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2")
-    #test_seq_cond_gen_s(x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], res_tag="T3")
-    # Test SeqCondGenRAM
-    #test_seq_cond_gen_ram(x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1")
-    #test_seq_cond_gen_ram(x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2")
-    test_seq_cond_gen_ram(x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], res_tag="T3")
+    # TEST WITH NO GUIDE DISTRIBUTIONS
+    #test_seq_cond_gen_act(x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1")
+    #test_seq_cond_gen_act(x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2")
+    #test_seq_cond_gen_act(x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], res_tag="T3")
+    test_seq_cond_gen_all(use_var=False, use_rav=True, \
+                          x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
+                          res_tag="T3")
+    # TEST WITH GUIDE CONTROLLER ONLY
+    #test_seq_cond_gen_act(x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1")
+    #test_seq_cond_gen_act(x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2")
+    #test_seq_cond_gen_act(x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], res_tag="T3")
+    test_seq_cond_gen_all(use_var=False, use_rav=True, \
+                          x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
+                          res_tag="T3")
+    # TEST WITH GUIDE OBSERVER ONLY
+    #test_seq_cond_gen_obs(x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1")
+    #test_seq_cond_gen_obs(x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2")
+    #test_seq_cond_gen_obs(x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], res_tag="T3")
+    test_seq_cond_gen_all(use_var=True, use_rav=False, \
+                          x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
+                          res_tag="T3")
+    # TEST WITH GUIDE CONTROLLER AND OBSERVER
+    #test_seq_cond_gen_all(x_objs=['cross', 'circle', 'circle'], y_objs=[0], res_tag="T1")
+    #test_seq_cond_gen_all(x_objs=['cross', 'circle'], y_objs=[0,1], res_tag="T2")
+    test_seq_cond_gen_all(use_var=True, use_rav=True, \
+                          x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
+                          res_tag="T3")

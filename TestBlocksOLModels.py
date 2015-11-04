@@ -410,7 +410,7 @@ if __name__=="__main__":
     #######################################################################
     # Train "binarized MNIST" generative models (open loopish LSTM triad) #
     #######################################################################
-    #test_imoold_generation(step_type='add', attention=False)
+    test_imoold_generation(step_type='add', attention=False)
     #test_imoold_generation(step_type='jump', attention=False)
     #######################################################
     # Finetune parameters of the variational distribution #
