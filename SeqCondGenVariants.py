@@ -1609,8 +1609,10 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
             q_z_mean, q_z_logvar, q_z = \
                     self.var_mlp_out.apply(h_var, u)
         else:
-            # don't use samples form the guide observer
+            # don't use samples form the guide observer -- don't use any noise
             q_z_mean, q_z_logvar, q_z = p_z_mean, p_z_logvar, p_z
+            p_z = p_z_mean
+            q_z = p_z_mean
         # compute KL(guide || primary) for channel: observer -> controller
         kl_q2p_z = tensor.sum(gaussian_kld(q_z_mean, q_z_logvar, \
                               p_z_mean, p_z_logvar), axis=1)
