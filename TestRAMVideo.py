@@ -241,10 +241,10 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, \
                      [(read_dim + att_spec_dim + rnn_dim), 4*rnn_dim], \
                      name="obs_mlp_in", **inits)
     var_mlp_in = MLP([Identity()], \
-                     [(read_dim + read_dim + att_spec_dim + rnn_dim), 4*rnn_dim], \
+                     [(read_dim + rnn_dim), 4*rnn_dim], \
                      name="var_mlp_in", **inits)
     rav_mlp_in = MLP([Identity()], \
-                     [(y_dim + z_dim + rnn_dim), 4*rnn_dim], \
+                     [(y_dim + rnn_dim), 4*rnn_dim], \
                      name="rav_mlp_in", **inits)
 
     # mlps for turning LSTM outputs into conditionals over z_gen
@@ -335,7 +335,7 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, \
                 rav_mlp_in=rav_mlp_in,
                 rav_mlp_out=rav_mlp_out,
                 rav_rnn=rav_rnn,
-                att_noise=0.05)
+                att_noise=0.02)
     SCG.initialize()
 
     compile_start_time = time.time()
@@ -376,7 +376,7 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, \
         scale = min(1.0, ((i+1) / 5000.0))
         if (((i + 1) % 10000) == 0):
             learn_rate = learn_rate * 0.96
-        if ((i > 150000) and ((i % 20000) == 0)):
+        if ((i > 150000) and ((i % 25000) == 0)):
             kl_scale = kl_scale * 1.1
         # set sgd and objective function hyperparams for this update
         SCG.set_sgd_params(lr=scale*learn_rate, mom_1=scale*momentum, mom_2=0.99)
@@ -781,9 +781,9 @@ if __name__=="__main__":
     # test_seq_cond_gen_all(use_var=False, use_rav=False, \
     #                       x_objs=['cross', 'circle'], y_objs=[0,1], \
     #                       res_tag="T2")
-    # test_seq_cond_gen_all(use_var=False, use_rav=False, \
-    #                       x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
-    #                       res_tag="T3")
+    test_seq_cond_gen_all(use_var=False, use_rav=False, \
+                          x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
+                          res_tag="T3")
     ###################################
     # TEST WITH GUIDE CONTROLLER ONLY #
     ###################################
@@ -817,6 +817,6 @@ if __name__=="__main__":
     # test_seq_cond_gen_all(use_var=True, use_rav=True, \
     #                       x_objs=['cross', 'circle'], y_objs=[0,1], \
     #                       res_tag="T2")
-    test_seq_cond_gen_all(use_var=True, use_rav=True, \
-                          x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
-                          res_tag="T3")
+    # test_seq_cond_gen_all(use_var=True, use_rav=True, \
+    #                       x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
+    #                       res_tag="T3")

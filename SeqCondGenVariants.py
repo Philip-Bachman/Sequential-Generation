@@ -1271,6 +1271,8 @@ class SeqCondGenOBS(BaseRecurrent, Initializable, Random):
         pickle_file.close()
         return
 
+
+
 ################################
 ################################
 ## ATTENTION-BASED PERCEPTION ##
@@ -1600,7 +1602,7 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
         if self.use_var:
             # update the guide observer RNN state
             i_var = self.var_mlp_in.apply( \
-                    tensor.concatenate([true_out, read_out, att_spec, h_con], axis=1))
+                    tensor.concatenate([true_out, h_obs], axis=1))
             h_var, c_var = self.var_rnn.apply(states=h_var, cells=c_var,
                                               inputs=i_var, iterate=False)
             # estimate guide conditional over z given h_var
@@ -1625,7 +1627,7 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
 
         if self.use_rav:
             # update the guide controller RNN state
-            i_rav = self.rav_mlp_in.apply(tensor.concatenate([y, z, h_obs], axis=1))
+            i_rav = self.rav_mlp_in.apply(tensor.concatenate([y, h_con], axis=1))
             h_rav, c_rav = self.rav_rnn.apply(states=h_rav, cells=c_rav, \
                                               inputs=i_rav, iterate=False)
 
