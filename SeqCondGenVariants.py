@@ -1391,7 +1391,8 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
         self.mom_2 = theano.shared(value=0.99*ones_ary, name='mom_2')
 
         # set noise scale for the attention placement
-        self.att_noise = att_noise
+        noise_ary = to_fX(att_noise * ones_ary)
+        self.att_noise = theano.shared(value=noise_ary, name='att_noise')
 
         # setup a "null pointer" that will point to the computation graph
         # for this model, which can be built by self.build_model_funcs()...
@@ -1561,12 +1562,14 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
         y_d = y - c_as_y
 
         # estimate conditional over attention spec given h_con (from time t-1)
-        p_a_mean, p_a_logvar, p_att_spec = \
+        p_a_mean, _p_a_logvar, p_att_spec = \
                 self.con_mlp_out.apply(h_con, u_att)
+        p_a_logvar = _p_a_logvar + tensor.log(self.att_noise[0])
         if self.use_rav:
             # estimate conditional over attention spec given h_rav (from time t-1)
-            q_a_mean, q_a_logvar, q_att_spec = \
+            q_a_mean, _q_a_logvar, q_att_spec = \
                     self.rav_mlp_out.apply(h_rav, u_att)
+            q_a_logvar = _q_a_logvar + tensor.log(self.att_noise[0])
         else:
             q_a_mean, q_a_logvar, q_att_spec = p_a_mean, p_a_logvar, p_att_spec
         # compute KL(guide || primary) for attention control
@@ -1685,10 +1688,9 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
         u = self.theano_rng.normal(
                     size=(self.total_steps, batch_size, z_dim),
                     avg=0., std=1.)
-        u_all = self.att_noise * self.theano_rng.normal(
+        u_att = self.att_noise[0] * self.theano_rng.normal(
                         size=(self.total_steps, batch_size, as_dim),
                         avg=0., std=1.)
-        u_att = self.att_noise_mask.dimshuffle('x','x',0) * u_all
 
         # run the multi-stage guided generative process
         cs, _, _, _, _, _, _, _, _, c_as_ys, nlls, kl_q2ps, kl_p2qs, kl_amus, kl_alvs, att_maps, read_imgs = \
