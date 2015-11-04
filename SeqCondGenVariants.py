@@ -1566,12 +1566,12 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
         # estimate conditional over attention spec given h_con (from time t-1)
         p_a_mean, _p_a_logvar, p_att_spec = \
                 self.con_mlp_out.apply(h_con, u_att)
-        p_a_logvar = _p_a_logvar + tensor.log(self.att_noise[0])
+        p_a_logvar = _p_a_logvar # + tensor.log(self.att_noise[0])
         if self.use_rav:
             # estimate conditional over attention spec given h_rav (from time t-1)
             q_a_mean, _q_a_logvar, q_att_spec = \
                     self.rav_mlp_out.apply(h_rav, u_att)
-            q_a_logvar = _q_a_logvar + tensor.log(self.att_noise[0])
+            q_a_logvar = _q_a_logvar # + tensor.log(self.att_noise[0])
         else:
             q_a_mean, q_a_logvar, q_att_spec = p_a_mean, p_a_logvar, p_att_spec
         # compute KL(guide || primary) for attention control
