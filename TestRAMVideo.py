@@ -212,11 +212,11 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, \
         return
 
     rnninits = {
-        'weights_init': IsotropicGaussian(0.01),
+        'weights_init': IsotropicGaussian(0.02),
         'biases_init': Constant(0.),
     }
     inits = {
-        'weights_init': IsotropicGaussian(0.01),
+        'weights_init': IsotropicGaussian(0.02),
         'biases_init': Constant(0.),
     }
 
@@ -230,7 +230,7 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, \
     read_dim = reader_mlp.read_dim # total number of "pixels" read by reader
 
     # MLP for updating belief state based on con_rnn
-    writer_mlp = MLP([Rectifier(), Rectifier(), None], [rnn_dim, mlp_dim, mlp_dim, obs_dim], \
+    writer_mlp = MLP([Identity()], [rnn_dim, obs_dim], \
                      name="writer_mlp", **inits)
 
     # mlps for processing inputs to LSTMs
@@ -465,6 +465,6 @@ if __name__=="__main__":
     # test_seq_cond_gen_all(use_var=True, use_rav=True, \
     #                       x_objs=['cross', 'circle'], y_objs=[0,1], \
     #                       res_tag="T2")
-    #test_seq_cond_gen_all(use_var=True, use_rav=True, \
-    #                      x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
-    #                      res_tag="T3")
+    test_seq_cond_gen_all(use_var=True, use_rav=True, \
+                          x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
+                          res_tag="T3")
