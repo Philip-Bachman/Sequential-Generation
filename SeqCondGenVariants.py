@@ -20,7 +20,7 @@ from blocks.utils import shared_floatx_nans
 from blocks.roles import add_role, WEIGHT, BIAS, PARAMETER, AUXILIARY
 
 
-from DKCode import get_adam_updates
+from DKCode import get_adam_updates, get_adam_updates_X
 from HelperFuncs import constFX, to_fX
 from LogPDFs import log_prob_bernoulli, gaussian_kld, gaussian_ent, \
                     gaussian_logvar_kld, gaussian_mean_kld
@@ -1769,16 +1769,21 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
             self.joint_grads[p] = grad_list[i]
 
         # construct the updates for all trainable parameters
-        self.joint_updates = get_adam_updates(params=self.joint_params, \
+        self.joint_updates, applied_updates = get_adam_updates_X( \
+                params=self.joint_params, \
                 grads=self.joint_grads, alpha=self.lr, \
                 beta1=self.mom_1, beta2=self.mom_2, \
                 mom2_init=1e-3, smoothing=1e-5, max_grad_norm=10.0)
+
+        # get the total grad norm and (post ADAM scaling) update norm.
+        self.grad_norm = sum([tensor.sum(g**2.0) for g in grad_list])
+        self.update_norm = sum([tensor.sum(u**2.0) for u in applied_updates])
 
         # collect the outputs to return from this function
         outputs = [self.joint_cost, self.nll_term, \
                    self.kld_q2p_term, self.kld_p2q_term, \
                    self.kld_amu_term, self.kld_alv_term, \
-                   self.reg_term]
+                   self.reg_term, self.grad_norm, self.update_norm]
         # collect the required inputs
         inputs = [x_sym, y_sym]
 

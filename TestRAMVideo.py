@@ -372,6 +372,7 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, \
     #learn_rate = 0.00005
     momentum = 0.9
     kl_scale = 1.0
+    cost_iters = 0
     for i in range(500000):
         scale = min(1.0, ((i+1) / 5000.0))
         if (((i + 1) % 10000) == 0):
@@ -386,9 +387,12 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, \
         Xb, Yb, Cb = generate_batch_multi(samp_count, xobjs=x_objs, yobjs=y_objs, img_scale=img_scale)
         result = SCG.train_joint(Xb, Yb)
         costs = [(costs[j] + result[j]) for j in range(len(result))]
+        cost_iters += 1
         # output diagnostic information and checkpoint parameters, etc.
-        if ((i % 1000) == 0):
-            costs = [(v / 1000.0) for v in costs]
+        if (((i % 1000) == 0) or \
+            ((i < 100) and ((i % 5) == 0)) or \
+            ((i < 1000) and ((i % 20) == 0))):
+            costs = [(v / float(cost_iters)) for v in costs]
             str1 = "-- batch {0:d} --".format(i)
             str2 = "    total_cost: {0:.4f}".format(costs[0])
             str3 = "    nll_term  : {0:.4f}".format(costs[1])
@@ -397,11 +401,14 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, \
             str6 = "    kld_amu   : {0:.4f}".format(costs[4])
             str7 = "    kld_alv   : {0:.4f}".format(costs[5])
             str8 = "    reg_term  : {0:.4f}".format(costs[6])
-            joint_str = "\n".join([str1, str2, str3, str4, str5, str6, str7, str8])
+            str9 = "    grad_norm : {0:.4f}".format(costs[7])
+            str10 = "    updt_norm : {0:.4f}".format(costs[8])
+            joint_str = "\n".join([str1, str2, str3, str4, str5, str6, str7, str8, str9, str10])
             print(joint_str)
             out_file.write(joint_str+"\n")
             out_file.flush()
             costs = [0.0 for v in costs]
+            cost_iters = 0
         if ((i % 5000) == 0):
             SCG.save_model_params("{}_params.pkl".format(result_tag))
             ###########################################
@@ -413,7 +420,6 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, \
             post_tag = "b{0:d}".format(i)
             #visualize_attention(result, pre_tag=result_tag, post_tag=post_tag)
             visualize_attention_joint(result, pre_tag=result_tag, post_tag=post_tag)
-
 
 
 
