@@ -11,6 +11,7 @@ import numpy as np
 import numpy.random as npr
 from collections import OrderedDict
 import time
+import tarfile
 
 # theano business
 import theano
@@ -58,7 +59,15 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, \
     # File tag, for output stuff #
     ##############################
     var_flags = "UV{}_UR{}".format(int(use_var), int(use_rav))
-    result_tag = "{}NEW_VID_SCGALL_{}_{}".format(RESULT_PATH, var_flags, res_tag)
+    result_tag = "{}WEN_VID_SCGALL_{}_{}".format(RESULT_PATH, var_flags, res_tag)
+
+    # begin by saving an archive of the "main" code files for this test
+    tar_name = "{}_code.tar".format(result_tag)
+    code_tar = tarfile.open(name=tar_name, mode='w')
+    code_tar.add('BlocksAttention.py')
+    code_tar.add('SeqCondGenVariants.py')
+    code_tar.add('TestRAMVideo.py')
+    code_tar.close()
 
     batch_size = 192
     traj_len = 15
@@ -335,7 +344,7 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, \
                 rav_mlp_in=rav_mlp_in,
                 rav_mlp_out=rav_mlp_out,
                 rav_rnn=rav_rnn,
-                att_noise=0.02)
+                com_noise=0.1, att_noise=0.02)
     SCG.initialize()
 
     compile_start_time = time.time()
