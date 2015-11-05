@@ -961,13 +961,13 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
         # estimate conditional over attention spec given h_con (from time t-1)
         p_a_mean, _p_a_logvar, p_att_spec = \
                 self.con_mlp_out.apply(h_con, u_att)
-        p_a_logvar = _p_a_logvar + tensor.log(self.att_noise[0])
+        p_a_logvar = _p_a_logvar + 2.0*tensor.log(self.att_noise[0])
         if self.use_rav:
             # treat attention placement as a "latent variable", and draw
             # samples of it from the guide policy
             q_a_mean, _q_a_logvar, q_att_spec = \
                     self.rav_mlp_out.apply(h_rav, u_att)
-            q_a_logvar = _q_a_logvar + tensor.log(self.att_noise[0])
+            q_a_logvar = _q_a_logvar + 2.0*tensor.log(self.att_noise[0])
         else:
             # treat attention placement as a "deterministic action"
             q_a_mean, q_a_logvar, q_att_spec = p_a_mean, p_a_logvar, p_att_spec
@@ -998,7 +998,7 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
         # estimate primary conditional over z given h_gen
         p_z_mean, _p_z_logvar, p_z = \
                 self.obs_mlp_out.apply(h_obs, u_com)
-        p_z_logvar = _p_z_logvar + tensor.log(self.com_noise[0])
+        p_z_logvar = _p_z_logvar + 2.0*tensor.log(self.com_noise[0])
         if self.use_var:
             # use a "latent variable" communication channel between the
             # observer and controller, and draw samples from the guide policy
@@ -1011,7 +1011,7 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
             # estimate guide conditional over z given h_var
             q_z_mean, _q_z_logvar, q_z = \
                     self.var_mlp_out.apply(h_var, u_com)
-            q_z_logvar = _q_z_logvar + tensor.log(self.com_noise[0])
+            q_z_logvar = _q_z_logvar + 2.0*tensor.log(self.com_noise[0])
         else:
             # use the observer -> controller channel as "deterministic action"
             q_z_mean, q_z_logvar, q_z = p_z_mean, p_z_logvar, p_z
