@@ -59,7 +59,7 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, \
     # File tag, for output stuff #
     ##############################
     var_flags = "UV{}_UR{}".format(int(use_var), int(use_rav))
-    result_tag = "{}WEN_VID_SCGALL_{}_{}".format(RESULT_PATH, var_flags, res_tag)
+    result_tag = "{}XEN_VID_SCGALL_{}_{}".format(RESULT_PATH, var_flags, res_tag)
 
     # begin by saving an archive of the "main" code files for this test
     tar_name = "{}_code.tar".format(result_tag)
@@ -344,7 +344,7 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, \
                 rav_mlp_in=rav_mlp_in,
                 rav_mlp_out=rav_mlp_out,
                 rav_rnn=rav_rnn,
-                com_noise=0.1, att_noise=0.02)
+                com_noise=0.3, att_noise=0.1)
     SCG.initialize()
 
     compile_start_time = time.time()
@@ -390,8 +390,8 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, \
             kl_scale = kl_scale + 0.1
         # set sgd and objective function hyperparams for this update
         SCG.set_sgd_params(lr=scale*learn_rate, mom_1=scale*momentum, mom_2=0.98)
-        SCG.set_lam_kld(lam_kld_q2p=kl_scale*2.0, lam_kld_p2q=kl_scale*0.2, \
-                        lam_kld_amu=0.0, lam_kld_alv=0.1)
+        SCG.set_lam_kld(lam_kld_q2p=kl_scale*1.0, lam_kld_p2q=kl_scale*0.1, \
+                        lam_kld_amu=0.0, lam_kld_alv=0.0)
         # perform a minibatch update and record the cost for this batch
         Xb, Yb, Cb = generate_batch_multi(samp_count, xobjs=x_objs, yobjs=y_objs, img_scale=img_scale)
         result = SCG.train_joint(Xb, Yb)

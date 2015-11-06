@@ -959,15 +959,15 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
         y_d = y - c_as_y
 
         # estimate conditional over attention spec given h_con (from time t-1)
-        p_a_mean, _p_a_logvar, p_att_spec = \
+        p_a_mean, p_a_logvar, p_att_spec = \
                 self.con_mlp_out.apply(h_con, u_att)
-        p_a_logvar = _p_a_logvar + tensor.log(self.att_noise[0])
+        #p_a_logvar = _p_a_logvar + 2.0*tensor.log(self.att_noise[0])
         if self.use_rav:
             # treat attention placement as a "latent variable", and draw
             # samples of it from the guide policy
-            q_a_mean, _q_a_logvar, q_att_spec = \
+            q_a_mean, q_a_logvar, q_att_spec = \
                     self.rav_mlp_out.apply(h_rav, u_att)
-            q_a_logvar = _q_a_logvar + tensor.log(self.att_noise[0])
+            #q_a_logvar = _q_a_logvar + 2.0*tensor.log(self.att_noise[0])
         else:
             # treat attention placement as a "deterministic action"
             q_a_mean, q_a_logvar, q_att_spec = p_a_mean, p_a_logvar, p_att_spec
@@ -980,8 +980,9 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
                               q_a_mean, q_a_logvar), axis=1)
 
         # mix samples from p/q based on value of self.train_switch
-        att_spec = (self.train_switch[0] * q_att_spec) + \
+        _att_spec = (self.train_switch[0] * q_att_spec) + \
                    ((1.0 - self.train_switch[0]) * p_att_spec)
+        att_spec = self.att_noise[0] * _att_spec
 
         # apply the attention-based reader to the input in x
         read_out = self.reader_mlp.apply(x, x, att_spec)
@@ -996,9 +997,9 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
         h_obs, c_obs = self.obs_rnn.apply(states=h_obs, cells=c_obs,
                                           inputs=i_obs, iterate=False)
         # estimate primary conditional over z given h_gen
-        p_z_mean, _p_z_logvar, p_z = \
+        p_z_mean, p_z_logvar, p_z = \
                 self.obs_mlp_out.apply(h_obs, u_com)
-        p_z_logvar = _p_z_logvar + tensor.log(self.com_noise[0])
+        #p_z_logvar = _p_z_logvar + 2.0*tensor.log(self.com_noise[0])
         if self.use_var:
             # use a "latent variable" communication channel between the
             # observer and controller, and draw samples from the guide policy
@@ -1009,9 +1010,9 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
             h_var, c_var = self.var_rnn.apply(states=h_var, cells=c_var,
                                               inputs=i_var, iterate=False)
             # estimate guide conditional over z given h_var
-            q_z_mean, _q_z_logvar, q_z = \
+            q_z_mean, q_z_logvar, q_z = \
                     self.var_mlp_out.apply(h_var, u_com)
-            q_z_logvar = _q_z_logvar + tensor.log(self.com_noise[0])
+            #q_z_logvar = _q_z_logvar + 2.0*tensor.log(self.com_noise[0])
         else:
             # use the observer -> controller channel as "deterministic action"
             q_z_mean, q_z_logvar, q_z = p_z_mean, p_z_logvar, p_z
@@ -1023,8 +1024,9 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
         kl_p2q_z = tensor.sum(gaussian_kld(p_z_mean, p_z_logvar, \
                               q_z_mean, q_z_logvar), axis=1)
         # mix samples from p/q based on value of self.train_switch
-        z = (self.train_switch[0] * q_z) + \
+        _z = (self.train_switch[0] * q_z) + \
             ((1.0 - self.train_switch[0]) * p_z)
+        z = self.com_noise[0] * _z
 
         # update the primary controller RNN state
         i_con = self.con_mlp_in.apply(tensor.concatenate([z, h_obs], axis=1))
@@ -1093,10 +1095,10 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
         hr0 = self.hr_0.repeat(batch_size, axis=0)
 
         # get zero-mean, unit-std. Gaussian noise for use in scan op
-        u_com = self.com_noise[0] * self.theano_rng.normal(
+        u_com = self.theano_rng.normal(
                         size=(self.total_steps, batch_size, z_dim),
                         avg=0., std=1.)
-        u_att = self.att_noise[0] * self.theano_rng.normal(
+        u_att = self.theano_rng.normal(
                         size=(self.total_steps, batch_size, as_dim),
                         avg=0., std=1.)
 
