@@ -59,7 +59,7 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, \
     # File tag, for output stuff #
     ##############################
     var_flags = "UV{}_UR{}".format(int(use_var), int(use_rav))
-    result_tag = "{}ZEN_VID_SCGALL_{}_{}".format(RESULT_PATH, var_flags, res_tag)
+    result_tag = "{}YEN_VID_SCGALL_{}_{}".format(RESULT_PATH, var_flags, res_tag)
 
     # begin by saving an archive of the "main" code files for this test
     tar_name = "{}_code.tar".format(result_tag)
@@ -257,13 +257,13 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, \
                      name="rav_mlp_in", **inits)
 
     # mlps for turning LSTM outputs into conditionals over z_gen
-    con_mlp_out = CondNet([Rectifier()], [rnn_dim, mlp_dim, att_spec_dim], \
+    con_mlp_out = CondNet([], [rnn_dim, att_spec_dim], \
                           name="con_mlp_out", **inits)
     obs_mlp_out = CondNet([], [rnn_dim, z_dim], \
                           name="obs_mlp_out", **inits)
     var_mlp_out = CondNet([], [rnn_dim, z_dim], \
                           name="var_mlp_out", **inits)
-    rav_mlp_out = CondNet([Rectifier()], [rnn_dim, mlp_dim, att_spec_dim], \
+    rav_mlp_out = CondNet([], [rnn_dim, mlp_dim, att_spec_dim], \
                           name="rav_mlp_out", **inits)
 
     # LSTMs for the actual LSTMs (obviously, perhaps)
@@ -456,9 +456,9 @@ if __name__=="__main__":
     # test_seq_cond_gen_all(use_var=False, use_rav=True, \
     #                       x_objs=['cross', 'circle'], y_objs=[0,1], \
     #                       res_tag="T2")
-    test_seq_cond_gen_all(use_var=False, use_rav=True, \
-                          x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
-                          res_tag="T3")
+    #test_seq_cond_gen_all(use_var=False, use_rav=True, \
+    #                      x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
+    #                      res_tag="T3")
     #################################
     # TEST WITH GUIDE OBSERVER ONLY #
     #################################
