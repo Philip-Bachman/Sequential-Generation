@@ -456,9 +456,9 @@ if __name__=="__main__":
     # test_seq_cond_gen_all(use_var=False, use_rav=True, \
     #                       x_objs=['cross', 'circle'], y_objs=[0,1], \
     #                       res_tag="T2")
-    #test_seq_cond_gen_all(use_var=False, use_rav=True, \
-    #                      x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
-    #                      res_tag="T3")
+    test_seq_cond_gen_all(use_var=False, use_rav=True, \
+                          x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
+                          res_tag="T3")
     #################################
     # TEST WITH GUIDE OBSERVER ONLY #
     #################################
@@ -480,6 +480,6 @@ if __name__=="__main__":
     # test_seq_cond_gen_all(use_var=True, use_rav=True, \
     #                       x_objs=['cross', 'circle'], y_objs=[0,1], \
     #                       res_tag="T2")
-    test_seq_cond_gen_all(use_var=True, use_rav=True, \
-                          x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
-                          res_tag="T3")
+    #test_seq_cond_gen_all(use_var=True, use_rav=True, \
+    #                      x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
+    #                      res_tag="T3")
