@@ -964,10 +964,10 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
         if self.use_rav:
             # treat attention placement as a "latent variable", and draw
             # samples of it from the guide policy
-            #rav_info = h_rav
-            rav_info = tensor.concatenate([y, h_con], axis=1)
-            q_a_mean, q_a_logvar, q_att_spec = \
-                    self.rav_mlp_out.apply(rav_info, u_att)
+            #rav_info = tensor.concatenate([y, h_con], axis=1)
+            _q_a_mean, q_a_logvar, q_att_spec = \
+                    self.rav_mlp_out.apply(h_rav, u_att)
+            q_a_mean = _q_a_mean + p_a_mean
         else:
             # treat attention placement as a "deterministic action"
             q_a_mean, q_a_logvar, q_att_spec = p_a_mean, p_a_logvar, p_att_spec
@@ -981,11 +981,12 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
 
         # mix samples from p/q based on value of self.train_switch
         _att_spec = (self.train_switch[0] * q_att_spec) + \
-                   ((1.0 - self.train_switch[0]) * p_att_spec)
+                    ((1.0 - self.train_switch[0]) * p_att_spec)
         att_spec = self.att_noise[0] * _att_spec
 
         # apply the attention-based reader to the input in x
         read_out = self.reader_mlp.apply(x, x, att_spec)
+        #self_out = self.reader_mlp.apply(c_as_y, c_as_y, att_spec)
         #diff_out = self.reader_mlp.apply(y_d, y_d, att_spec)
         true_out = self.reader_mlp.apply(y, y, att_spec)
         att_map = self.reader_mlp.att_map(att_spec)
@@ -1009,8 +1010,9 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
             h_var, c_var = self.var_rnn.apply(states=h_var, cells=c_var,
                                               inputs=i_var, iterate=False)
             # estimate guide conditional over z given h_var
-            q_z_mean, q_z_logvar, q_z = \
+            _q_z_mean, q_z_logvar, q_z = \
                     self.var_mlp_out.apply(h_var, u_com)
+            q_z_mean = _q_z_mean + p_z_mean
         else:
             # use the observer -> controller channel as "deterministic action"
             q_z_mean, q_z_logvar, q_z = p_z_mean, p_z_logvar, p_z
@@ -1023,7 +1025,7 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
                               q_z_mean, q_z_logvar), axis=1)
         # mix samples from p/q based on value of self.train_switch
         _z = (self.train_switch[0] * q_z) + \
-            ((1.0 - self.train_switch[0]) * p_z)
+             ((1.0 - self.train_switch[0]) * p_z)
         z = self.com_noise[0] * _z
 
         # update the primary controller RNN state
@@ -1033,10 +1035,9 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
 
         if self.use_rav:
             # update the guide controller RNN state
-            #i_rav = self.rav_mlp_in.apply(tensor.concatenate([y, z, h_obs], axis=1))
-            #h_rav, c_rav = self.rav_rnn.apply(states=h_rav, cells=c_rav, \
-            #                                  inputs=i_rav, iterate=False)
-            pass
+            i_rav = self.rav_mlp_in.apply(tensor.concatenate([y, z, h_obs], axis=1))
+            h_rav, c_rav = self.rav_rnn.apply(states=h_rav, cells=c_rav, \
+                                              inputs=i_rav, iterate=False)
 
         # update the "workspace" (stored in c)
         c = self.writer_mlp.apply(h_con)

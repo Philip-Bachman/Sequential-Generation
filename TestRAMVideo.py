@@ -59,7 +59,7 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, \
     # File tag, for output stuff #
     ##############################
     var_flags = "UV{}_UR{}".format(int(use_var), int(use_rav))
-    result_tag = "{}VEN_VID_SCGALL_{}_{}".format(RESULT_PATH, var_flags, res_tag)
+    result_tag = "{}ZEO_VID_SCGALL_{}_{}".format(RESULT_PATH, var_flags, res_tag)
 
     # begin by saving an archive of the "main" code files for this test
     tar_name = "{}_code.tar".format(result_tag)
@@ -263,7 +263,7 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, \
                           name="obs_mlp_out", **inits)
     var_mlp_out = CondNet([], [rnn_dim, z_dim], \
                           name="var_mlp_out", **inits)
-    rav_mlp_out = CondNet([Rectifier(), Rectifier()], [(y_dim + rnn_dim), mlp_dim, mlp_dim, att_spec_dim], \
+    rav_mlp_out = CondNet([Rectifier()], [rnn_dim, mlp_dim, att_spec_dim], \
                           name="rav_mlp_out", **inits)
 
     # LSTMs for the actual LSTMs (obviously, perhaps)
@@ -344,7 +344,7 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, \
                 rav_mlp_in=rav_mlp_in,
                 rav_mlp_out=rav_mlp_out,
                 rav_rnn=rav_rnn,
-                com_noise=0.3, att_noise=0.1)
+                com_noise=0.4, att_noise=0.1)
     SCG.initialize()
 
     compile_start_time = time.time()
