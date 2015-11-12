@@ -59,7 +59,7 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, \
     # File tag, for output stuff #
     ##############################
     var_flags = "UV{}_UR{}".format(int(use_var), int(use_rav))
-    result_tag = "{}ZEO_VID_SCGALL_{}_{}".format(RESULT_PATH, var_flags, res_tag)
+    result_tag = "{}ZEP_VID_SCGALL_{}_{}".format(RESULT_PATH, var_flags, res_tag)
 
     # begin by saving an archive of the "main" code files for this test
     tar_name = "{}_code.tar".format(result_tag)
@@ -247,10 +247,10 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, \
                      [(z_dim + rnn_dim), 4*rnn_dim], \
                      name="con_mlp_in", **inits)
     obs_mlp_in = MLP([Identity()], \
-                     [(read_dim + att_spec_dim + rnn_dim), 4*rnn_dim], \
+                     [(read_dim + read_dim + att_spec_dim + rnn_dim), 4*rnn_dim], \
                      name="obs_mlp_in", **inits)
     var_mlp_in = MLP([Identity()], \
-                     [(read_dim + read_dim + att_spec_dim + rnn_dim), 4*rnn_dim], \
+                     [(read_dim + read_dim + read_dim + att_spec_dim + rnn_dim), 4*rnn_dim], \
                      name="var_mlp_in", **inits)
     rav_mlp_in = MLP([Identity()], \
                      [(y_dim + z_dim + rnn_dim), 4*rnn_dim], \
@@ -456,9 +456,9 @@ if __name__=="__main__":
     # test_seq_cond_gen_all(use_var=False, use_rav=True, \
     #                       x_objs=['cross', 'circle'], y_objs=[0,1], \
     #                       res_tag="T2")
-    test_seq_cond_gen_all(use_var=False, use_rav=True, \
-                          x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
-                          res_tag="T3")
+    #test_seq_cond_gen_all(use_var=False, use_rav=True, \
+    #                      x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
+    #                      res_tag="T3")
     #################################
     # TEST WITH GUIDE OBSERVER ONLY #
     #################################
@@ -480,6 +480,6 @@ if __name__=="__main__":
     # test_seq_cond_gen_all(use_var=True, use_rav=True, \
     #                       x_objs=['cross', 'circle'], y_objs=[0,1], \
     #                       res_tag="T2")
-    #test_seq_cond_gen_all(use_var=True, use_rav=True, \
-    #                      x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
-    #                      res_tag="T3")
+    test_seq_cond_gen_all(use_var=True, use_rav=True, \
+                          x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
+                          res_tag="T3")

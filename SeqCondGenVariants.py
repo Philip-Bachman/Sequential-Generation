@@ -503,7 +503,7 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
         self.joint_params = self.get_model_params(ary_type='theano')
 
         # apply some l2 regularization to the model parameters
-        self.reg_term = (0.0 * sum([tensor.sum(p**2.0) for p in self.joint_params]))
+        self.reg_term = (1e-5 * sum([tensor.sum(p**2.0) for p in self.joint_params]))
         self.reg_term.name = "reg_term"
 
         # compute the full cost w.r.t. which we will optimize params
@@ -524,7 +524,7 @@ class SeqCondGen2dS(BaseRecurrent, Initializable, Random):
         self.joint_updates = get_adam_updates(params=self.joint_params,
                 grads=self.joint_grads, alpha=self.lr,
                 beta1=self.mom_1, beta2=self.mom_2,
-                mom2_init=1e-3, smoothing=1e-5, max_grad_norm=5.0)
+                mom2_init=1e-3, smoothing=1e-4, max_grad_norm=5.0)
 
         # collect the outputs to return from this function
         outputs = [self.joint_cost, self.nll_term, \
@@ -965,9 +965,9 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
             # treat attention placement as a "latent variable", and draw
             # samples of it from the guide policy
             #rav_info = tensor.concatenate([y, h_con], axis=1)
-            _q_a_mean, q_a_logvar, q_att_spec = \
+            q_a_mean, q_a_logvar, q_att_spec = \
                     self.rav_mlp_out.apply(h_rav, u_att)
-            q_a_mean = _q_a_mean + p_a_mean
+            #q_a_mean = _q_a_mean + p_a_mean
         else:
             # treat attention placement as a "deterministic action"
             q_a_mean, q_a_logvar, q_att_spec = p_a_mean, p_a_logvar, p_att_spec
@@ -986,7 +986,7 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
 
         # apply the attention-based reader to the input in x
         read_out = self.reader_mlp.apply(x, x, att_spec)
-        #self_out = self.reader_mlp.apply(c_as_y, c_as_y, att_spec)
+        self_out = self.reader_mlp.apply(c_as_y, c_as_y, att_spec)
         #diff_out = self.reader_mlp.apply(y_d, y_d, att_spec)
         true_out = self.reader_mlp.apply(y, y, att_spec)
         att_map = self.reader_mlp.att_map(att_spec)
@@ -994,7 +994,7 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
 
         # update the primary observer RNN state
         i_obs = self.obs_mlp_in.apply( \
-                tensor.concatenate([read_out, att_spec, h_con], axis=1))
+                tensor.concatenate([self_out, read_out, att_spec, h_con], axis=1))
         h_obs, c_obs = self.obs_rnn.apply(states=h_obs, cells=c_obs,
                                           inputs=i_obs, iterate=False)
         # estimate primary conditional over z given h_gen
@@ -1006,13 +1006,13 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
 
             # update the guide observer RNN state
             i_var = self.var_mlp_in.apply( \
-                    tensor.concatenate([true_out, read_out, att_spec, h_con], axis=1))
+                    tensor.concatenate([true_out, self_out, read_out, att_spec, h_con], axis=1))
             h_var, c_var = self.var_rnn.apply(states=h_var, cells=c_var,
                                               inputs=i_var, iterate=False)
             # estimate guide conditional over z given h_var
-            _q_z_mean, q_z_logvar, q_z = \
+            q_z_mean, q_z_logvar, q_z = \
                     self.var_mlp_out.apply(h_var, u_com)
-            q_z_mean = _q_z_mean + p_z_mean
+            #q_z_mean = _q_z_mean + p_z_mean
         else:
             # use the observer -> controller channel as "deterministic action"
             q_z_mean, q_z_logvar, q_z = p_z_mean, p_z_logvar, p_z
@@ -1163,7 +1163,7 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
         self.joint_params = self.get_model_params(ary_type='theano')
 
         # apply some l2 regularization to the model parameters
-        self.reg_term = (0.0 * sum([tensor.sum(p**2.0) for p in self.joint_params]))
+        self.reg_term = (1e-5 * sum([tensor.sum(p**2.0) for p in self.joint_params]))
         self.reg_term.name = "reg_term"
 
         # compute the full cost w.r.t. which we will optimize params
@@ -1187,7 +1187,7 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
                 params=self.joint_params, \
                 grads=self.joint_grads, alpha=self.lr, \
                 beta1=self.mom_1, beta2=self.mom_2, \
-                mom2_init=1e-3, smoothing=1e-5, max_grad_norm=10.0)
+                mom2_init=1e-3, smoothing=1e-4, max_grad_norm=10.0)
 
         # get the total grad norm and (post ADAM scaling) update norm.
         self.grad_norm = sum([tensor.sum(g**2.0) for g in grad_list])
