@@ -52,22 +52,23 @@ BREAK_STR = """
 #############################################################################
 """
 
-def test_seq_cond_gen_all(use_var=True, use_rav=True, \
-                          x_objs=['circle'], y_objs=[0], \
-                          res_tag="AAA"):
+def test_seq_cond_gen_all(use_var=True, use_rav=True, traj_len=15,
+                          x_objs=['circle'], y_objs=[0],
+                          res_tag="AAA", sample_pretrained=False):
     ##############################
     # File tag, for output stuff #
     ##############################
     var_flags = "UV{}_UR{}".format(int(use_var), int(use_rav))
-    result_tag = "{}ZEP_VID_SCGALL_{}_{}".format(RESULT_PATH, var_flags, res_tag)
+    result_tag = "{}ZEN_VID_SCGALL_{}_{}".format(RESULT_PATH, var_flags, res_tag)
 
     # begin by saving an archive of the "main" code files for this test
-    tar_name = "{}_code.tar".format(result_tag)
-    code_tar = tarfile.open(name=tar_name, mode='w')
-    code_tar.add('BlocksAttention.py')
-    code_tar.add('SeqCondGenVariants.py')
-    code_tar.add('TestRAMVideo.py')
-    code_tar.close()
+    if not sample_pretrained:
+        tar_name = "{}_code.tar".format(result_tag)
+        code_tar = tarfile.open(name=tar_name, mode='w')
+        code_tar.add('BlocksAttention.py')
+        code_tar.add('SeqCondGenVariants.py')
+        code_tar.add('TestRAMVideo.py')
+        code_tar.close()
 
     batch_size = 192
     traj_len = 15
@@ -354,14 +355,23 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, \
 
     # TEST SAVE/LOAD FUNCTIONALITY
     param_save_file = "{}_params.pkl".format(result_tag)
-    #SCG.save_model_params(param_save_file)
-    #SCG.load_model_params(param_save_file)
+    if sample_pretrained:
+        SCG.load_model_params(param_save_file)
 
     # quick test of attention trajectory sampler
     samp_count = 32
     Xb, Yb, Cb = generate_batch_multi(samp_count, xobjs=x_objs, yobjs=y_objs, img_scale=img_scale)
-    result = SCG.sample_attention(Xb, Yb)
-    visualize_attention_joint(result, pre_tag=result_tag, post_tag="b0")
+
+    if sample_pretrained:
+        # draw sample trajectories from both guide and primary policies
+        result = SCG.sample_attention(Xb, Yb, sample_source='q')
+        visualize_attention_joint(result, pre_tag=result_tag, post_tag="QS")
+        result = SCG.sample_attention(Xb, Yb, sample_source='p')
+        visualize_attention_joint(result, pre_tag=result_tag, post_tag="PS")
+        return # only sample a model trajectory and then quit
+    else:
+        result = SCG.sample_attention(Xb, Yb)
+        visualize_attention_joint(result, pre_tag=result_tag, post_tag="b0")
 
     # build the main model functions (i.e. training and cost functions)
     SCG.build_model_funcs()
@@ -468,9 +478,9 @@ if __name__=="__main__":
     # test_seq_cond_gen_all(use_var=True, use_rav=False, \
     #                       x_objs=['cross', 'circle'], y_objs=[0,1], \
     #                       res_tag="T2")
-    #test_seq_cond_gen_all(use_var=True, use_rav=False, \
+    #test_seq_cond_gen_all(use_var=True, use_rav=False, traj_len=25, \
     #                      x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
-    #                      res_tag="T3")
+    #                      res_tag="T3", sample_pretrained=False)
     ###########################################
     # TEST WITH GUIDE CONTROLLER AND OBSERVER #
     ###########################################
@@ -480,6 +490,6 @@ if __name__=="__main__":
     # test_seq_cond_gen_all(use_var=True, use_rav=True, \
     #                       x_objs=['cross', 'circle'], y_objs=[0,1], \
     #                       res_tag="T2")
-    test_seq_cond_gen_all(use_var=True, use_rav=True, \
+    test_seq_cond_gen_all(use_var=True, use_rav=True, traj_len=25, \
                           x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
-                          res_tag="T3")
+                          res_tag="T3", sample_pretrained=False)
