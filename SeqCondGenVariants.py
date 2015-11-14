@@ -70,6 +70,7 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
         y_dim: dimension of outputs to predict
         use_var: whether to include "guide" distribution for observer
         use_rav: whether to include "guide" distribution for controller
+        use_att: whether to use attention or read full inputs
         reader_mlp: used for reading from the input
         writer_mlp: used for writing to the output prediction
         con_mlp_in: preprocesses input to the "controller" LSTM
@@ -89,7 +90,7 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
                     total_steps, init_steps,
                     exit_rate, nll_weight,
                     x_dim, y_dim,
-                    use_var, use_rav,
+                    use_var, use_rav, use_att,
                     reader_mlp, writer_mlp,
                     con_mlp_in, con_rnn, con_mlp_out,
                     obs_mlp_in, obs_rnn, obs_mlp_out,
@@ -106,6 +107,7 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
         self.nll_weight = nll_weight
         self.use_var = use_var
         self.use_rav = use_rav
+        self.use_att = use_att
         self.x_dim = x_dim
         self.y_dim = y_dim
         assert (self.x_dim == self.y_dim), "x_dim must equal y_dim!"
@@ -327,10 +329,8 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
         if self.use_rav:
             # treat attention placement as a "latent variable", and draw
             # samples of it from the guide policy
-            #rav_info = tensor.concatenate([y, h_con], axis=1)
             q_a_mean, q_a_logvar, q_att_spec = \
                     self.rav_mlp_out.apply(h_rav, u_att)
-            #q_a_mean = _q_a_mean + p_a_mean
         else:
             # treat attention placement as a "deterministic action"
             q_a_mean, q_a_logvar, q_att_spec = p_a_mean, p_a_logvar, p_att_spec
@@ -347,40 +347,45 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
                     ((1.0 - self.train_switch[0]) * p_att_spec)
         att_spec = self.att_noise[0] * _att_spec
 
-        # apply the attention-based reader to the input in x
-        read_out = self.reader_mlp.apply(x, x, att_spec)
-        self_out = self.reader_mlp.apply(c_as_y, c_as_y, att_spec)
-        #diff_out = self.reader_mlp.apply(y_d, y_d, att_spec)
-        true_out = self.reader_mlp.apply(y, y, att_spec)
-        att_map = self.reader_mlp.att_map(att_spec)
-        read_img = self.reader_mlp.write(read_out, att_spec)
+        if self.use_att:
+            # apply the attention-based reader to the input in x
+            read_out = self.reader_mlp.apply(x, x, att_spec)
+            true_out = self.reader_mlp.apply(y, y, att_spec)
+            att_map = self.reader_mlp.att_map(att_spec)
+            read_img = self.reader_mlp.write(read_out, att_spec)
+            # construct inputs to obs and var nets using attention
+            obs_inp = tensor.concatenate([read_out, att_spec, h_con], axis=1)
+            var_inp = tensor.concatenate([true_out, read_out, att_spec, h_con], axis=1)
+        else:
+            # dummy outputs for attentino visualization
+            att_map = (0.0 * x) + 0.5
+            read_img = x
+            # construct inputs to obs and var nets using full observation
+            obs_inp = tensor.concatenate([x, att_spec, h_con], axis=1)
+            var_inp = tensor.concatenate([y, x, att_spec, h_con], axis=1)
 
         # update the primary observer RNN state
-        i_obs = self.obs_mlp_in.apply( \
-                tensor.concatenate([self_out, read_out, att_spec, h_con], axis=1))
+        i_obs = self.obs_mlp_in.apply(obs_inp)
         h_obs, c_obs = self.obs_rnn.apply(states=h_obs, cells=c_obs,
                                           inputs=i_obs, iterate=False)
-        # estimate primary conditional over z given h_gen
+        # estimate primary conditional over z given h_obs
         p_z_mean, p_z_logvar, p_z = \
                 self.obs_mlp_out.apply(h_obs, u_com)
-        if self.use_var:
-            # use a "latent variable" communication channel between the
-            # observer and controller, and draw samples from the guide policy
 
+        if self.use_var:
             # update the guide observer RNN state
-            i_var = self.var_mlp_in.apply( \
-                    tensor.concatenate([true_out, self_out, read_out, att_spec, h_con], axis=1))
+            i_var = self.var_mlp_in.apply(var_inp)
             h_var, c_var = self.var_rnn.apply(states=h_var, cells=c_var,
                                               inputs=i_var, iterate=False)
             # estimate guide conditional over z given h_var
             q_z_mean, q_z_logvar, q_z = \
                     self.var_mlp_out.apply(h_var, u_com)
-            #q_z_mean = _q_z_mean + p_z_mean
         else:
             # use the observer -> controller channel as "deterministic action"
             q_z_mean, q_z_logvar, q_z = p_z_mean, p_z_logvar, p_z
             p_z = p_z_mean
             q_z = p_z_mean
+
         # compute KL(guide || primary) for channel: observer -> controller
         kl_q2p_z = tensor.sum(gaussian_kld(q_z_mean, q_z_logvar, \
                               p_z_mean, p_z_logvar), axis=1)
@@ -777,7 +782,7 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
                     obs_mlp_in, obs_rnn, obs_mlp_out,
                     var_mlp_in, var_rnn, var_mlp_out,
                     rav_mlp_in, rav_rnn, rav_mlp_out,
-                    com_noise=0.1, att_noise=0.05,
+                    com_noise=0.5, att_noise=0.1,
                     **kwargs):
         super(SeqCondGenALT, self).__init__(**kwargs)
         # record basic structural parameters
@@ -1028,28 +1033,31 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
                    ((1.0 - self.train_switch[0]) * p_att_spec)
         att_spec = self.att_noise[0] * _att_spec
 
-        # apply the attention-based reader to the input in x
-        read_out = self.reader_mlp.apply(x, x, att_spec)
-        #diff_out = self.reader_mlp.apply(y_d, y_d, att_spec)
-        true_out = self.reader_mlp.apply(y, y, att_spec)
-        att_map = self.reader_mlp.att_map(att_spec)
-        read_img = self.reader_mlp.write(read_out, att_spec)
+        if self.use_att:
+            # apply the attention-based reader to the input in x
+            read_out = self.reader_mlp.apply(x, x, att_spec)
+            true_out = self.reader_mlp.apply(y, y, att_spec)
+            att_map = self.reader_mlp.att_map(att_spec)
+            read_img = self.reader_mlp.write(read_out, att_spec)
+            # construct inputs to obs and var nets using attention
+            obs_inp = tensor.concatenate([read_out, att_spec, h_con], axis=1)
+            var_inp = tensor.concatenate([true_out, read_out, att_spec, h_con], axis=1)
+        else:
+            # construct inputs to obs and var nets using full observation
+            obs_inp = tensor.concatenate([x, h_con], axis=1)
+            var_inp = tensor.concatenate([y, x, h_con], axis=1)
 
         # update the primary observer RNN state
-        i_obs = self.obs_mlp_in.apply( \
-                tensor.concatenate([read_out, att_spec, h_con], axis=1))
+        i_obs = self.obs_mlp_in.apply(obs_inp)
         h_obs, c_obs = self.obs_rnn.apply(states=h_obs, cells=c_obs,
                                           inputs=i_obs, iterate=False)
-        # estimate primary conditional over z given h_gen
+        # estimate primary conditional over z given h_obs
         p_z_mean, p_z_logvar, p_z = \
                 self.obs_mlp_out.apply(h_obs, u_com)
-        if self.use_var:
-            # use a "latent variable" communication channel between the
-            # observer and controller, and draw samples from the guide policy
 
+        if self.use_var:
             # update the guide observer RNN state
-            i_var = self.var_mlp_in.apply( \
-                    tensor.concatenate([true_out, read_out, att_spec, h_con], axis=1))
+            i_var = self.var_mlp_in.apply(var_inp)
             h_var, c_var = self.var_rnn.apply(states=h_var, cells=c_var,
                                               inputs=i_var, iterate=False)
             # estimate guide conditional over z given h_var
@@ -1060,6 +1068,7 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
             q_z_mean, q_z_logvar, q_z = p_z_mean, p_z_logvar, p_z
             p_z = p_z_mean
             q_z = p_z_mean
+
         # compute KL(guide || primary) for channel: observer -> controller
         kl_q2p_z = tensor.sum(gaussian_kld(q_z_mean, q_z_logvar, \
                               p_z_mean, p_z_logvar), axis=1)

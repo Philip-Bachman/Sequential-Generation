@@ -52,9 +52,9 @@ BREAK_STR = """
 #############################################################################
 """
 
-def test_seq_cond_gen_all(use_var=True, use_rav=True, use_att=True,
-                          traj_len=15, x_objs=['circle'], y_objs=[0],
-                          res_tag="AAA", sample_pretrained=False):
+def test_seq_pred_all(use_var=True, use_rav=True, use_att=True,
+                      traj_len=20, x_objs=['circle'], y_objs=[0],
+                      res_tag="AAA", sample_pretrained=False):
     ##############################
     # File tag, for output stuff #
     ##############################
@@ -63,7 +63,7 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, use_att=True,
     else:
         att_tag = "NA"
     var_flags = "UV{}_UR{}_{}".format(int(use_var), int(use_rav), att_tag)
-    result_tag = "{}PEZ_VID_SCGALL_{}_{}".format(RESULT_PATH, var_flags, res_tag)
+    result_tag = "{}SEQ_PRED_{}_{}".format(RESULT_PATH, var_flags, res_tag)
 
     # begin by saving an archive of the "main" code files for this test
     if not sample_pretrained:
@@ -71,11 +71,11 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, use_att=True,
         code_tar = tarfile.open(name=tar_name, mode='w')
         code_tar.add('BlocksAttention.py')
         code_tar.add('SeqCondGenVariants.py')
-        code_tar.add('TestRAMVideo.py')
+        code_tar.add('TestSeqPred.py')
         code_tar.close()
 
     batch_size = 192
-    traj_len = 15
+    traj_len = 20
     im_dim = 50
     obs_dim = im_dim*im_dim
 
@@ -122,33 +122,28 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, use_att=True,
         obj_imgs = []
         obj_coords = []
         for obj in xobjs:
-            imgs, coords = generate_batch(num_samples, obj_type=obj)
+            imgs, coords = generate_batch(num_samples+1, obj_type=obj)
             obj_imgs.append(imgs)
             obj_coords.append(coords)
-        seq_len = obj_coords[0].shape[0]
-        batch_size = obj_coords[0].shape[1]
-        x_imgs = np.zeros(obj_imgs[0].shape)
-        y_imgs = np.zeros(obj_imgs[0].shape)
-        y_coords = np.zeros(obj_coords[0].shape)
+        seq_len = obj_imgs[0].shape[0] - 1
+        batch_size = obj_imgs[0].shape[1]
+        obs_dim = obj_imgs[0].shape[2]
+        x_imgs = np.zeros((seq_len, batch_size, obs_dim))
+        y_imgs = np.zeros((seq_len, batch_size, obs_dim))
         for o_num in range(len(xobjs)):
-            x_imgs = x_imgs + obj_imgs[o_num]
+            x_imgs = x_imgs + obj_imgs[o_num][:-1,:,:]
             if o_num in yobjs:
-                y_imgs = y_imgs + obj_imgs[o_num]
-            mask = npr.rand(seq_len, batch_size) < (1. / (o_num+1))
-            mask = mask[:,:,np.newaxis]
-            y_coords = (mask * obj_coords[o_num]) + ((1.-mask) * y_coords)
-        # rescale coordinates as desired
-        y_coords = img_scale * y_coords
-        # add noise to image sequences
-        pix_mask = npr.rand(*x_imgs.shape) < 0.05
-        pix_noise = npr.rand(*x_imgs.shape)
-        x_imgs = x_imgs + (pix_mask * pix_noise)
+                y_imgs = y_imgs + obj_imgs[o_num][1:,:,:]
+        # # add noise to image sequences
+        # pix_mask = npr.rand(*x_imgs.shape) < 0.05
+        # pix_noise = npr.rand(*x_imgs.shape)
+        # x_imgs = x_imgs + (pix_mask * pix_noise)
         # clip to 0...0.99
         x_imgs = np.maximum(x_imgs, 0.001)
         x_imgs = np.minimum(x_imgs, 0.999)
         y_imgs = np.maximum(y_imgs, 0.001)
         y_imgs = np.minimum(y_imgs, 0.999)
-        return [to_fX(x_imgs), to_fX(y_imgs), to_fX(y_coords)]
+        return [to_fX(x_imgs), to_fX(y_imgs)]
 
     ############################################################
     # Setup some parameters for the Iterative Refinement Model #
@@ -156,7 +151,7 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, use_att=True,
     total_steps = traj_len
     init_steps = 10
     exit_rate = 0.0
-    nll_weight = 0.5
+    nll_weight = 1.0
     x_dim = obs_dim
     y_dim = obs_dim
     z_dim = 256
@@ -237,39 +232,58 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, use_att=True,
     # module for doing local 2d read defined by an attention specification
     img_scale = 1.0 # image coords will range over [-img_scale...img_scale]
     read_N = 2      # use NxN grid for reader
-    reader_mlp = FovAttentionReader2d(x_dim=obs_dim,
+    reader_mlp = FovAttentionReader2d(x_dim=x_dim,
                                       width=im_dim, height=im_dim, N=read_N,
                                       img_scale=img_scale, att_scale=0.33,
                                       **inits)
     read_dim = reader_mlp.read_dim # total number of "pixels" read by reader
 
     # MLP for updating belief state based on con_rnn
-    writer_mlp = MLP([Rectifier(), Identity()], [rnn_dim, mlp_dim, obs_dim], \
+    writer_mlp = MLP([Rectifier(), Identity()], [rnn_dim, mlp_dim, y_dim], \
                      name="writer_mlp", **inits)
 
-    # mlps for processing inputs to LSTMs
-    con_mlp_in = MLP([Identity()], \
-                     [(z_dim + rnn_dim), 4*rnn_dim], \
-                     name="con_mlp_in", **inits)
-    obs_mlp_in = MLP([Identity()], \
-                     [(read_dim + read_dim + att_spec_dim + rnn_dim), 4*rnn_dim], \
-                     name="obs_mlp_in", **inits)
-    var_mlp_in = MLP([Identity()], \
-                     [(read_dim + read_dim + read_dim + att_spec_dim + rnn_dim), 4*rnn_dim], \
-                     name="var_mlp_in", **inits)
-    rav_mlp_in = MLP([Identity()], \
-                     [(y_dim + z_dim + rnn_dim), 4*rnn_dim], \
-                     name="rav_mlp_in", **inits)
+    if use_att:
+        # mlps for processing inputs to observer LSTMs
+        obs_mlp_in = MLP([Identity()], \
+                         [(read_dim + att_spec_dim + rnn_dim), 4*rnn_dim], \
+                         name="obs_mlp_in", **inits)
+        var_mlp_in = MLP([Identity()], \
+                         [(read_dim + read_dim + att_spec_dim + rnn_dim), 4*rnn_dim], \
+                         name="var_mlp_in", **inits)
+        # mlps for processing inputs to controller LSTMs
+        con_mlp_in = MLP([Identity()], \
+                         [(z_dim + rnn_dim), 4*rnn_dim], \
+                         name="con_mlp_in", **inits)
+        rav_mlp_in = MLP([Identity()], \
+                         [(y_dim + z_dim + rnn_dim), 4*rnn_dim], \
+                         name="rav_mlp_in", **inits)
+    else:
+        # mlps for processing inputs to observer LSTMs
+        obs_mlp_in = MLP([Identity()], \
+                         [(x_dim + att_spec_dim + rnn_dim), 4*rnn_dim], \
+                         name="obs_mlp_in", **inits)
+        var_mlp_in = MLP([Identity()], \
+                         [(y_dim + x_dim + att_spec_dim + rnn_dim), 4*rnn_dim], \
+                         name="var_mlp_in", **inits)
+        # mlps for processing inputs to controller LSTMs
+        con_mlp_in = MLP([Identity()], \
+                         [(z_dim + rnn_dim), 4*rnn_dim], \
+                         name="con_mlp_in", **inits)
+        rav_mlp_in = MLP([Identity()], \
+                         [(y_dim + z_dim + rnn_dim), 4*rnn_dim], \
+                         name="rav_mlp_in", **inits)
 
-    # mlps for turning LSTM outputs into conditionals over z_gen
+
+    # mlps for turning LSTM outputs into conditionals over z_att
     con_mlp_out = CondNet([Rectifier()], [rnn_dim, mlp_dim, att_spec_dim], \
                           name="con_mlp_out", **inits)
+    rav_mlp_out = CondNet([Rectifier()], [rnn_dim, mlp_dim, att_spec_dim], \
+                          name="rav_mlp_out", **inits)
+    # mlps for turning LSTM outputs into conditionals over z_com
     obs_mlp_out = CondNet([], [rnn_dim, z_dim], \
                           name="obs_mlp_out", **inits)
     var_mlp_out = CondNet([], [rnn_dim, z_dim], \
                           name="var_mlp_out", **inits)
-    rav_mlp_out = CondNet([Rectifier()], [rnn_dim, mlp_dim, att_spec_dim], \
-                          name="rav_mlp_out", **inits)
 
     # LSTMs for the actual LSTMs (obviously, perhaps)
     con_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=1.0, \
@@ -309,6 +323,7 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, use_att=True,
         y_dim: dimension of outputs to predict
         use_var: whether to include "guide" distribution for observer
         use_rav: whether to include "guide" distribution for controller
+        use_att: whether to use attention-based input processing
         reader_mlp: used for reading from the input
         writer_mlp: used for writing to the output prediction
         con_mlp_in: preprocesses input to the "controller" LSTM
@@ -335,6 +350,7 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, use_att=True,
                 y_dim=obs_dim,
                 use_var=use_var,
                 use_rav=use_rav,
+                use_att=use_att,
                 reader_mlp=reader_mlp,
                 writer_mlp=writer_mlp,
                 con_mlp_in=con_mlp_in,
@@ -392,7 +408,6 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, use_att=True,
     out_file.flush()
     costs = [0. for i in range(10)]
     learn_rate = 0.0001
-    #learn_rate = 0.00005
     momentum = 0.9
     kl_scale = 1.0
     cost_iters = 0
@@ -449,51 +464,28 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, use_att=True,
 
 
 if __name__=="__main__":
-    ####################################
-    # TEST WITH NO GUIDE DISTRIBUTIONS #
-    ####################################
-    # test_seq_cond_gen_all(use_var=False, use_rav=False, \
-    #                       x_objs=['cross', 'circle', 'circle'], y_objs=[0], \
-    #                       res_tag="T1")
-    # test_seq_cond_gen_all(use_var=False, use_rav=False, \
-    #                       x_objs=['cross', 'circle'], y_objs=[0,1], \
-    #                       res_tag="T2")
-    #test_seq_cond_gen_all(use_var=False, use_rav=False, \
-    #                      x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
-    #                      res_tag="T3")
-    ###################################
-    # TEST WITH GUIDE CONTROLLER ONLY #
-    ###################################
-    # test_seq_cond_gen_all(use_var=False, use_rav=True, \
-    #                       x_objs=['cross', 'circle', 'circle'], y_objs=[0], \
-    #                       res_tag="T1")
-    # test_seq_cond_gen_all(use_var=False, use_rav=True, \
-    #                       x_objs=['cross', 'circle'], y_objs=[0,1], \
-    #                       res_tag="T2")
-    #test_seq_cond_gen_all(use_var=False, use_rav=True, \
-    #                      x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
-    #                      res_tag="T3")
-    #################################
-    # TEST WITH GUIDE OBSERVER ONLY #
-    #################################
-    # test_seq_cond_gen_all(use_var=True, use_rav=False, \
-    #                       x_objs=['cross', 'circle', 'circle'], y_objs=[0], \
-    #                       res_tag="T1")
-    # test_seq_cond_gen_all(use_var=True, use_rav=False, \
-    #                       x_objs=['cross', 'circle'], y_objs=[0,1], \
-    #                       res_tag="T2")
-    #test_seq_cond_gen_all(use_var=True, use_rav=False, traj_len=25, \
-    #                      x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
-    #                      res_tag="T3", sample_pretrained=False)
-    ###########################################
-    # TEST WITH GUIDE CONTROLLER AND OBSERVER #
-    ###########################################
-    # test_seq_cond_gen_all(use_var=True, use_rav=True, \
-    #                       x_objs=['cross', 'circle', 'circle'], y_objs=[0], \
-    #                       res_tag="T1")
-    # test_seq_cond_gen_all(use_var=True, use_rav=True, \
-    #                       x_objs=['cross', 'circle'], y_objs=[0,1], \
-    #                       res_tag="T2")
-    test_seq_cond_gen_all(use_var=True, use_rav=True, traj_len=25, \
-                          x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
-                          res_tag="T3", sample_pretrained=False)
+    ##################################################
+    # TEST WITH NO LATENT VARIABLES AND NO ATTENTION #
+    ##################################################
+    test_seq_pred(use_var=False, use_rav=False, use_att=False, traj_len=20, \
+                  x_objs=['t-up', 't-down', 't-left', 't-right'], y_objs=[0,1,2,3], \
+                  res_tag="T1", sample_pretrained=False)
+    ###################################################
+    # TEST WITH ALL LATENT VARIABLES AND NO ATTENTION #
+    ###################################################
+    #test_seq_pred(use_var=True, use_rav=True, use_att=False, traj_len=20, \
+    #              x_objs=['t-up', 't-down', 't-left', 't-right'], y_objs=[0,1,2,3], \
+    #              res_tag="T1", sample_pretrained=False)
+
+    ###############################################
+    # TEST WITH NO LATENT VARIABLES AND ATTENTION #
+    ###############################################
+    #test_seq_pred(use_var=False, use_rav=False, use_att=True, traj_len=20, \
+    #              x_objs=['t-up', 't-down', 't-left', 't-right'], y_objs=[0,1,2,3], \
+    #              res_tag="T1", sample_pretrained=False)
+    ################################################
+    # TEST WITH ALL LATENT VARIABLES AND ATTENTION #
+    ################################################
+    #test_seq_pred(use_var=True, use_rav=True, use_att=True, traj_len=20, \
+    #              x_objs=['t-up', 't-down', 't-left', 't-right'], y_objs=[0,1,2,3], \
+    #              res_tag="T1", sample_pretrained=False)
