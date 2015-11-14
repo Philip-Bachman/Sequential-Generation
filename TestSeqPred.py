@@ -52,9 +52,9 @@ BREAK_STR = """
 #############################################################################
 """
 
-def test_seq_pred_all(use_var=True, use_rav=True, use_att=True,
-                      traj_len=20, x_objs=['circle'], y_objs=[0],
-                      res_tag="AAA", sample_pretrained=False):
+def test_seq_pred(use_var=True, use_rav=True, use_att=True,
+                  traj_len=20, x_objs=['circle'], y_objs=[0],
+                  res_tag="AAA", sample_pretrained=False):
     ##############################
     # File tag, for output stuff #
     ##############################
@@ -94,7 +94,7 @@ def test_seq_pred_all(use_var=True, use_rav=True, use_att=True,
 
     def generate_batch(num_samples, obj_type='circle'):
         # generate a minibatch of trajectories
-        traj_pos, traj_vel = TRAJ.generate_trajectories(num_samples, traj_len)
+        traj_pos, traj_vel = TRAJ.generate_trajectories(num_samples, (traj_len+1))
         traj_x = traj_pos[:,:,0]
         traj_y = traj_pos[:,:,1]
         # draw the trajectories
@@ -105,11 +105,11 @@ def test_seq_pred_all(use_var=True, use_rav=True, use_att=True,
         paint_obj = OPTRS[obj_type]
         W = paint_obj(center_y, center_x, delta, 0.05*sigma)
         # shape trajectories into a batch for passing to the model
-        batch_imgs = np.zeros((num_samples, traj_len, obs_dim))
-        batch_coords = np.zeros((num_samples, traj_len, 2))
+        batch_imgs = np.zeros((num_samples, (traj_len+1), obs_dim))
+        batch_coords = np.zeros((num_samples, (traj_len+1), 2))
         for i in range(num_samples):
-            start_idx = i * traj_len
-            end_idx = start_idx + traj_len
+            start_idx = i * (traj_len+1)
+            end_idx = start_idx + (traj_len+1)
             img_set = W[start_idx:end_idx,:]
             batch_imgs[i,:,:] = img_set
             batch_coords[i,:,0] = center_x[start_idx:end_idx]
@@ -380,7 +380,7 @@ def test_seq_pred_all(use_var=True, use_rav=True, use_att=True,
 
     # quick test of attention trajectory sampler
     samp_count = 32
-    Xb, Yb, Cb = generate_batch_multi(samp_count, xobjs=x_objs, yobjs=y_objs, img_scale=img_scale)
+    Xb, Yb = generate_batch_multi(samp_count, xobjs=x_objs, yobjs=y_objs, img_scale=img_scale)
 
     if sample_pretrained:
         # draw sample trajectories from both guide and primary policies
@@ -422,7 +422,7 @@ def test_seq_pred_all(use_var=True, use_rav=True, use_att=True,
         SCG.set_lam_kld(lam_kld_q2p=kl_scale*1.0, lam_kld_p2q=kl_scale*0.1, \
                         lam_kld_amu=0.0, lam_kld_alv=0.0)
         # perform a minibatch update and record the cost for this batch
-        Xb, Yb, Cb = generate_batch_multi(samp_count, xobjs=x_objs, yobjs=y_objs, img_scale=img_scale)
+        Xb, Yb = generate_batch_multi(samp_count, xobjs=x_objs, yobjs=y_objs, img_scale=img_scale)
         result = SCG.train_joint(Xb, Yb)
         costs = [(costs[j] + result[j]) for j in range(len(result))]
         cost_iters += 1
@@ -453,7 +453,7 @@ def test_seq_pred_all(use_var=True, use_rav=True, use_att=True,
             # Sample and draw attention trajectories. #
             ###########################################
             samp_count = 32
-            Xb, Yb, Cb = generate_batch_multi(samp_count, xobjs=x_objs, yobjs=y_objs, img_scale=img_scale)
+            Xb, Yb = generate_batch_multi(samp_count, xobjs=x_objs, yobjs=y_objs, img_scale=img_scale)
             result = SCG.sample_attention(Xb, Yb)
             post_tag = "b{0:d}".format(i)
             #visualize_attention(result, pre_tag=result_tag, post_tag=post_tag)
@@ -467,13 +467,13 @@ if __name__=="__main__":
     ##################################################
     # TEST WITH NO LATENT VARIABLES AND NO ATTENTION #
     ##################################################
-    test_seq_pred(use_var=False, use_rav=False, use_att=False, traj_len=20, \
-                  x_objs=['t-up', 't-down', 't-left', 't-right'], y_objs=[0,1,2,3], \
-                  res_tag="T1", sample_pretrained=False)
-    ###################################################
-    # TEST WITH ALL LATENT VARIABLES AND NO ATTENTION #
-    ###################################################
-    #test_seq_pred(use_var=True, use_rav=True, use_att=False, traj_len=20, \
+    #test_seq_pred(use_var=False, use_rav=False, use_att=False, traj_len=20, \
+    #              x_objs=['t-up', 't-down', 't-left', 't-right'], y_objs=[0,1,2,3], \
+    #              res_tag="T1", sample_pretrained=False)
+    ###############################################
+    # TEST WITH LATENT VARIABLES AND NO ATTENTION #
+    ###############################################
+    #test_seq_pred(use_var=True, use_rav=False, use_att=False, traj_len=20, \
     #              x_objs=['t-up', 't-down', 't-left', 't-right'], y_objs=[0,1,2,3], \
     #              res_tag="T1", sample_pretrained=False)
 
@@ -483,9 +483,9 @@ if __name__=="__main__":
     #test_seq_pred(use_var=False, use_rav=False, use_att=True, traj_len=20, \
     #              x_objs=['t-up', 't-down', 't-left', 't-right'], y_objs=[0,1,2,3], \
     #              res_tag="T1", sample_pretrained=False)
-    ################################################
-    # TEST WITH ALL LATENT VARIABLES AND ATTENTION #
-    ################################################
-    #test_seq_pred(use_var=True, use_rav=True, use_att=True, traj_len=20, \
-    #              x_objs=['t-up', 't-down', 't-left', 't-right'], y_objs=[0,1,2,3], \
-    #              res_tag="T1", sample_pretrained=False)
+    ############################################
+    # TEST WITH LATENT VARIABLES AND ATTENTION #
+    ############################################
+    test_seq_pred(use_var=True, use_rav=False, use_att=True, traj_len=20, \
+                  x_objs=['t-up', 't-down', 't-left', 't-right'], y_objs=[0,1,2,3], \
+                  res_tag="T1", sample_pretrained=False)
