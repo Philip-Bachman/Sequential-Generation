@@ -86,7 +86,7 @@ def test_rldraw_classic(step_type='add', use_pol=True):
     # Make a tag for identifying result files #
     ###########################################
     pol_tag = "yp" if use_pol else "np"
-    res_tag = "TRLD_{}_{}".format(step_type, pol_tag)
+    res_tag = "TRLD_SPLIT_{}_{}".format(step_type, pol_tag)
 
     ##########################
     # Get some training data #
@@ -248,8 +248,8 @@ if __name__=="__main__":
     #########################################################################
     # Train "binarized MNIST" generative models (open loopish LSTM quartet) #
     #########################################################################
-    #test_rldraw_classic(step_type='add', use_pol=True)
-    test_rldraw_classic(step_type='add', use_pol=False)
+    test_rldraw_classic(step_type='add', use_pol=True)
+    #test_rldraw_classic(step_type='add', use_pol=False)
 
 
 

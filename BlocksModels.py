@@ -22,7 +22,7 @@ from blocks.roles import add_role, WEIGHT, BIAS, PARAMETER, AUXILIARY
 from BlocksAttention import ZoomableAttention2d
 from DKCode import get_adam_updates, get_adam_updates_X
 from HelperFuncs import constFX, to_fX, tanh_clip
-from LogPDFs import log_prob_bernoulli, gaussian_kld
+from LogPDFs import log_prob_bernoulli, gaussian_kld, log_prob_gaussian2
 
 ################################
 # Softplus activation function #
@@ -1405,6 +1405,9 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         zero_ary = to_fX(numpy.zeros((1,)))
         self.rnn_noise = theano.shared(value=zero_ary, name='rnn_noise')
 
+        # silly switches for "split" runs
+        self.use_q = True
+        self.use_p = False
 
         # list for holding references to model params
         self.params = []
@@ -1474,7 +1477,7 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
             return self.dec_rnn.get_dim('states')
         elif name == 'c_dec':
             return self.dec_rnn.get_dim('cells')
-        elif name == 'z_gen':
+        elif name == 'z':
             return self.enc_mlp_out.get_dim('output')
         elif name in ['nll', 'kl_q2p', 'kl_p2q']:
             return 0
@@ -1534,7 +1537,7 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         # estimate primary policy's conditional over z
         p_z_mean, p_z_logvar, p_z = self.pol_mlp_out.apply(h_pol, u)
         if not self.use_pol:
-            # use a fixed policy for "action selection" (policy is ZMUV Gauss)
+            # use a "null" policy, i.e. ZMUV Gaussian
             p_z_mean = 0.0 * p_z_mean
             p_z_logvar = 0.0 * p_z_logvar
             p_z = u
@@ -1566,15 +1569,89 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
                             q_z_mean, q_z_logvar), axis=1)
         return c, h_pol, c_pol, h_enc, c_enc, h_dec, c_dec, nll, kl_q2p, kl_p2q
 
+    ############################################
+    # FUNCS FOR SAMPLING SPLIT RUNS OF P AND Q #
+    ############################################
+
+    @recurrent(sequences=['u'], contexts=['x'],
+               states=['c', 'h_pol', 'c_pol', 'h_enc', 'c_enc', 'h_dec', 'c_dec'],
+               outputs=['c', 'h_pol', 'c_pol', 'h_enc', 'c_enc', 'h_dec', 'c_dec', 'z', 'log_prob_z'])
+    def run_before(self, u, c, h_pol, c_pol, h_enc, c_enc, h_dec, c_dec, x):
+        if self.use_q:
+            # update the guide policy state
+            enc_inp = tensor.concatenate([x, h_dec], axis=1)
+            i_enc = self.enc_mlp_in.apply(enc_inp)
+            h_enc, c_enc = self.enc_rnn.apply(states=h_enc, cells=c_enc,
+                                              inputs=i_enc, iterate=False)
+            # estimate guide policy's conditional over z
+            z_mean, z_logvar, z = self.enc_mlp_out.apply(h_enc, u)
+        elif self.use_p:
+            # update the primary policy state
+            pol_inp = tensor.concatenate([h_dec], axis=1)
+            i_pol = self.pol_mlp_in.apply(pol_inp)
+            h_pol, c_pol = self.pol_rnn.apply(states=h_pol, cells=c_pol,
+                                              inputs=i_pol, iterate=False)
+            # estimate guide policy's conditional over z
+            z_mean, z_logvar, z = self.pol_mlp_out.apply(h_pol, u)
+            if not self.use_pol:
+                # use a "null" policy, i.e. ZMUV Gaussian
+                z_mean = 0.0 * z_mean
+                z_logvar = 0.0 * z_logvar
+                z = u
+        else:
+            assert False, "Run flags not set properly!"
+        # compute log(prob(z | h))
+        log_prob_z = tensor.flatten(log_prob_gaussian2(z, z_mean, z_logvar))
+        # update the shared dynamics' state
+        dec_inp = tensor.concatenate([z], axis=1)
+        i_dec = self.dec_mlp_in.apply(dec_inp)
+        h_dec, c_dec = self.dec_rnn.apply(states=h_dec, cells=c_dec, \
+                                          inputs=i_dec, iterate=False)
+        # get current state of the x under construction
+        if self.step_type == 'add':
+            c = c + self.writer_mlp.apply(h_dec)
+        else:
+            c = self.writer_mlp.apply(h_dec)
+        return c, h_pol, c_pol, h_enc, c_enc, h_dec, c_dec, z, log_prob_z
+
+    @recurrent(sequences=['z', 'h_dec'], contexts=['x'],
+               states=['h_pol', 'c_pol', 'h_enc', 'c_enc'],
+               outputs=['h_pol', 'c_pol', 'h_enc', 'c_enc', 'log_prob_z'])
+    def run_after(self, z, h_dec, h_pol, c_pol, h_enc, c_enc, x):
+        if self.use_q:
+            # update the guide policy state
+            enc_inp = tensor.concatenate([x, h_dec], axis=1)
+            i_enc = self.enc_mlp_in.apply(enc_inp)
+            h_enc, c_enc = self.enc_rnn.apply(states=h_enc, cells=c_enc,
+                                              inputs=i_enc, iterate=False)
+            # estimate guide policy's conditional over z
+            z_mean, z_logvar, _ = self.enc_mlp_out.apply(h_enc, 0.0*z)
+        elif self.use_p:
+            # update the primary policy state
+            pol_inp = tensor.concatenate([h_dec], axis=1)
+            i_pol = self.pol_mlp_in.apply(pol_inp)
+            h_pol, c_pol = self.pol_rnn.apply(states=h_pol, cells=c_pol,
+                                              inputs=i_pol, iterate=False)
+            # estimate guide policy's conditional over z
+            z_mean, z_logvar, _ = self.pol_mlp_out.apply(h_pol, 0.0*z)
+            if not self.use_pol:
+                # use a "null" policy, i.e. ZMUV Gaussian
+                z_mean = 0.0 * z_mean
+                z_logvar = 0.0 * z_logvar
+        else:
+            assert False, "Run flags not set properly!"
+        # compute log(prob(z | h))
+        log_prob_z = tensor.flatten(log_prob_gaussian2(z, z_mean, z_logvar))
+        return h_pol, c_pol, h_enc, c_enc, log_prob_z
 
     #------------------------------------------------------------------------
 
     @application(inputs=['x_in'],
                  outputs=['cs', 'nlls', 'kl_q2ps', 'kl_p2qs'])
-    def run_model(self, x_in):
+    def run_model_simul(self, x_in):
         # get important size and shape information
         batch_size = x_in.shape[0]
-        z_gen_dim = self.get_dim('z_gen')
+        z_dim = self.get_dim('z')
         cp_dim = self.get_dim('c_pol')
         ce_dim = self.get_dim('c_enc')
         cd_dim = self.get_dim('c_dec')
@@ -1592,13 +1669,13 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         hd0 = self.hd_0.repeat(batch_size, axis=0)
 
         # get zero-mean, unit-std. Gaussian noise for use in scan op
-        u_gen = self.theano_rng.normal(
-                    size=(self.n_iter, batch_size, z_gen_dim),
+        u = self.theano_rng.normal(
+                    size=(self.n_iter, batch_size, z_dim),
                     avg=0., std=1.)
 
         # run the multi-stage guided generative process
         cs, _, _, _, _, _, _, nlls, kl_q2ps, kl_p2qs = \
-                self.apply(u=u_gen, c=c0,
+                self.apply(u=u, c=c0,
                            h_pol=hp0, c_pol=cp0,
                            h_enc=he0, c_enc=ce0,
                            h_dec=hd0, c_dec=cd0, x=x_in)
@@ -1611,6 +1688,78 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         return cs, nlls, kl_q2ps, kl_p2qs
 
 
+    @application(inputs=['x_in'],
+                 outputs=['cs', 'nlls', 'kl_q2ps', 'kl_p2qs'])
+    def run_model_split(self, x_in):
+        # get important size and shape information
+        batch_size = x_in.shape[0]
+        z_dim = self.get_dim('z')
+        cp_dim = self.get_dim('c_pol')
+        ce_dim = self.get_dim('c_enc')
+        cd_dim = self.get_dim('c_dec')
+        hp_dim = self.get_dim('h_pol')
+        he_dim = self.get_dim('h_enc')
+        hd_dim = self.get_dim('h_dec')
+
+        # get initial states for all model components
+        c0 = self.c_0.repeat(batch_size, axis=0)
+        cp0 = self.cp_0.repeat(batch_size, axis=0)
+        hp0 = self.hp_0.repeat(batch_size, axis=0)
+        ce0 = self.ce_0.repeat(batch_size, axis=0)
+        he0 = self.he_0.repeat(batch_size, axis=0)
+        cd0 = self.cd_0.repeat(batch_size, axis=0)
+        hd0 = self.hd_0.repeat(batch_size, axis=0)
+
+        ################
+        # RUN Q THEN P #
+        ################
+        # get zero-mean, unit-std. Gaussian noise for use in scan op
+        u_for_q = self.theano_rng.normal(
+                    size=(self.n_iter, batch_size, z_dim),
+                    avg=0., std=1.)
+        # run the generative process starting from q
+        self.use_q = True
+        self.use_p = False
+        cs_from_q, _, _, _, _, hds_from_q, _, zs_from_q, log_q_zs_from_q = \
+                self.run_before(u=u_for_q, c=c0,
+                           h_pol=hp0, c_pol=cp0,
+                           h_enc=he0, c_enc=ce0,
+                           h_dec=hd0, c_dec=cd0, x=x_in)
+        # try to follow the q trajectory using p
+        self.use_p = True
+        self.use_q = False
+        all_hds_from_q = tensor.concatenate([hd0.dimshuffle('x',0,1), hds_from_q], axis=0)
+        hds_from_q_for_p = all_hds_from_q[:-1,:,:]
+        _, _, _, _, log_p_zs_from_q = \
+                self.run_after(z=zs_from_q,
+                          h_dec=hds_from_q_for_p,
+                          h_pol=hp0, c_pol=cp0,
+                          h_enc=he0, c_enc=ce0, x=x_in)
+
+
+        ################
+        # RUN P THEN Q #
+        ################
+        # TODO: Implement this so we can start training "max entropy models"
+
+        # TEMP #
+        # compute the NLL of the reconstruction as of this step
+        c_as_x = tensor.nnet.sigmoid(tanh_clip(cs_from_q[-1,:,:], clip_val=15.0))
+        flat_nlls = -1.0 * tensor.flatten(log_prob_bernoulli(x_in, c_as_x))
+        nlls_from_q = flat_nlls.dimshuffle('x',0).repeat(self.n_iter, axis=0)
+        # # # # #
+        cs = cs_from_q
+        nlls = nlls_from_q
+        kl_q2ps = log_prob_q_zs_from_q - log_prob_p_zs_from_q
+        kl_p2qs = log_prob_q_zs_from_q - log_prob_p_zs_from_q
+        # TEMP #
+
+        # add name tags to the constructed symbolic variables
+        cs.name = "cs"
+        nlls.name = "nlls"
+        kl_q2ps.name = "kl_q2ps"
+        kl_p2qs.name = "kl_p2qs"
+        return cs, nlls, kl_q2ps, kl_p2qs
 
     def build_model_funcs(self):
         """
@@ -1620,7 +1769,7 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         x_in_sym = tensor.matrix('x_in_sym')
 
         # collect symbolic vars for model samples and costs (given x_in_sym)
-        cs, nlls, kl_q2ps, kl_p2qs = self.run_model(x_in_sym)
+        cs, nlls, kl_q2ps, kl_p2qs = self.run_model_split(x_in_sym)
 
         # get the expected NLL part of the VFE bound
         self.nll_term = tensor.mean(nlls[-1])
@@ -1695,7 +1844,7 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         # symbolic variable for providing inputs
         x_in_sym = tensor.matrix('x_in_sym')
         # collect symbolic vars for model samples and costs (given x_in_sym)
-        cs, nlls, kl_q2ps, kl_p2qs = self.run_model(x_in_sym)
+        cs, nlls, kl_q2ps, kl_p2qs = self.run_model_split(x_in_sym)
         cs_as_xs = tensor.nnet.sigmoid(tanh_clip(cs, clip_val=15.0))
 
         # get important parts of the VFE bound
