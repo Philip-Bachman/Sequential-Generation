@@ -129,7 +129,7 @@ def test_rldraw_classic(step_type='add', use_pol=True):
     # setup submodels for processing LSTM inputs
     pol_mlp_in = MLP([Identity()], [dec_dim, 4*pol_dim],
                      name="pol_mlp_in", **inits)
-    enc_mlp_in = MLP([Identity()], [(read_dim + dec_dim), 4*enc_dim],
+    enc_mlp_in = MLP([Identity()], [(x_dim + dec_dim), 4*enc_dim],
                      name="enc_mlp_in", **inits)
     dec_mlp_in = MLP([Identity()], [z_dim, 4*dec_dim],
                      name="dec_mlp_in", **inits)
@@ -150,7 +150,7 @@ def test_rldraw_classic(step_type='add', use_pol=True):
                 step_type=step_type, # step_type can be 'add' or 'jump'
                 use_pol=use_pol,
                 reader_mlp=reader_mlp,
-                writer_mlp=writer_mlp
+                writer_mlp=writer_mlp,
                 pol_mlp_in=pol_mlp_in,
                 pol_mlp_out=pol_mlp_out,
                 pol_rnn=pol_rnn,
@@ -165,8 +165,17 @@ def test_rldraw_classic(step_type='add', use_pol=True):
     compile_start_time = time.time()
 
     # build the cost gradients, training function, samplers, etc.
-    draw.build_model_funcs()
     draw.build_sampling_funcs()
+    print("Testing model sampler...")
+    # draw some independent samples from the model
+    samples = draw.sample_model(Xtr[:65,:], sample_source='p')
+    n_iter, N, D = samples.shape
+    samples = samples.reshape( (n_iter, N, 28, 28) )
+    for j in xrange(n_iter):
+        img = img_grid(samples[j,:,:,:])
+        img.save("%s_samples_%03d.png" % (res_tag, j))
+
+    draw.build_model_funcs()
 
     compile_end_time = time.time()
     compile_minutes = (compile_end_time - compile_start_time) / 60.0
@@ -227,7 +236,7 @@ def test_rldraw_classic(step_type='add', use_pol=True):
             out_file.write(joint_str+"\n")
             out_file.flush()
             # draw some independent samples from the model
-            samples = draw.sample_model(Xb[:256], sample_source='p')
+            samples = draw.sample_model(Xb[:256,:], sample_source='p')
             n_iter, N, D = samples.shape
             samples = samples.reshape( (n_iter, N, 28, 28) )
             for j in xrange(n_iter):
@@ -239,7 +248,7 @@ if __name__=="__main__":
     #########################################################################
     # Train "binarized MNIST" generative models (open loopish LSTM quartet) #
     #########################################################################
-    test_rldraw_classic(step_type='add', use_pol=True)
+    #test_rldraw_classic(step_type='add', use_pol=True)
     test_rldraw_classic(step_type='add', use_pol=False)
 
 

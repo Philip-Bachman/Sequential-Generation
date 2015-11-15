@@ -1394,6 +1394,13 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         ones_ary = numpy.ones((1,)).astype(theano.config.floatX)
         self.train_switch = theano.shared(value=ones_ary, name='train_switch')
 
+        # shared var learning rate for generator and inferencer
+        zero_ary = to_fX( numpy.zeros((1,)) )
+        self.lr = theano.shared(value=zero_ary, name='rld_lr')
+        # shared var momentum parameters for generator and inferencer
+        self.mom_1 = theano.shared(value=zero_ary, name='rld_mom_1')
+        self.mom_2 = theano.shared(value=zero_ary, name='rld_mom_2')
+
         # regularization noise on RNN states
         zero_ary = to_fX(numpy.zeros((1,)))
         self.rnn_noise = theano.shared(value=zero_ary, name='rnn_noise')
@@ -1555,7 +1562,7 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         # compute KL(q || p) and KL(p || q) for this step
         kl_q2p = tensor.sum(gaussian_kld(q_z_mean, q_z_logvar, \
                             p_z_mean, p_z_logvar), axis=1)
-        kl_p2q = tensor.sum(gaussian_kld(p_gen_mean, p_gen_logvar, \
+        kl_p2q = tensor.sum(gaussian_kld(p_z_mean, p_z_logvar, \
                             q_z_mean, q_z_logvar), axis=1)
         return c, h_pol, c_pol, h_enc, c_enc, h_dec, c_dec, nll, kl_q2p, kl_p2q
 
@@ -1638,8 +1645,8 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
 
         # compute the full cost w.r.t. which we will optimize params
         self.joint_cost = self.nll_term + \
-                          (self.lam_kld_q2p[0] * self.kld_q2p_term) + \
-                          (self.lam_kld_p2q[0] * self.kld_p2q_term) + \
+                          (0.95 * self.kld_q2p_term) + \
+                          (0.05 * self.kld_p2q_term) + \
                           self.reg_term
         self.joint_cost.name = "joint_cost"
 
