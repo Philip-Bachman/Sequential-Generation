@@ -409,6 +409,374 @@ def test_seq_cond_gen_alt(use_var=True, use_att=True,
             visualize_attention_joint(result, pre_tag=result_tag, post_tag=post_tag)
 
 
+BREAK_STR = """
+#############################################################################
+#############################################################################
+#############################################################################
+#############################################################################
+#############################################################################
+#############################################################################
+#############################################################################
+#############################################################################
+"""
+
+def test_seq_cond_gen_alt(use_var=True, use_att=True,
+                          traj_len=15, x_objs=['circle'], y_objs=[0],
+                          res_tag="AAA", sample_pretrained=False):
+    ##############################
+    # File tag, for output stuff #
+    ##############################
+    if use_att:
+        att_tag = "YA"
+    else:
+        att_tag = "NA"
+    var_flags = "UV{}_{}".format(int(use_var), att_tag)
+    result_tag = "{}AAA_VID_SCGALU_{}_{}".format(RESULT_PATH, var_flags, res_tag)
+
+    # begin by saving an archive of the "main" code files for this test
+    if not sample_pretrained:
+        tar_name = "{}_code.tar".format(result_tag)
+        code_tar = tarfile.open(name=tar_name, mode='w')
+        code_tar.add('BlocksAttention.py')
+        code_tar.add('SeqCondGenVariants.py')
+        code_tar.add('TestRAMVideo.py')
+        code_tar.close()
+
+    batch_size = 192
+    traj_len = 15
+    im_dim = 32
+    obs_dim = im_dim*im_dim
+
+    # configure a trajectory generator
+    obj_scale = 0.2
+    im_box = 1.0 - obj_scale
+    x_range = [-im_box,im_box]
+    y_range = [-im_box,im_box]
+    max_speed = 0.15
+    TRAJ = TrajectoryGenerator(x_range=x_range, y_range=y_range, \
+                               max_speed=max_speed)
+    # configure object renderers for the allowed object types...
+    obj_types = ['circle', 'cross', 'square', 't-up', 't-down',
+                 't-left', 't-right']
+    OPTRS = get_object_painters(im_dim=im_dim, obj_types=obj_types, obj_scale=obj_scale)
+
+    def generate_batch(num_samples, obj_type='circle'):
+        # generate a minibatch of trajectories
+        traj_pos, traj_vel = TRAJ.generate_trajectories(num_samples, traj_len)
+        traj_x = traj_pos[:,:,0]
+        traj_y = traj_pos[:,:,1]
+        # draw the trajectories
+        center_x = to_fX( traj_x.T.ravel() )
+        center_y = to_fX( traj_y.T.ravel() )
+        delta = to_fX( np.ones(center_x.shape) )
+        sigma = to_fX( np.ones(center_x.shape) )
+        paint_obj = OPTRS[obj_type]
+        W = paint_obj(center_y, center_x, delta, 0.05*sigma)
+        # shape trajectories into a batch for passing to the model
+        batch_imgs = np.zeros((num_samples, traj_len, obs_dim))
+        batch_coords = np.zeros((num_samples, traj_len, 2))
+        for i in range(num_samples):
+            start_idx = i * traj_len
+            end_idx = start_idx + traj_len
+            img_set = W[start_idx:end_idx,:]
+            batch_imgs[i,:,:] = img_set
+            batch_coords[i,:,0] = center_x[start_idx:end_idx]
+            batch_coords[i,:,1] = center_y[start_idx:end_idx]
+        batch_imgs = np.swapaxes(batch_imgs, 0, 1)
+        batch_coords = np.swapaxes(batch_coords, 0, 1)
+        return [to_fX( batch_imgs ), to_fX( batch_coords )]
+
+    def generate_batch_multi(num_samples, xobjs=['circle'], yobjs=[0], img_scale=1.0):
+        obj_imgs = []
+        obj_coords = []
+        for obj in xobjs:
+            imgs, coords = generate_batch(num_samples, obj_type=obj)
+            obj_imgs.append(imgs)
+            obj_coords.append(coords)
+        seq_len = obj_coords[0].shape[0]
+        batch_size = obj_coords[0].shape[1]
+        x_imgs = np.zeros(obj_imgs[0].shape)
+        y_imgs = np.zeros(obj_imgs[0].shape)
+        y_coords = np.zeros(obj_coords[0].shape)
+        for o_num in range(len(xobjs)):
+            x_imgs = x_imgs + obj_imgs[o_num]
+            if o_num in yobjs:
+                y_imgs = y_imgs + obj_imgs[o_num]
+            mask = npr.rand(seq_len, batch_size) < (1. / (o_num+1))
+            mask = mask[:,:,np.newaxis]
+            y_coords = (mask * obj_coords[o_num]) + ((1.-mask) * y_coords)
+        # rescale coordinates as desired
+        y_coords = img_scale * y_coords
+        # add noise to image sequences
+        pix_mask = npr.rand(*x_imgs.shape) < 0.05
+        pix_noise = npr.rand(*x_imgs.shape)
+        x_imgs = x_imgs + (pix_mask * pix_noise)
+        # clip to 0...0.99
+        x_imgs = np.maximum(x_imgs, 0.001)
+        x_imgs = np.minimum(x_imgs, 0.999)
+        y_imgs = np.maximum(y_imgs, 0.001)
+        y_imgs = np.minimum(y_imgs, 0.999)
+        return [to_fX(x_imgs), to_fX(y_imgs), to_fX(y_coords)]
+
+    ############################################################
+    # Setup some parameters for the Iterative Refinement Model #
+    ############################################################
+    total_steps = traj_len
+    init_steps = 10
+    exit_rate = 0.0
+    nll_weight = 1.0
+    x_dim = obs_dim
+    y_dim = obs_dim
+    z_dim = 256
+    att_spec_dim = 5
+    rnn_dim = 512
+    mlp_dim = 512
+
+    def visualize_attention(result, pre_tag="AAA", post_tag="AAA"):
+        seq_len = result[0].shape[0]
+        samp_count = result[0].shape[1]
+        # get generated predictions
+        x_samps = np.zeros((seq_len*samp_count, obs_dim))
+        idx = 0
+        for s1 in range(samp_count):
+            for s2 in range(seq_len):
+                x_samps[idx] = result[0][s2,s1,:]
+                idx += 1
+        file_name = "{0:s}_traj_xs_{1:s}.png".format(pre_tag, post_tag)
+        utils.visualize_samples(x_samps, file_name, num_rows=samp_count)
+        # get sequential attention maps
+        seq_samps = np.zeros((seq_len*samp_count, obs_dim))
+        idx = 0
+        for s1 in range(samp_count):
+            for s2 in range(seq_len):
+                seq_samps[idx] = result[1][s2,s1,:]
+                idx += 1
+        file_name = "{0:s}_traj_att_maps_{1:s}.png".format(pre_tag, post_tag)
+        utils.visualize_samples(seq_samps, file_name, num_rows=samp_count)
+        # get sequential attention maps (read out values)
+        seq_samps = np.zeros((seq_len*samp_count, obs_dim))
+        idx = 0
+        for s1 in range(samp_count):
+            for s2 in range(seq_len):
+                seq_samps[idx] = result[2][s2,s1,:]
+                idx += 1
+        file_name = "{0:s}_traj_read_outs_{1:s}.png".format(pre_tag, post_tag)
+        utils.visualize_samples(seq_samps, file_name, num_rows=samp_count)
+        # get original input sequences
+        seq_samps = np.zeros((seq_len*samp_count, obs_dim))
+        idx = 0
+        for s1 in range(samp_count):
+            for s2 in range(seq_len):
+                seq_samps[idx] = result[3][s2,s1,:]
+                idx += 1
+        file_name = "{0:s}_traj_xs_in_{1:s}.png".format(pre_tag, post_tag)
+        utils.visualize_samples(seq_samps, file_name, num_rows=samp_count)
+        return
+
+    def visualize_attention_joint(result, pre_tag="AAA", post_tag="AAA"):
+        seq_len = result[0].shape[0]
+        samp_count = result[0].shape[1]
+        # get generated predictions
+        seq_samps = np.zeros((3*seq_len*samp_count, obs_dim))
+        idx = 0
+        for s1 in range(samp_count):
+            for s2 in range(seq_len):
+                seq_samps[idx] = result[3][s2,s1,:]
+                idx += 1
+            for s2 in range(seq_len):
+                seq_samps[idx] = result[0][s2,s1,:]
+                idx += 1
+            for s2 in range(seq_len):
+                seq_samps[idx] = result[1][s2,s1,:]
+                idx += 1
+        file_name = "{0:s}_traj_joint_{1:s}.png".format(pre_tag, post_tag)
+        utils.visualize_samples(seq_samps, file_name, num_rows=(3*samp_count))
+        return
+
+    rnninits = {
+        'weights_init': IsotropicGaussian(0.02),
+        'biases_init': Constant(0.),
+    }
+    inits = {
+        'weights_init': IsotropicGaussian(0.02),
+        'biases_init': Constant(0.),
+    }
+
+    # module for doing local 2d read defined by an attention specification
+    img_scale = 1.0 # image coords will range over [-img_scale...img_scale]
+    read_N = 2      # use NxN grid for reader
+    reader_mlp = FovAttentionReader2d(x_dim=x_dim,
+                                      width=im_dim, height=im_dim, N=read_N,
+                                      img_scale=img_scale, att_scale=0.33,
+                                      **inits)
+    read_dim = reader_mlp.read_dim # total number of "pixels" read by reader
+
+    # MLP for transforming z into attention specs
+    dec_mlp_attn = MLP([Rectifier(), Identity()], [z_dim, mlp_dim, att_spec_dim],
+                       name="dec_mlp_attn", **inits)
+    # MLP for transforming z into self loop information
+    dec_mlp_self = MLP([Rectifier(), Identity()], [z_dim, mlp_dim, z_dim],
+                       name="dec_mlp_self", **inits)
+    # MLP for transforming z into a prediction for y
+    dec_mlp_pred = MLP([Rectifier(), Identity()], [z_dim, mlp_dim, y_dim],
+                       name="dec_mlp_self", **inits)
+
+    # mlps for processing inputs to LSTMs (find dimensions)
+    if use_att:
+        pol1_input_dim = read_dim + att_spec_dim + z_dim
+        var1_input_dim = y_dim + read_dim + att_spec_dim + z_dim
+    else:
+        pol1_input_dim = x_dim + z_dim
+        var1_input_dim = y_dim + x_dim + z_dim
+    pol2_input_dim = z_dim + rnn_dim
+    var2_input_dim = z_dim + rnn_dim
+    # mlps for processing inputs to LSTMs (make models)
+    pol1_mlp_in = MLP([Identity()], [pol1_input_dim, 4*rnn_dim], \
+                      name="pol1_mlp_in", **inits)
+    pol2_mlp_in = MLP([Identity()], [pol2_input_dim, 4*rnn_dim], \
+                      name="pol2_mlp_in", **inits)
+    var1_mlp_in = MLP([Identity()], [var1_input_dim, 4*rnn_dim], \
+                      name="var1_mlp_in", **inits)
+    var2_mlp_in = MLP([Identity()], [var2_input_dim, 4*rnn_dim], \
+                      name="var2_mlp_in", **inits)
+
+    # mlps for turning LSTM outputs into conditionals over zin and z
+    pol1_mlp_out = CondNet([], [rnn_dim, z_dim], \
+                           name="pol1_mlp_out", **inits)
+    var1_mlp_out = CondNet([], [rnn_dim, z_dim], \
+                           name="var1_mlp_out", **inits)
+    pol2_mlp_out = CondNet([], [rnn_dim, z_dim], \
+                           name="pol2_mlp_out", **inits)
+    var2_mlp_out = CondNet([], [rnn_dim, z_dim], \
+                           name="var2_mlp_out", **inits)
+
+    # LSTMs for the actual LSTMs (obviously, perhaps)
+    pol1_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=1.0, \
+                          name="pol1_rnn", **rnninits)
+    pol2_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=1.0, \
+                          name="pol2_rnn", **rnninits)
+    var1_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=1.0, \
+                          name="var1_rnn", **rnninits)
+    var2_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=1.0, \
+                          name="var2_rnn", **rnninits)
+
+    SCG = SeqCondGenALU(
+                x_and_y_are_seqs=True,
+                total_steps=total_steps,
+                init_steps=init_steps,
+                exit_rate=exit_rate,
+                nll_weight=nll_weight,
+                x_dim=obs_dim,
+                y_dim=obs_dim,
+                use_var=use_var,
+                use_att=True,
+                reader_mlp=reader_mlp,
+                pol1_mlp_in=pol1_mlp_in,
+                pol1_rnn=pol1_rnn,
+                pol1_mlp_out=pol1_mlp_out,
+                pol2_mlp_in=pol2_mlp_in,
+                pol2_rnn=pol2_rnn,
+                pol2_mlp_out=pol2_mlp_out,
+                var1_mlp_in=var1_mlp_in,
+                var1_rnn=var1_rnn,
+                var1_mlp_out=var1_mlp_out,
+                var2_mlp_in=var2_mlp_in,
+                var2_rnn=var2_rnn,
+                var2_mlp_out=var2_mlp_out,
+                dec_mlp_attn=dec_mlp_attn,
+                dec_mlp_self=dec_mlp_self,
+                dec_mlp_pred=dec_mlp_pred)
+    SCG.initialize()
+
+    compile_start_time = time.time()
+
+    # build the attention trajectory sampler
+    SCG.build_attention_funcs()
+
+    # TEST SAVE/LOAD FUNCTIONALITY
+    param_save_file = "{}_params.pkl".format(result_tag)
+    if sample_pretrained:
+        SCG.load_model_params(param_save_file)
+
+    # quick test of attention trajectory sampler
+    samp_count = 32
+    Xb, Yb, Cb = generate_batch_multi(samp_count, xobjs=x_objs, yobjs=y_objs, img_scale=img_scale)
+
+    if sample_pretrained:
+        # draw sample trajectories from both guide and primary policies
+        result = SCG.sample_attention(Xb, Yb, sample_source='q')
+        visualize_attention_joint(result, pre_tag=result_tag, post_tag="QS")
+        result = SCG.sample_attention(Xb, Yb, sample_source='p')
+        visualize_attention_joint(result, pre_tag=result_tag, post_tag="PS")
+        return # only sample a model trajectory and then quit
+    else:
+        result = SCG.sample_attention(Xb, Yb)
+        visualize_attention_joint(result, pre_tag=result_tag, post_tag="b0")
+
+    # build the main model functions (i.e. training and cost functions)
+    SCG.build_model_funcs()
+
+    compile_end_time = time.time()
+    compile_minutes = (compile_end_time - compile_start_time) / 60.0
+    print("THEANO COMPILE TIME (MIN): {}".format(compile_minutes))
+
+    ################################################################
+    # Apply some updates, to check that they aren't totally broken #
+    ################################################################
+    print("Beginning to train the model...")
+    out_file = open("{}_results.txt".format(result_tag), 'wb')
+    out_file.flush()
+    costs = [0. for i in range(10)]
+    learn_rate = 0.0001
+    #learn_rate = 0.00005
+    momentum = 0.9
+    kl_scale = 1.0
+    cost_iters = 0
+    for i in range(500000):
+        scale = min(1.0, ((i+1) / 5000.0))
+        if (((i + 1) % 10000) == 0):
+            learn_rate = learn_rate * 0.96
+        if ((i > 160000) and ((i % 20000) == 0)):
+            kl_scale = kl_scale + 0.1
+        # set sgd and objective function hyperparams for this update
+        SCG.set_sgd_params(lr=scale*learn_rate, mom_1=scale*momentum, mom_2=0.98)
+        SCG.set_lam_kld(lam_kld_q2p=kl_scale*1.0, lam_kld_p2q=kl_scale*1.0, \
+                        lam_kld_amu=0.0, lam_kld_alv=0.0)
+        # perform a minibatch update and record the cost for this batch
+        Xb, Yb, Cb = generate_batch_multi(samp_count, xobjs=x_objs, yobjs=y_objs, img_scale=img_scale)
+        result = SCG.train_joint(Xb, Yb)
+        costs = [(costs[j] + result[j]) for j in range(len(result))]
+        cost_iters += 1
+        # output diagnostic information and checkpoint parameters, etc.
+        if (((i % 1000) == 0) or \
+            ((i < 100) and ((i % 5) == 0)) or \
+            ((i < 1000) and ((i % 20) == 0))):
+            costs = [(v / float(cost_iters)) for v in costs]
+            str1 = "-- batch {0:d} --".format(i)
+            str2 = "    total_cost: {0:.4f}".format(costs[0])
+            str3 = "    nll_term  : {0:.4f}".format(costs[1])
+            str4 = "    kld_q2p   : {0:.4f}".format(costs[2])
+            str5 = "    kld_p2q   : {0:.4f}".format(costs[3])
+            str6 = "    reg_term  : {0:.4f}".format(costs[4])
+            str7 = "    grad_norm : {0:.4f}".format(costs[5])
+            str8 = "    updt_norm : {0:.4f}".format(costs[6])
+            joint_str = "\n".join([str1, str2, str3, str4, str5, str6, str7, str8])
+            print(joint_str)
+            out_file.write(joint_str+"\n")
+            out_file.flush()
+            costs = [0.0 for v in costs]
+            cost_iters = 0
+        if ((i % 5000) == 0):
+            SCG.save_model_params("{}_params.pkl".format(result_tag))
+            ###########################################
+            # Sample and draw attention trajectories. #
+            ###########################################
+            samp_count = 32
+            Xb, Yb, Cb = generate_batch_multi(samp_count, xobjs=x_objs, yobjs=y_objs, img_scale=img_scale)
+            result = SCG.sample_attention(Xb, Yb)
+            post_tag = "b{0:d}".format(i)
+            #visualize_attention(result, pre_tag=result_tag, post_tag=post_tag)
+            visualize_attention_joint(result, pre_tag=result_tag, post_tag=post_tag)
 
 
 if __name__=="__main__":
@@ -421,6 +789,6 @@ if __name__=="__main__":
     #################################
     # TEST WITH GUIDE OBSERVER ONLY #
     #################################
-    test_seq_cond_gen_alt(use_var=True, use_att=True, traj_len=15, \
+    test_seq_cond_gen_alu(use_var=True, use_att=True, traj_len=15, \
                           x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
                           res_tag="T3", sample_pretrained=False)
