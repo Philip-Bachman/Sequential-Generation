@@ -1367,7 +1367,7 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
     def __init__(self, n_iter, step_type, use_pol,
                  reader_mlp, writer_mlp,
                  pol_mlp_in, pol_rnn, pol_mlp_out,
-                 enc_mlp_in, enc_rnn, enc_mlp_out,
+                 var_mlp_in, var_rnn, var_mlp_out,
                  dec_mlp_in, dec_rnn, dec_mlp_out,
                  **kwargs):
         super(RLDrawModel, self).__init__(**kwargs)
@@ -1383,9 +1383,9 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         self.pol_mlp_in = pol_mlp_in
         self.pol_rnn = pol_rnn
         self.pol_mlp_out = pol_mlp_out
-        self.enc_mlp_in = enc_mlp_in
-        self.enc_rnn = enc_rnn
-        self.enc_mlp_out = enc_mlp_out
+        self.var_mlp_in = var_mlp_in
+        self.var_rnn = var_rnn
+        self.var_mlp_out = var_mlp_out
         self.dec_mlp_in = dec_mlp_in
         self.dec_rnn = dec_rnn
         self.dec_mlp_out = dec_mlp_out
@@ -1414,7 +1414,7 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         # record the sub-models that underlie this model
         self.children = [self.reader_mlp, self.writer_mlp,
                          self.pol_mlp_in, self.pol_rnn, self.pol_mlp_out,
-                         self.enc_mlp_in, self.enc_rnn, self.enc_mlp_out,
+                         self.var_mlp_in, self.var_rnn, self.var_mlp_out,
                          self.dec_mlp_in, self.dec_rnn, self.dec_mlp_out]
         return
 
@@ -1426,8 +1426,8 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         c_dim = self.get_dim('c')
         cp_dim = self.get_dim('c_pol')
         hp_dim = self.get_dim('h_pol')
-        ce_dim = self.get_dim('c_enc')
-        he_dim = self.get_dim('h_enc')
+        cv_dim = self.get_dim('c_var')
+        hv_dim = self.get_dim('h_var')
         cd_dim = self.get_dim('c_dec')
         hd_dim = self.get_dim('h_dec')
         # self.c_0 provides initial state of the next column prediction
@@ -1438,11 +1438,11 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         add_role(self.cp_0, PARAMETER)
         self.hp_0 = shared_floatx_nans((1,hp_dim), name='hp_0')
         add_role(self.hp_0, PARAMETER)
-        # self.ce_0/self.he_0 provides initial state of the guide policy
-        self.ce_0 = shared_floatx_nans((1,ce_dim), name='ce_0')
-        add_role(self.ce_0, PARAMETER)
-        self.he_0 = shared_floatx_nans((1,he_dim), name='he_0')
-        add_role(self.he_0, PARAMETER)
+        # self.cv_0/self.hv_0 provides initial state of the guide policy
+        self.cv_0 = shared_floatx_nans((1,cv_dim), name='cv_0')
+        add_role(self.cv_0, PARAMETER)
+        self.hv_0 = shared_floatx_nans((1,hv_dim), name='hv_0')
+        add_role(self.hv_0, PARAMETER)
         # self.cd_0/self.hd_0 provides initial state of the shared dynamics
         self.cd_0 = shared_floatx_nans((1,cd_dim), name='cd_0')
         add_role(self.cd_0, PARAMETER)
@@ -1450,8 +1450,8 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         add_role(self.hd_0, PARAMETER)
         # add the theano shared variables to our parameter lists
         self.params.extend([ self.c_0,
-                             self.cp_0, self.ce_0, self.cd_0,
-                             self.hp_0, self.he_0, self.hd_0 ])
+                             self.cp_0, self.cv_0, self.cd_0,
+                             self.hp_0, self.hv_0, self.hd_0 ])
         return
 
     def _initialize(self):
@@ -1469,16 +1469,16 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
             return self.pol_rnn.get_dim('states')
         elif name == 'c_pol':
             return self.pol_rnn.get_dim('cells')
-        elif name == 'h_enc':
-            return self.enc_rnn.get_dim('states')
-        elif name == 'c_enc':
-            return self.enc_rnn.get_dim('cells')
+        elif name == 'h_var':
+            return self.var_rnn.get_dim('states')
+        elif name == 'c_var':
+            return self.var_rnn.get_dim('cells')
         elif name == 'h_dec':
             return self.dec_rnn.get_dim('states')
         elif name == 'c_dec':
             return self.dec_rnn.get_dim('cells')
         elif name == 'z':
-            return self.enc_mlp_out.get_dim('output')
+            return self.var_mlp_out.get_dim('output')
         elif name in ['nll', 'kl_q2p', 'kl_p2q']:
             return 0
         else:
@@ -1512,9 +1512,9 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
     #------------------------------------------------------------------------
 
     @recurrent(sequences=['u'], contexts=['x'],
-               states=['c', 'h_pol', 'c_pol', 'h_enc', 'c_enc', 'h_dec', 'c_dec', 'nll', 'kl_q2p', 'kl_p2q'],
-               outputs=['c', 'h_pol', 'c_pol', 'h_enc', 'c_enc', 'h_dec', 'c_dec', 'nll', 'kl_q2p', 'kl_p2q'])
-    def apply(self, u, c, h_pol, c_pol, h_enc, c_enc, h_dec, c_dec, nll, kl_q2p, kl_p2q, x):
+               states=['c', 'h_pol', 'c_pol', 'h_var', 'c_var', 'h_dec', 'c_dec', 'nll', 'kl_q2p', 'kl_p2q'],
+               outputs=['c', 'h_pol', 'c_pol', 'h_var', 'c_var', 'h_dec', 'c_dec', 'nll', 'kl_q2p', 'kl_p2q'])
+    def apply(self, u, c, h_pol, c_pol, h_var, c_var, h_dec, c_dec, nll, kl_q2p, kl_p2q, x):
         # get current state of the x under construction
         if self.step_type == 'add':
             c = c
@@ -1529,10 +1529,10 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
                                           inputs=i_pol, iterate=False)
 
         # update the guide policy state
-        enc_inp = tensor.concatenate([x, h_dec], axis=1)
-        i_enc = self.enc_mlp_in.apply(enc_inp)
-        h_enc, c_enc = self.enc_rnn.apply(states=h_enc, cells=c_enc,
-                                          inputs=i_enc, iterate=False)
+        var_inp = tensor.concatenate([x, h_dec], axis=1)
+        i_var = self.var_mlp_in.apply(var_inp)
+        h_var, c_var = self.var_rnn.apply(states=h_var, cells=c_var,
+                                          inputs=i_var, iterate=False)
 
         # estimate primary policy's conditional over z
         p_z_mean, p_z_logvar, p_z = self.pol_mlp_out.apply(h_pol, u)
@@ -1542,7 +1542,7 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
             p_z_logvar = 0.0 * p_z_logvar
             p_z = u
         # estimate guide policy's conditional over z
-        q_z_mean, q_z_logvar, q_z = self.enc_mlp_out.apply(h_enc, u)
+        q_z_mean, q_z_logvar, q_z = self.var_mlp_out.apply(h_var, u)
 
         # mix samples from p/q based on value of self.train_switch
         z = (self.train_switch[0] * q_z) + \
@@ -1567,24 +1567,24 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
                             p_z_mean, p_z_logvar), axis=1)
         kl_p2q = tensor.sum(gaussian_kld(p_z_mean, p_z_logvar, \
                             q_z_mean, q_z_logvar), axis=1)
-        return c, h_pol, c_pol, h_enc, c_enc, h_dec, c_dec, nll, kl_q2p, kl_p2q
+        return c, h_pol, c_pol, h_var, c_var, h_dec, c_dec, nll, kl_q2p, kl_p2q
 
     ############################################
     # FUNCS FOR SAMPLING SPLIT RUNS OF P AND Q #
     ############################################
 
     @recurrent(sequences=['u'], contexts=['x'],
-               states=['c', 'h_pol', 'c_pol', 'h_enc', 'c_enc', 'h_dec', 'c_dec'],
-               outputs=['c', 'h_pol', 'c_pol', 'h_enc', 'c_enc', 'h_dec', 'c_dec', 'z', 'log_prob_z'])
-    def run_before(self, u, c, h_pol, c_pol, h_enc, c_enc, h_dec, c_dec, x):
+               states=['c', 'h_pol', 'c_pol', 'h_var', 'c_var', 'h_dec', 'c_dec'],
+               outputs=['c', 'h_pol', 'c_pol', 'h_var', 'c_var', 'h_dec', 'c_dec', 'z', 'log_prob_z'])
+    def run_before(self, u, c, h_pol, c_pol, h_var, c_var, h_dec, c_dec, x):
         if self.use_q:
             # update the guide policy state
-            enc_inp = tensor.concatenate([x, h_dec], axis=1)
-            i_enc = self.enc_mlp_in.apply(enc_inp)
-            h_enc, c_enc = self.enc_rnn.apply(states=h_enc, cells=c_enc,
-                                              inputs=i_enc, iterate=False)
+            var_inp = tensor.concatenate([x, h_dec], axis=1)
+            i_var = self.var_mlp_in.apply(var_inp)
+            h_var, c_var = self.var_rnn.apply(states=h_var, cells=c_var,
+                                              inputs=i_var, iterate=False)
             # estimate guide policy's conditional over z
-            z_mean, z_logvar, z = self.enc_mlp_out.apply(h_enc, u)
+            z_mean, z_logvar, z = self.var_mlp_out.apply(h_var, u)
         elif self.use_p:
             # update the primary policy state
             pol_inp = tensor.concatenate([h_dec], axis=1)
@@ -1612,20 +1612,20 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
             c = c + self.writer_mlp.apply(h_dec)
         else:
             c = self.writer_mlp.apply(h_dec)
-        return c, h_pol, c_pol, h_enc, c_enc, h_dec, c_dec, z, log_prob_z
+        return c, h_pol, c_pol, h_var, c_var, h_dec, c_dec, z, log_prob_z
 
     @recurrent(sequences=['z', 'h_dec'], contexts=['x'],
-               states=['h_pol', 'c_pol', 'h_enc', 'c_enc'],
-               outputs=['h_pol', 'c_pol', 'h_enc', 'c_enc', 'log_prob_z'])
-    def run_after(self, z, h_dec, h_pol, c_pol, h_enc, c_enc, x):
+               states=['h_pol', 'c_pol', 'h_var', 'c_var'],
+               outputs=['h_pol', 'c_pol', 'h_var', 'c_var', 'log_prob_z'])
+    def run_after(self, z, h_dec, h_pol, c_pol, h_var, c_var, x):
         if self.use_q:
             # update the guide policy state
-            enc_inp = tensor.concatenate([x, h_dec], axis=1)
-            i_enc = self.enc_mlp_in.apply(enc_inp)
-            h_enc, c_enc = self.enc_rnn.apply(states=h_enc, cells=c_enc,
-                                              inputs=i_enc, iterate=False)
+            var_inp = tensor.concatenate([x, h_dec], axis=1)
+            i_var = self.var_mlp_in.apply(var_inp)
+            h_var, c_var = self.var_rnn.apply(states=h_var, cells=c_var,
+                                              inputs=i_var, iterate=False)
             # estimate guide policy's conditional over z
-            z_mean, z_logvar, _ = self.enc_mlp_out.apply(h_enc, 0.0*z)
+            z_mean, z_logvar, _ = self.var_mlp_out.apply(h_var, 0.0*z)
         elif self.use_p:
             # update the primary policy state
             pol_inp = tensor.concatenate([h_dec], axis=1)
@@ -1642,7 +1642,7 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
             assert False, "Run flags not set properly!"
         # compute log(prob(z | h))
         log_prob_z = tensor.flatten(log_prob_gaussian2(z, z_mean, z_logvar))
-        return h_pol, c_pol, h_enc, c_enc, log_prob_z
+        return h_pol, c_pol, h_var, c_var, log_prob_z
 
     #------------------------------------------------------------------------
 
@@ -1653,18 +1653,18 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         batch_size = x_in.shape[0]
         z_dim = self.get_dim('z')
         cp_dim = self.get_dim('c_pol')
-        ce_dim = self.get_dim('c_enc')
+        cv_dim = self.get_dim('c_var')
         cd_dim = self.get_dim('c_dec')
         hp_dim = self.get_dim('h_pol')
-        he_dim = self.get_dim('h_enc')
+        hv_dim = self.get_dim('h_var')
         hd_dim = self.get_dim('h_dec')
 
         # get initial states for all model components
         c0 = self.c_0.repeat(batch_size, axis=0)
         cp0 = self.cp_0.repeat(batch_size, axis=0)
         hp0 = self.hp_0.repeat(batch_size, axis=0)
-        ce0 = self.ce_0.repeat(batch_size, axis=0)
-        he0 = self.he_0.repeat(batch_size, axis=0)
+        cv0 = self.cv_0.repeat(batch_size, axis=0)
+        hv0 = self.hv_0.repeat(batch_size, axis=0)
         cd0 = self.cd_0.repeat(batch_size, axis=0)
         hd0 = self.hd_0.repeat(batch_size, axis=0)
 
@@ -1677,7 +1677,7 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         cs, _, _, _, _, _, _, nlls, kl_q2ps, kl_p2qs = \
                 self.apply(u=u, c=c0,
                            h_pol=hp0, c_pol=cp0,
-                           h_enc=he0, c_enc=ce0,
+                           h_var=hv0, c_var=cv0,
                            h_dec=hd0, c_dec=cd0, x=x_in)
 
         # add name tags to the constructed symbolic variables
@@ -1695,18 +1695,18 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         batch_size = x_in.shape[0]
         z_dim = self.get_dim('z')
         cp_dim = self.get_dim('c_pol')
-        ce_dim = self.get_dim('c_enc')
+        cv_dim = self.get_dim('c_var')
         cd_dim = self.get_dim('c_dec')
         hp_dim = self.get_dim('h_pol')
-        he_dim = self.get_dim('h_enc')
+        hv_dim = self.get_dim('h_var')
         hd_dim = self.get_dim('h_dec')
 
         # get initial states for all model components
         c0 = self.c_0.repeat(batch_size, axis=0)
         cp0 = self.cp_0.repeat(batch_size, axis=0)
         hp0 = self.hp_0.repeat(batch_size, axis=0)
-        ce0 = self.ce_0.repeat(batch_size, axis=0)
-        he0 = self.he_0.repeat(batch_size, axis=0)
+        cv0 = self.cv_0.repeat(batch_size, axis=0)
+        hv0 = self.hv_0.repeat(batch_size, axis=0)
         cd0 = self.cd_0.repeat(batch_size, axis=0)
         hd0 = self.hd_0.repeat(batch_size, axis=0)
 
@@ -1720,21 +1720,21 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         # run the generative process starting from q
         self.use_q = True
         self.use_p = False
-        cs_from_q, _, _, _, _, hds_from_q, _, zs_from_q, log_q_zs_from_q = \
+        cs_from_q, _, _, _, _, hds_from_q, _, zs_from_q, log_prob_q_zs_from_q = \
                 self.run_before(u=u_for_q, c=c0,
                            h_pol=hp0, c_pol=cp0,
-                           h_enc=he0, c_enc=ce0,
+                           h_var=hv0, c_var=cv0,
                            h_dec=hd0, c_dec=cd0, x=x_in)
         # try to follow the q trajectory using p
         self.use_p = True
         self.use_q = False
         all_hds_from_q = tensor.concatenate([hd0.dimshuffle('x',0,1), hds_from_q], axis=0)
         hds_from_q_for_p = all_hds_from_q[:-1,:,:]
-        _, _, _, _, log_p_zs_from_q = \
+        _, _, _, _, log_prob_p_zs_from_q = \
                 self.run_after(z=zs_from_q,
                           h_dec=hds_from_q_for_p,
                           h_pol=hp0, c_pol=cp0,
-                          h_enc=he0, c_enc=ce0, x=x_in)
+                          h_var=hv0, c_var=cv0, x=x_in)
 
 
         ################

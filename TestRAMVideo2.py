@@ -396,7 +396,7 @@ def test_seq_cond_gen_alt(use_var=True, use_att=True,
             out_file.flush()
             costs = [0.0 for v in costs]
             cost_iters = 0
-        if ((i % 5000) == 0):
+        if ((i % 5000) == 0) or (((i % 100) == 0) and (i < 1500)):
             SCG.save_model_params("{}_params.pkl".format(result_tag))
             ###########################################
             # Sample and draw attention trajectories. #
