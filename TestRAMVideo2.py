@@ -52,7 +52,7 @@ BREAK_STR = """
 #############################################################################
 """
 
-def test_seq_cond_gen_all(use_var=True, use_rav=True, use_att=True,
+def test_seq_cond_gen_alt(use_var=True, use_att=True,
                           traj_len=15, x_objs=['circle'], y_objs=[0],
                           res_tag="AAA", sample_pretrained=False):
     ##############################
@@ -62,8 +62,8 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, use_att=True,
         att_tag = "YA"
     else:
         att_tag = "NA"
-    var_flags = "UV{}_UR{}_{}".format(int(use_var), int(use_rav), att_tag)
-    result_tag = "{}AAA_VID_SCGALL_{}_{}".format(RESULT_PATH, var_flags, res_tag)
+    var_flags = "UV{}_{}".format(int(use_var), att_tag)
+    result_tag = "{}AAA_VID_SCGALT_{}_{}".format(RESULT_PATH, var_flags, res_tag)
 
     # begin by saving an archive of the "main" code files for this test
     if not sample_pretrained:
@@ -156,7 +156,7 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, use_att=True,
     total_steps = traj_len
     init_steps = 10
     exit_rate = 0.0
-    nll_weight = 0.5
+    nll_weight = 1.0
     x_dim = obs_dim
     y_dim = obs_dim
     z_dim = 256
@@ -243,89 +243,55 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, use_att=True,
                                       **inits)
     read_dim = reader_mlp.read_dim # total number of "pixels" read by reader
 
-    # MLP for updating belief state based on con_rnn
+    # MLP for transforming shared dynamics state into prediction for y
     writer_mlp = MLP([Rectifier(), Identity()], [rnn_dim, mlp_dim, obs_dim], \
                      name="writer_mlp", **inits)
 
-    # mlps for processing inputs to LSTMs
-    con_mlp_in = MLP([Identity()], \
-                     [z_dim, 4*rnn_dim], \
-                     name="con_mlp_in", **inits)
-    obs_mlp_in = MLP([Identity()], \
-                     [(read_dim + att_spec_dim + rnn_dim), 4*rnn_dim], \
-                     name="obs_mlp_in", **inits)
-    var_mlp_in = MLP([Identity()], \
-                     [(y_dim + read_dim + att_spec_dim + rnn_dim), 4*rnn_dim], \
-                     name="var_mlp_in", **inits)
-    rav_mlp_in = MLP([Identity()], \
-                     [(y_dim + z_dim), 4*rnn_dim], \
-                     name="rav_mlp_in", **inits)
+    # MLP for transforming z into an attention spec
+    att_spec_mlp = MLP([Rectifier(), Identity()], [z_dim, mlp_dim, att_spec_dim], \
+                       name="att_spec_mlp", **inits)
 
-    # mlps for turning LSTM outputs into conditionals over z_gen
-    con_mlp_out = CondNet([Rectifier()], [rnn_dim, mlp_dim, att_spec_dim], \
-                          name="con_mlp_out", **inits)
-    obs_mlp_out = CondNet([Rectifier()], [rnn_dim, mlp_dim, z_dim], \
-                          name="obs_mlp_out", **inits)
-    var_mlp_out = CondNet([Rectifier()], [rnn_dim, mlp_dim, z_dim], \
+    # mlps for processing inputs to LSTMs (find dimensions)
+    if use_att:
+        pol1_input_dim = read_dim + att_spec_dim + rnn_dim
+        var1_input_dim = y_dim + read_dim + att_spec_dim + rnn_dim
+    else:
+        pol1_input_dim = x_dim + att_spec_dim + rnn_dim
+        var1_input_dim = y_dim + x_dim + att_spec_dim + rnn_dim
+    pol2_input_dim = rnn_dim
+    var2_input_dim = rnn_dim
+    dyn_input_dim = z_dim
+    # mlps for processing inputs to LSTMs (make models)
+    pol1_mlp_in = MLP([Identity()], [pol1_input_dim, 4*rnn_dim], \
+                      name="pol1_mlp_in", **inits)
+    pol2_mlp_in = MLP([Identity()], [pol2_input_dim, 4*rnn_dim], \
+                      name="pol2_mlp_in", **inits)
+    var1_mlp_in = MLP([Identity()], [var1_input_dim, 4*rnn_dim], \
+                      name="var1_mlp_in", **inits)
+    var2_mlp_in = MLP([Identity()], [var2_input_dim, 4*rnn_dim], \
+                      name="var2_mlp_in", **inits)
+    dyn_mlp_in = MLP([Identity()], [dyn_input_dim, 4*rnn_dim], \
+                      name="dyn_mlp_in", **inits)
+
+    # mlps for turning LSTM outputs into conditionals over z
+    pol_mlp_out = CondNet([], [rnn_dim, z_dim], \
+                          name="pol_mlp_out", **inits)
+    var_mlp_out = CondNet([], [rnn_dim, z_dim], \
                           name="var_mlp_out", **inits)
-    rav_mlp_out = CondNet([Rectifier()], [rnn_dim, mlp_dim, att_spec_dim], \
-                          name="rav_mlp_out", **inits)
 
     # LSTMs for the actual LSTMs (obviously, perhaps)
-    con_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=1.0, \
-                         name="con_rnn", **rnninits)
-    obs_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=1.0, \
-                         name="obs_rnn", **rnninits)
-    var_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=1.0, \
-                         name="var_rnn", **rnninits)
-    rav_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=1.0, \
-                         name="rav_rnn", **rnninits)
+    pol1_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=1.0, \
+                          name="pol1_rnn", **rnninits)
+    pol2_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=1.0, \
+                          name="pol2_rnn", **rnninits)
+    var1_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=1.0, \
+                          name="var1_rnn", **rnninits)
+    var2_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=1.0, \
+                          name="var2_rnn", **rnninits)
+    dyn_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=1.0, \
+                          name="dyn_rnn", **rnninits)
 
-    SeqCondGenALL_doc_str = \
-    """
-    SeqCondGenALL -- constructs conditional densities under time constraints.
-
-    This model sequentially constructs a conditional density estimate by taking
-    repeated glimpses at the input x, and constructing a hypothesis about the
-    output y. The objective is maximum likelihood for (x,y) pairs drawn from
-    some training set. We learn a proper generative model, using variational
-    inference -- which can be interpreted as a sort of guided policy search.
-
-    The input pairs (x, y) can be either "static" or "sequential". In the
-    static case, the same x and y are used at every step of the hypothesis
-    construction loop. In the sequential case, x and y can change at each step
-    of the loop.
-
-    Parameters:
-        x_and_y_are_seqs: boolean telling whether the conditioning information
-                          and prediction targets are sequential.
-        total_steps: total number of steps in sequential estimation process
-        init_steps: number of steps prior to first NLL measurement
-        exit_rate: probability of exiting following each non "init" step
-                   **^^ THIS IS SET TO 0 WHEN USING SEQUENTIAL INPUT ^^**
-        nll_weight: weight for the prediction NLL term at each step.
-                   **^^ THIS IS IGNORED WHEN USING STATIC INPUT ^^**
-        x_dim: dimension of inputs on which to condition
-        y_dim: dimension of outputs to predict
-        use_var: whether to include "guide" distribution for observer
-        use_rav: whether to include "guide" distribution for controller
-        reader_mlp: used for reading from the input
-        writer_mlp: used for writing to the output prediction
-        con_mlp_in: preprocesses input to the "controller" LSTM
-        con_rnn: the "controller" LSTM
-        con_mlp_out: CondNet for distribution over att spec given con_rnn
-        obs_mlp_in: preprocesses input to the "observer" LSTM
-        obs_rnn: the "observer" LSTM
-        obs_mlp_out: CondNet for distribution over z given gen_rnn
-        var_mlp_in: preprocesses input to the "guide observer" LSTM
-        var_rnn: the "guide observer" LSTM
-        var_mlp_out: CondNet for distribution over z given var_rnn
-        rav_mlp_in: preprocesses input to the "guide controller" LSTM
-        rav_rnn: the "guide controller" LSTM
-        rav_mlp_out: CondNet for distribution over z given rav_rnn
-    """
-
-    SCG = SeqCondGenALL(
+    SCG = SeqCondGenALT(
                 x_and_y_are_seqs=True,
                 total_steps=total_steps,
                 init_steps=init_steps,
@@ -334,23 +300,22 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, use_att=True,
                 x_dim=obs_dim,
                 y_dim=obs_dim,
                 use_var=use_var,
-                use_rav=use_rav,
                 use_att=True,
                 reader_mlp=reader_mlp,
                 writer_mlp=writer_mlp,
-                con_mlp_in=con_mlp_in,
-                con_mlp_out=con_mlp_out,
-                con_rnn=con_rnn,
-                obs_mlp_in=obs_mlp_in,
-                obs_mlp_out=obs_mlp_out,
-                obs_rnn=obs_rnn,
-                var_mlp_in=var_mlp_in,
+                pol1_mlp_in=pol1_mlp_in,
+                pol1_rnn=pol1_rnn,
+                pol2_mlp_in=pol2_mlp_in,
+                pol2_rnn=pol2_rnn,
+                pol_mlp_out=pol_mlp_out,
+                var1_mlp_in=var1_mlp_in,
+                var1_rnn=var1_rnn,
+                var2_mlp_in=var2_mlp_in,
+                var2_rnn=var2_rnn,
                 var_mlp_out=var_mlp_out,
-                var_rnn=var_rnn,
-                rav_mlp_in=rav_mlp_in,
-                rav_mlp_out=rav_mlp_out,
-                rav_rnn=rav_rnn,
-                com_noise=0.4, att_noise=0.1)
+                dyn_mlp_in=dyn_mlp_in,
+                dyn_rnn=dyn_rnn,
+                att_spec_mlp=att_spec_mlp)
     SCG.initialize()
 
     compile_start_time = time.time()
@@ -422,12 +387,10 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, use_att=True,
             str3 = "    nll_term  : {0:.4f}".format(costs[1])
             str4 = "    kld_q2p   : {0:.4f}".format(costs[2])
             str5 = "    kld_p2q   : {0:.4f}".format(costs[3])
-            str6 = "    kld_amu   : {0:.4f}".format(costs[4])
-            str7 = "    kld_alv   : {0:.4f}".format(costs[5])
-            str8 = "    reg_term  : {0:.4f}".format(costs[6])
-            str9 = "    grad_norm : {0:.4f}".format(costs[7])
-            str10 = "    updt_norm : {0:.4f}".format(costs[8])
-            joint_str = "\n".join([str1, str2, str3, str4, str5, str6, str7, str8, str9, str10])
+            str6 = "    reg_term  : {0:.4f}".format(costs[4])
+            str7 = "    grad_norm : {0:.4f}".format(costs[5])
+            str8 = "    updt_norm : {0:.4f}".format(costs[6])
+            joint_str = "\n".join([str1, str2, str3, str4, str5, str6, str7, str8])
             print(joint_str)
             out_file.write(joint_str+"\n")
             out_file.flush()
@@ -448,29 +411,16 @@ def test_seq_cond_gen_all(use_var=True, use_rav=True, use_att=True,
 
 
 
-
 if __name__=="__main__":
     ####################################
     # TEST WITH NO GUIDE DISTRIBUTIONS #
     ####################################
-    # test_seq_cond_gen_all(use_var=False, use_rav=False, \
-    #                       x_objs=['cross', 'circle', 'circle'], y_objs=[0], \
-    #                       res_tag="T1")
-    # test_seq_cond_gen_all(use_var=False, use_rav=False, \
-    #                       x_objs=['cross', 'circle'], y_objs=[0,1], \
-    #                       res_tag="T2")
-    #test_seq_cond_gen_all(use_var=False, use_rav=False, \
+    #test_seq_cond_gen_alt(use_var=False, use_att=True, traj_len=15, \
     #                      x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
-    #                      res_tag="T3")
+    #                      res_tag="T3", sample_pretrained=False)
     #################################
     # TEST WITH GUIDE OBSERVER ONLY #
     #################################
-    # test_seq_cond_gen_all(use_var=True, use_rav=False, \
-    #                       x_objs=['cross', 'circle', 'circle'], y_objs=[0], \
-    #                       res_tag="T1")
-    # test_seq_cond_gen_all(use_var=True, use_rav=False, \
-    #                       x_objs=['cross', 'circle'], y_objs=[0,1], \
-    #                       res_tag="T2")
-    test_seq_cond_gen_all(use_var=True, use_rav=False, traj_len=15, \
+    test_seq_cond_gen_alt(use_var=True, use_att=True, traj_len=15, \
                           x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
                           res_tag="T3", sample_pretrained=False)

@@ -978,7 +978,7 @@ class IMoCLDrawModels(BaseRecurrent, Initializable, Random):
         else:
             # non-additive steps use c_dec as a "latent workspace", which means
             # it needs to be transformed before being comparable to x.
-            c_as_x = tensor.nnet.sigmoid(self.writer_mlp.apply(c_dec))
+            c_as_x = tensor.nnet.sigmoid(self.writer_mlp.apply(h_dec))
         # apply a mask for mixing observed and imputed parts of x. c_as_x
         # gives the current reconstruction of x, for all dimensions. m will
         # use 1 to indicate known values, and 0 to indicate values to impute.
@@ -1012,7 +1012,7 @@ class IMoCLDrawModels(BaseRecurrent, Initializable, Random):
         if self.step_type == 'add':
             c = c + self.writer_mlp.apply(h_dec)
         else:
-            c = self.writer_mlp.apply(c_dec)
+            c = self.writer_mlp.apply(h_dec)
         # compute the NLL of the reconstruction as of this step
         c_as_x = tensor.nnet.sigmoid(c)
         m_inv = 1.0 - m

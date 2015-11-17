@@ -326,16 +326,12 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
         # estimate conditional over attention spec given h_con (from time t-1)
         p_a_mean, p_a_logvar, p_att_spec = \
                 self.con_mlp_out.apply(h_con, u_att)
-        if self.use_rav:
-            # treat attention placement as a "latent variable", and draw
-            # samples of it from the guide policy
-            q_a_mean, q_a_logvar, q_att_spec = \
-                    self.rav_mlp_out.apply(h_rav, u_att)
-        else:
-            # treat attention placement as a "deterministic action"
-            q_a_mean, q_a_logvar, q_att_spec = p_a_mean, p_a_logvar, p_att_spec
-            p_att_spec = p_a_mean
-            q_att_spec = q_a_mean
+
+        # treat attention placement as a "deterministic action"
+        q_a_mean, q_a_logvar, q_att_spec = p_a_mean, p_a_logvar, p_att_spec
+        p_att_spec = p_a_mean
+        q_att_spec = q_a_mean
+
         # compute KL(guide || primary) for attention control
         kl_q2p_a = tensor.sum(gaussian_kld(q_a_mean, q_a_logvar, \
                               p_a_mean, p_a_logvar), axis=1)
@@ -355,7 +351,7 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
             read_img = self.reader_mlp.write(read_out, att_spec)
             # construct inputs to obs and var nets using attention
             obs_inp = tensor.concatenate([read_out, att_spec, h_con], axis=1)
-            var_inp = tensor.concatenate([true_out, read_out, att_spec, h_con], axis=1)
+            var_inp = tensor.concatenate([y, read_out, att_spec, h_con], axis=1)
         else:
             # dummy outputs for attentino visualization
             att_map = (0.0 * x) + 0.5
@@ -397,15 +393,9 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
         z = self.com_noise[0] * _z
 
         # update the primary controller RNN state
-        i_con = self.con_mlp_in.apply(tensor.concatenate([z, h_obs], axis=1))
+        i_con = self.con_mlp_in.apply(tensor.concatenate([z], axis=1))
         h_con, c_con = self.con_rnn.apply(states=h_con, cells=c_con, \
                                           inputs=i_con, iterate=False)
-
-        if self.use_rav:
-            # update the guide controller RNN state
-            i_rav = self.rav_mlp_in.apply(tensor.concatenate([y, z, h_obs], axis=1))
-            h_rav, c_rav = self.rav_rnn.apply(states=h_rav, cells=c_rav, \
-                                              inputs=i_rav, iterate=False)
 
         # update the "workspace" (stored in c)
         c = self.writer_mlp.apply(h_con)
@@ -562,21 +552,25 @@ class SeqCondGenALL(BaseRecurrent, Initializable, Random):
         self.update_norm = sum([tensor.sum(u**2.0) for u in applied_updates])
 
         # collect the outputs to return from this function
-        outputs = [self.joint_cost, self.nll_term, \
+        train_outputs = [self.joint_cost, self.nll_term, \
                    self.kld_q2p_term, self.kld_p2q_term, \
                    self.kld_amu_term, self.kld_alv_term, \
                    self.reg_term, self.grad_norm, self.update_norm]
+        bound_outputs = [self.joint_cost, self.nll_term, \
+                   self.kld_q2p_term, self.kld_p2q_term, \
+                   self.kld_amu_term, self.kld_alv_term, \
+                   self.reg_term]
         # collect the required inputs
         inputs = [x_sym, y_sym]
 
         # compile the theano functions for computing stuff, like for real
         print("Compiling model training/update function...")
         self.train_joint = theano.function(inputs=inputs, \
-                                           outputs=outputs, \
+                                           outputs=train_outputs, \
                                            updates=self.joint_updates)
         print("Compiling model cost estimator function...")
         self.compute_nll_bound = theano.function(inputs=inputs, \
-                                                 outputs=outputs)
+                                                 outputs=bound_outputs)
         return
 
     def build_attention_funcs(self):
@@ -727,12 +721,6 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
     """
     SeqCondGenALT -- constructs conditional densities under time constraints.
 
-    This model is structured like Jimmy Ba's model. The proposal distribution
-    doesn't get its own LSTM for generating attention placements. Instead, it
-    uses an MLP that receives the current controller state and the ground truth
-    target for the full current frame. There's still an optional proposal
-    distribution for communication between the observer and controller though.
-
     This model sequentially constructs a conditional density estimate by taking
     repeated glimpses at the input x, and constructing a hypothesis about the
     output y. The objective is maximum likelihood for (x,y) pairs drawn from
@@ -756,33 +744,37 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
         x_dim: dimension of inputs on which to condition
         y_dim: dimension of outputs to predict
         use_var: whether to include "guide" distribution for observer
-        use_rav: whether to include "guide" distribution for controller
+        use_att: whether to use attention or read full inputs
         reader_mlp: used for reading from the input
-        writer_mlp: used for writing to the output prediction
-        con_mlp_in: preprocesses input to the "controller" LSTM
-        con_rnn: the "controller" LSTM
-        con_mlp_out: CondNet for distribution over att spec given con_rnn
-        obs_mlp_in: preprocesses input to the "observer" LSTM
-        obs_rnn: the "observer" LSTM
-        obs_mlp_out: CondNet for distribution over z given gen_rnn
-        var_mlp_in: preprocesses input to the "guide observer" LSTM
-        var_rnn: the "guide observer" LSTM
-        var_mlp_out: CondNet for distribution over z given var_rnn
-        rav_mlp_in: preprocesses input to the "guide controller" LSTM
-        rav_rnn: the "guide controller" LSTM
-        rav_mlp_out: CondNet for distribution over z given rav_rnn
+        writer_mlp: transform shared dynamics state into a prediction for y
+        pol1_mlp_in:
+        pol1_rnn:
+        pol2_mlp_in:
+        pol2_rnn:
+        pol_mlp_out: conditional over z given h_pol2
+        var1_mlp_in:
+        var1_rnn:
+        var2_mlp_in:
+        var2_rnn:
+        var_mlp_out: conditional over z given h_var2
+        dyn_mlp_in:
+        dyn_rnn:
+        att_spec_mlp: convert z into an attention spec
     """
     def __init__(self, x_and_y_are_seqs,
                     total_steps, init_steps,
                     exit_rate, nll_weight,
                     x_dim, y_dim,
-                    use_var, use_rav,
+                    use_var, use_att,
                     reader_mlp, writer_mlp,
-                    con_mlp_in, con_rnn, con_mlp_out,
-                    obs_mlp_in, obs_rnn, obs_mlp_out,
-                    var_mlp_in, var_rnn, var_mlp_out,
-                    rav_mlp_in, rav_rnn, rav_mlp_out,
-                    com_noise=0.5, att_noise=0.1,
+                    pol1_mlp_in, pol1_rnn,
+                    pol2_mlp_in, pol2_rnn,
+                    pol_mlp_out,
+                    var1_mlp_in, var1_rnn,
+                    var2_mlp_in, var2_rnn,
+                    var_mlp_out,
+                    dyn_mlp_in, dyn_rnn,
+                    att_spec_mlp,
                     **kwargs):
         super(SeqCondGenALT, self).__init__(**kwargs)
         # record basic structural parameters
@@ -792,7 +784,7 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
         self.exit_rate = exit_rate
         self.nll_weight = nll_weight
         self.use_var = use_var
-        self.use_rav = use_rav
+        self.use_att = use_att
         self.x_dim = x_dim
         self.y_dim = y_dim
         assert (self.x_dim == self.y_dim), "x_dim must equal y_dim!"
@@ -807,18 +799,19 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
         # set up stuff for dealing with stochastic attention placement
         self.att_spec_dim = 5 # dimension for attention specification
         # grab handles for sequential read/write models
-        self.con_mlp_in = con_mlp_in
-        self.con_rnn = con_rnn
-        self.con_mlp_out = con_mlp_out
-        self.obs_mlp_in = obs_mlp_in
-        self.obs_rnn = obs_rnn
-        self.obs_mlp_out = obs_mlp_out
-        self.var_mlp_in = var_mlp_in
-        self.var_rnn = var_rnn
+        self.pol1_mlp_in = pol1_mlp_in
+        self.pol1_rnn = pol1_rnn
+        self.pol2_mlp_in = pol2_mlp_in
+        self.pol2_rnn = pol2_rnn
+        self.pol_mlp_out = pol_mlp_out
+        self.var1_mlp_in = var1_mlp_in
+        self.var1_rnn = var1_rnn
+        self.var2_mlp_in = var2_mlp_in
+        self.var2_rnn = var2_rnn
         self.var_mlp_out = var_mlp_out
-        self.rav_mlp_in = rav_mlp_in
-        self.rav_rnn = rav_rnn
-        self.rav_mlp_out = rav_mlp_out
+        self.dyn_mlp_in = dyn_mlp_in
+        self.dyn_rnn = dyn_rnn
+        self.att_spec_mlp = att_spec_mlp
         # create a shared variable switch for controlling sampling
         ones_ary = numpy.ones((1,)).astype(theano.config.floatX)
         self.train_switch = theano.shared(value=ones_ary, name='train_switch')
@@ -834,13 +827,6 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
         self.mom_1 = theano.shared(value=0.9*ones_ary, name='mom_1')
         self.mom_2 = theano.shared(value=0.99*ones_ary, name='mom_2')
 
-        # set noise scale for the communication channel observer -> controller
-        noise_ary = to_fX(com_noise * ones_ary)
-        self.com_noise = theano.shared(value=noise_ary, name='com_noise')
-        # set noise scale for the attention placement
-        noise_ary = to_fX(att_noise * ones_ary)
-        self.att_noise = theano.shared(value=noise_ary, name='att_noise')
-
         # setup a "null pointer" that will point to the computation graph
         # for this model, which can be built by self.build_model_funcs()...
         self.cg = None
@@ -848,10 +834,14 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
         # record the sub-models around which this model is built
         self.params = []
         self.children = [self.reader_mlp, self.writer_mlp,
-                         self.con_mlp_in, self.con_rnn, self.con_mlp_out,
-                         self.obs_mlp_in, self.obs_rnn, self.obs_mlp_out,
-                         self.var_mlp_in, self.var_rnn, self.var_mlp_out,
-                         self.rav_mlp_in, self.rav_rnn, self.rav_mlp_out]
+                         self.pol1_mlp_in, self.pol1_rnn,
+                         self.pol2_mlp_in, self.pol2_rnn,
+                         self.pol_mlp_out,
+                         self.var1_mlp_in, self.var1_rnn,
+                         self.var2_mlp_in, self.var2_rnn,
+                         self.var_mlp_out,
+                         self.dyn_mlp_in, self.dyn_rnn,
+                         self.att_spec_mlp]
         return
 
     def set_sgd_params(self, lr=0.01, mom_1=0.9, mom_2=0.999):
@@ -916,43 +906,53 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
         """
         Allocate shared parameters used by this model.
         """
-        # get size information for the desired parameters
-        c_dim = self.get_dim('c')
-        cc_dim = self.get_dim('c_con')
-        hc_dim = self.get_dim('h_con')
-        co_dim = self.get_dim('c_obs')
-        ho_dim = self.get_dim('h_obs')
-        cv_dim = self.get_dim('c_var')
-        hv_dim = self.get_dim('h_var')
-        cr_dim = self.get_dim('c_rav')
-        hr_dim = self.get_dim('h_rav')
-        # self.c_0 provides initial state of the next column prediction
-        self.c_0 = shared_floatx_nans((1,c_dim), name='c_0')
-        add_role(self.c_0, PARAMETER)
-        # self.cc_0/self.hc_0 provides initial state of the controller
-        self.cc_0 = shared_floatx_nans((1,cc_dim), name='cc_0')
-        add_role(self.cc_0, PARAMETER)
-        self.hc_0 = shared_floatx_nans((1,hc_dim), name='hc_0')
-        add_role(self.hc_0, PARAMETER)
-        # self.co_0/self.ho_0 provides initial state of the primary policy
-        self.co_0 = shared_floatx_nans((1,co_dim), name='co_0')
-        add_role(self.co_0, PARAMETER)
-        self.ho_0 = shared_floatx_nans((1,ho_dim), name='ho_0')
-        add_role(self.ho_0, PARAMETER)
-        # self.cv_0/self.hv_0 provides initial state of the guide policy
-        self.cv_0 = shared_floatx_nans((1,cv_dim), name='cv_0')
-        add_role(self.cv_0, PARAMETER)
-        self.hv_0 = shared_floatx_nans((1,hv_dim), name='hv_0')
-        add_role(self.hv_0, PARAMETER)
-        # self.cr_0/self.hr_0 provides initial state of the guide policy
-        self.cr_0 = shared_floatx_nans((1,cr_dim), name='cr_0')
-        add_role(self.cr_0, PARAMETER)
-        self.hr_0 = shared_floatx_nans((1,hr_dim), name='hr_0')
-        add_role(self.hr_0, PARAMETER)
+        # initial attention spec
+        as_dim = self.att_spec_dim
+        self.as_0 = shared_floatx_nans((1,as_dim), name='as_0')
+
+        # initial state of primary policy LSTM (1)
+        hp1_dim = self.get_dim('h_pol1')
+        cp1_dim = self.get_dim('c_pol1')
+        self.hp1_0 = shared_floatx_nans((1,hp1_dim), name='hp1_0')
+        self.cp1_0 = shared_floatx_nans((1,cp1_dim), name='cp1_0')
+        add_role(self.hp1_0, PARAMETER)
+        add_role(self.cp1_0, PARAMETER)
+        # initial state of primary policy LSTM (2)
+        hp2_dim = self.get_dim('h_pol2')
+        cp2_dim = self.get_dim('c_pol2')
+        self.hp2_0 = shared_floatx_nans((1,hp2_dim), name='hp2_0')
+        self.cp2_0 = shared_floatx_nans((1,cp2_dim), name='cp2_0')
+        add_role(self.hp2_0, PARAMETER)
+        add_role(self.cp2_0, PARAMETER)
+
+        # initial state of guide policy LSTM (1)
+        hv1_dim = self.get_dim('h_var1')
+        cv1_dim = self.get_dim('c_var1')
+        self.hv1_0 = shared_floatx_nans((1,hv1_dim), name='hv1_0')
+        self.cv1_0 = shared_floatx_nans((1,cv1_dim), name='cv1_0')
+        add_role(self.hv1_0, PARAMETER)
+        add_role(self.cv1_0, PARAMETER)
+        # initial state of guide policy LSTM (2)
+        hv2_dim = self.get_dim('h_var2')
+        cv2_dim = self.get_dim('c_var2')
+        self.hv2_0 = shared_floatx_nans((1,hv2_dim), name='hv2_0')
+        self.cv2_0 = shared_floatx_nans((1,cv2_dim), name='cv2_0')
+        add_role(self.hv2_0, PARAMETER)
+        add_role(self.cv2_0, PARAMETER)
+
+        # initial state of shared dynamics LSTM
+        hd_dim = self.get_dim('h_dyn')
+        cd_dim = self.get_dim('c_dyn')
+        self.hd_0 = shared_floatx_nans((1,hd_dim), name='hd_0')
+        self.cd_0 = shared_floatx_nans((1,cd_dim), name='cd_0')
+        add_role(self.hd_0, PARAMETER)
+        add_role(self.cd_0, PARAMETER)
+
         # add the theano shared variables to our parameter lists
-        self.params.extend([ self.c_0, \
-                             self.cc_0, self.co_0, self.cv_0, self.cr_0, \
-                             self.hc_0, self.ho_0, self.hv_0, self.hr_0 ])
+        self.params.extend([ self.as_0, \
+                             self.hp1_0, self.hp2_0, self.hv1_0, self.hv2_0,
+                             self.cp1_0, self.cp2_0, self.cv1_0, self.cv2_0,
+                             self.hd_0, self.cd_0 ])
         return
 
     def _initialize(self):
@@ -966,30 +966,34 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
     def get_dim(self, name):
         if name == 'x':
             return self.x_dim
+        elif name == 'y':
+            return self.y_dim
         elif name == 'nll_scale':
             return 1
-        elif name in ['c', 'c0', 'y']:
-            return self.y_dim
-        elif name in ['u_com', 'z']:
-            return self.obs_mlp_out.get_dim('output')
-        elif name in ['u_att']:
+        elif name == 'att_spec':
             return self.att_spec_dim
-        elif name in ['h_con', 'hc0']:
-            return self.con_rnn.get_dim('states')
-        elif name == 'c_con':
-            return self.con_rnn.get_dim('cells')
-        elif name == 'h_obs':
-            return self.obs_rnn.get_dim('states')
-        elif name == 'c_obs':
-            return self.obs_rnn.get_dim('cells')
-        elif name == 'h_var':
-            return self.var_rnn.get_dim('states')
-        elif name == 'c_var':
-            return self.var_rnn.get_dim('cells')
-        elif name == 'h_rav':
-            return self.rav_rnn.get_dim('states')
-        elif name == 'c_rav':
-            return self.rav_rnn.get_dim('cells')
+        elif name in ['u', 'z']:
+            return self.pol_mlp_out.get_dim('output')
+        elif name in ['h_pol1', 'hp10']:
+            return self.pol1_rnn.get_dim('states')
+        elif name in ['h_pol2', 'hp20']:
+            return self.pol2_rnn.get_dim('states')
+        elif name in ['h_var1', 'hv10']:
+            return self.var1_rnn.get_dim('states')
+        elif name in ['h_var2', 'hv20']:
+            return self.var2_rnn.get_dim('states')
+        elif name in ['h_dyn', 'hd0']:
+            return self.dyn_rnn.get_dim('states')
+        elif name in ['c_pol1', 'cp10']:
+            return self.pol1_rnn.get_dim('cells')
+        elif name in ['c_pol2', 'cp20']:
+            return self.pol2_rnn.get_dim('cells')
+        elif name in ['c_var1', 'cv10']:
+            return self.var1_rnn.get_dim('cells')
+        elif name in ['c_var2', 'cv20']:
+            return self.var2_rnn.get_dim('cells')
+        elif name in ['c_dyn', 'cd0']:
+            return self.dyn_rnn.get_dim('cells')
         elif name in ['nll', 'kl_q2p', 'kl_p2q', 'kld_amu', 'kld_alv']:
             return 0
         else:
@@ -998,130 +1002,98 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
 
     #------------------------------------------------------------------------
 
-    @recurrent(sequences=['x', 'y', 'u_com', 'u_att', 'nll_scale'], contexts=[],
-               states=['c', 'h_con', 'c_con', 'h_obs', 'c_obs', 'h_var', 'c_var', 'h_rav', 'c_rav'],
-               outputs=['c', 'h_con', 'c_con', 'h_obs', 'c_obs', 'h_var', 'c_var', 'h_rav', 'c_rav', 'c_as_y', 'nll', 'kl_q2p', 'kl_p2q', 'kl_amu', 'kl_alv', 'att_map', 'read_img'])
-    def apply(self, x, y, u_com, u_att, nll_scale, c, h_con, c_con, h_obs, c_obs, h_var, c_var, h_rav, c_rav):
-        # non-additive steps use c_con as a "latent workspace", which means
-        # it needs to be transformed before being comparable to y.
-        c_as_y = tensor.nnet.sigmoid(self.writer_mlp.apply(h_con))
-        # compute difference between current prediction and target value
-        y_d = y - c_as_y
-
-        # estimate conditional over attention spec given h_con (from time t-1)
-        p_a_mean, p_a_logvar, p_att_spec = \
-                self.con_mlp_out.apply(h_con, u_att)
-        if self.use_rav:
-            # treat attention placement as a "latent variable", and draw
-            # samples of it from the guide policy
-            rav_info = tensor.concatenate([y, h_con], axis=1)
-            q_a_mean, q_a_logvar, q_att_spec = \
-                    self.rav_mlp_out.apply(rav_info, u_att)
-        else:
-            # treat attention placement as a "deterministic action"
-            q_a_mean, q_a_logvar, q_att_spec = p_a_mean, p_a_logvar, p_att_spec
-            p_att_spec = p_a_mean
-            q_att_spec = q_a_mean
-        # compute KL(guide || primary) for attention control
-        kl_q2p_a = tensor.sum(gaussian_kld(q_a_mean, q_a_logvar, \
-                              p_a_mean, p_a_logvar), axis=1)
-        kl_p2q_a = tensor.sum(gaussian_kld(p_a_mean, p_a_logvar, \
-                              q_a_mean, q_a_logvar), axis=1)
-
-        # mix samples from p/q based on value of self.train_switch
-        _att_spec = (self.train_switch[0] * q_att_spec) + \
-                   ((1.0 - self.train_switch[0]) * p_att_spec)
-        att_spec = self.att_noise[0] * _att_spec
-
+    @recurrent(sequences=['x', 'y', 'u', 'nll_scale'], contexts=[],
+               states=['att_spec', 'h_pol1', 'c_pol1', 'h_pol2', 'c_pol2', 'h_var1', 'c_var1', 'h_var2', 'c_var2', 'h_dyn', 'c_dyn'],
+               outputs=['att_spec', 'h_pol1', 'c_pol1', 'h_pol2', 'c_pol2', 'h_var1', 'c_var1', 'h_var2', 'c_var2', 'h_dyn', 'c_dyn', 'y_pred', 'nll', 'kl_q2p', 'kl_p2q', 'att_map', 'read_img'])
+    def apply(self, x, y, u, nll_scale, att_spec, h_pol1, c_pol1, h_pol2, c_pol2, h_var1, c_var1, h_var2, c_var2, h_dyn, c_dyn):
         if self.use_att:
             # apply the attention-based reader to the input in x
             read_out = self.reader_mlp.apply(x, x, att_spec)
             true_out = self.reader_mlp.apply(y, y, att_spec)
             att_map = self.reader_mlp.att_map(att_spec)
             read_img = self.reader_mlp.write(read_out, att_spec)
-            # construct inputs to obs and var nets using attention
-            obs_inp = tensor.concatenate([read_out, att_spec, h_con], axis=1)
-            var_inp = tensor.concatenate([true_out, read_out, att_spec, h_con], axis=1)
+            # construct inputs to pol and var nets using attention
+            pol_inp = tensor.concatenate([read_out, att_spec, h_dyn], axis=1)
+            var_inp = tensor.concatenate([y, read_out, att_spec, h_dyn], axis=1)
         else:
+            # dummy outputs for attention visualization
+            att_map = (0.0 * x) + 0.5
+            read_img = x
             # construct inputs to obs and var nets using full observation
-            obs_inp = tensor.concatenate([x, h_con], axis=1)
-            var_inp = tensor.concatenate([y, x, h_con], axis=1)
+            pol_inp = tensor.concatenate([x, att_spec, h_dyn], axis=1)
+            var_inp = tensor.concatenate([y, x, att_spec, h_dyn], axis=1)
 
-        # update the primary observer RNN state
-        i_obs = self.obs_mlp_in.apply(obs_inp)
-        h_obs, c_obs = self.obs_rnn.apply(states=h_obs, cells=c_obs,
-                                          inputs=i_obs, iterate=False)
-        # estimate primary conditional over z given h_obs
+        # update the primary policy's deep LSTM state
+        i_pol1 = self.pol1_mlp_in.apply(pol_inp)
+        h_pol1, c_pol1 = self.pol1_rnn.apply(states=h_pol1, cells=c_pol1,
+                                             inputs=i_pol1, iterate=False)
+        i_pol2 = self.pol2_mlp_in.apply(h_pol1)
+        h_pol2, c_pol2 = self.pol2_rnn.apply(states=h_pol2, cells=c_pol2,
+                                             inputs=i_pol2, iterate=False)
+        # estimate primary policy's conditional over z given h_pol2
         p_z_mean, p_z_logvar, p_z = \
-                self.obs_mlp_out.apply(h_obs, u_com)
+                self.pol_mlp_out.apply(h_pol2, u)
 
         if self.use_var:
-            # update the guide observer RNN state
-            i_var = self.var_mlp_in.apply(var_inp)
-            h_var, c_var = self.var_rnn.apply(states=h_var, cells=c_var,
-                                              inputs=i_var, iterate=False)
-            # estimate guide conditional over z given h_var
+            # update the guide policy's deep LSTM state
+            i_var1 = self.var1_mlp_in.apply(var_inp)
+            h_var1, c_var1 = self.var1_rnn.apply(states=h_var1, cells=c_var1,
+                                                 inputs=i_var1, iterate=False)
+            i_var2 = self.var2_mlp_in.apply(h_var1)
+            h_var2, c_var2 = self.var2_rnn.apply(states=h_var2, cells=c_var2,
+                                                 inputs=i_var2, iterate=False)
+            # estimate guide policy's conditional over z given h_var2
             q_z_mean, q_z_logvar, q_z = \
-                    self.var_mlp_out.apply(h_var, u_com)
+                    self.var_mlp_out.apply(h_var2, u)
         else:
             # use the observer -> controller channel as "deterministic action"
             q_z_mean, q_z_logvar, q_z = p_z_mean, p_z_logvar, p_z
             p_z = p_z_mean
             q_z = p_z_mean
 
-        # compute KL(guide || primary) for channel: observer -> controller
-        kl_q2p_z = tensor.sum(gaussian_kld(q_z_mean, q_z_logvar, \
-                              p_z_mean, p_z_logvar), axis=1)
-        kl_p2q_z = tensor.sum(gaussian_kld(p_z_mean, p_z_logvar, \
-                              q_z_mean, q_z_logvar), axis=1)
         # mix samples from p/q based on value of self.train_switch
-        _z = (self.train_switch[0] * q_z) + \
-            ((1.0 - self.train_switch[0]) * p_z)
-        z = self.com_noise[0] * _z
+        z = (self.train_switch[0] * q_z) + \
+             ((1.0 - self.train_switch[0]) * p_z)
+        # compute KL(guide || primary) and KL(primary || guide)
+        kl_q2p = tensor.sum(gaussian_kld(q_z_mean, q_z_logvar, \
+                            p_z_mean, p_z_logvar), axis=1)
+        kl_p2q = tensor.sum(gaussian_kld(p_z_mean, p_z_logvar, \
+                            q_z_mean, q_z_logvar), axis=1)
 
-        # update the primary controller RNN state
-        i_con = self.con_mlp_in.apply(tensor.concatenate([z, h_obs], axis=1))
-        h_con, c_con = self.con_rnn.apply(states=h_con, cells=c_con, \
-                                          inputs=i_con, iterate=False)
+        # decode z into an input to the shared dynamics and an attention spec
+        att_spec = self.att_spec_mlp.apply(z)
+        i_dyn = self.dyn_mlp_in.apply(z)
 
-        if self.use_rav:
-            # update the guide controller RNN state
-            pass
+        # update the shared dynamics LSTM state
+        h_dyn, c_dyn = self.dyn_rnn.apply(states=h_dyn, cells=c_dyn, \
+                                          inputs=i_dyn, iterate=False)
 
-        # update the "workspace" (stored in c)
-        c = self.writer_mlp.apply(h_con)
+        # transform the dynamics state into an observation/prediction
+        y_pred = tensor.nnet.sigmoid(self.writer_mlp.apply(h_dyn))
 
         # compute the NLL of the reconstruction as of this step. the NLL at
         # each step is rescaled by a factor such that the sum of the factors
         # for all steps is 1, and all factors are non-negative.
-        c_as_y = tensor.nnet.sigmoid(c)
-        nll = -nll_scale * tensor.flatten(log_prob_bernoulli(y, c_as_y))
-        # compute KL(q || p) and KL(p || q) for this step
-        kl_q2p = kl_q2p_z + kl_q2p_a
-        kl_p2q = kl_p2q_z + kl_p2q_a
-        # compute attention module KLd terms for this step
-        kl_amu = tensor.sum(gaussian_mean_kld(p_a_mean, p_a_logvar, \
-                            0., 0.), axis=1)
-        kl_alv = tensor.sum(gaussian_logvar_kld(p_a_mean, p_a_logvar, \
-                            0., 0.), axis=1)
-        return c, h_con, c_con, h_obs, c_obs, h_var, c_var, h_rav, c_rav, c_as_y, nll, kl_q2p, kl_p2q, kl_amu, kl_alv, att_map, read_img
+        nll = -nll_scale * tensor.flatten(log_prob_bernoulli(y, y_pred))
+        return att_spec, h_pol1, c_pol1, h_pol2, c_pol2, h_var1, c_var1, h_var2, c_var2, h_dyn, c_dyn, y_pred, nll, kl_q2p, kl_p2q, att_map, read_img
 
     #------------------------------------------------------------------------
 
     @application(inputs=['x', 'y'],
-                 outputs=['xs', 'cs', 'c_as_ys', 'nlls', 'kl_q2ps', 'kl_p2qs', 'kl_amus', 'kl_alvs', 'att_maps', 'read_imgs'])
+                 outputs=['xs', 'y_preds', 'nlls', 'kl_q2ps', 'kl_p2qs', 'att_maps', 'read_imgs'])
     def process_inputs(self, x, y):
         # get important size and shape information
         z_dim = self.get_dim('z')
-        cc_dim = self.get_dim('c_con')
-        hc_dim = self.get_dim('h_con')
-        co_dim = self.get_dim('c_obs')
-        ho_dim = self.get_dim('h_obs')
-        cv_dim = self.get_dim('c_var')
-        hv_dim = self.get_dim('h_var')
-        cr_dim = self.get_dim('c_rav')
-        hr_dim = self.get_dim('h_rav')
-        as_dim = self.att_spec_dim
+        hp1_dim = self.get_dim('h_pol1')
+        cp1_dim = self.get_dim('c_pol1')
+        hp2_dim = self.get_dim('h_pol2')
+        cp2_dim = self.get_dim('c_pol2')
+        hv1_dim = self.get_dim('h_var1')
+        cv1_dim = self.get_dim('c_var1')
+        hv2_dim = self.get_dim('h_var2')
+        cv2_dim = self.get_dim('c_var2')
+        hd_dim = self.get_dim('h_dyn')
+        cd_dim = self.get_dim('c_dyn')
 
         if self.x_and_y_are_seqs:
             batch_size = x.shape[1]
@@ -1133,47 +1105,43 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
             y = y.dimshuffle('x',0,1).repeat(self.total_steps, axis=0)
 
         # get initial states for all model components
-        c0 = self.c_0.repeat(batch_size, axis=0)
-        cc0 = self.cc_0.repeat(batch_size, axis=0)
-        hc0 = self.hc_0.repeat(batch_size, axis=0)
-        co0 = self.co_0.repeat(batch_size, axis=0)
-        ho0 = self.ho_0.repeat(batch_size, axis=0)
-        cv0 = self.cv_0.repeat(batch_size, axis=0)
-        hv0 = self.hv_0.repeat(batch_size, axis=0)
-        cr0 = self.cr_0.repeat(batch_size, axis=0)
-        hr0 = self.hr_0.repeat(batch_size, axis=0)
+        as0 = self.as_0.repeat(batch_size, axis=0)
+        hp10 = self.hp1_0.repeat(batch_size, axis=0)
+        cp10 = self.cp1_0.repeat(batch_size, axis=0)
+        hp20 = self.hp2_0.repeat(batch_size, axis=0)
+        cp20 = self.cp2_0.repeat(batch_size, axis=0)
+        hv10 = self.hv1_0.repeat(batch_size, axis=0)
+        cv10 = self.cv1_0.repeat(batch_size, axis=0)
+        hv20 = self.hv2_0.repeat(batch_size, axis=0)
+        cv20 = self.cv2_0.repeat(batch_size, axis=0)
+        hd0 = self.hd_0.repeat(batch_size, axis=0)
+        cd0 = self.cd_0.repeat(batch_size, axis=0)
 
         # get zero-mean, unit-std. Gaussian noise for use in scan op
-        u_com = self.theano_rng.normal(
-                        size=(self.total_steps, batch_size, z_dim),
-                        avg=0., std=1.)
-        u_att = self.theano_rng.normal(
-                        size=(self.total_steps, batch_size, as_dim),
-                        avg=0., std=1.)
+        u = self.theano_rng.normal(
+                    size=(self.total_steps, batch_size, z_dim),
+                    avg=0., std=1.)
 
         # run the multi-stage guided generative process
-        cs, _, _, _, _, _, _, _, _, c_as_ys, nlls, kl_q2ps, kl_p2qs, kl_amus, kl_alvs, att_maps, read_imgs = \
-                self.apply(x=x, y=y, u_com=u_com, u_att=u_att,
-                             nll_scale=self.nll_scales,
-                             c=c0,
-                             h_con=hc0, c_con=cc0,
-                             h_obs=ho0, c_obs=co0,
-                             h_var=hv0, c_var=cv0,
-                             h_rav=hr0, c_rav=cr0)
+        _, _, _, _, _, _, _, _, _, _, _, y_preds, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
+                self.apply(x=x, y=y, u=u, nll_scale=self.nll_scales,
+                           att_spec=as0,
+                           h_pol1=hp10, c_pol1=cp10,
+                           h_pol2=hp20, c_pol2=cp20,
+                           h_var1=hv10, c_var1=cv10,
+                           h_var2=hv20, c_var2=cv20,
+                           h_dyn=hd0, c_dyn=cd0)
 
         # add name tags to the constructed values
         xs = x
         xs.name = "xs"
-        cs.name = "cs"
-        c_as_ys.name = "c_as_ys"
+        y_preds.name = "y_preds"
         nlls.name = "nlls"
         kl_q2ps.name = "kl_q2ps"
         kl_p2qs.name = "kl_p2qs"
-        kl_amus.name = "kl_amus"
-        kl_alvs.name = "kl_alvs"
         att_maps.name = "att_maps"
         read_imgs.name = "read_imgs"
-        return xs, cs, c_as_ys, nlls, kl_q2ps, kl_p2qs, kl_amus, kl_alvs, att_maps, read_imgs
+        return xs, y_preds, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs
 
     def build_model_funcs(self):
         """
@@ -1188,7 +1156,7 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
             y_sym = tensor.matrix('y_sym')
 
         # collect estimates of y given x produced by this model
-        xs, cs, c_as_ys, nlls, kl_q2ps, kl_p2qs, kl_amus, kl_alvs, att_maps, read_imgs = \
+        xs, y_preds, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
                 self.process_inputs(x_sym, y_sym)
 
         # get the expected NLL part of the VFE bound
@@ -1200,14 +1168,9 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
         self.kld_q2p_term.name = "kld_q2p_term"
         self.kld_p2q_term = kl_p2qs.sum(axis=0).mean()
         self.kld_p2q_term.name = "kld_p2q_term"
-        # get KLd terms on attention placement
-        self.kld_amu_term = kl_amus.sum(axis=0).mean()
-        self.kld_amu_term.name = "kld_amu_term"
-        self.kld_alv_term = kl_alvs.sum(axis=0).mean()
-        self.kld_alv_term.name = "kld_alv_term"
 
         # grab handles for all the optimizable parameters in our cost
-        dummy_cost = self.nll_term + self.kld_q2p_term + self.kld_amu_term
+        dummy_cost = self.nll_term + self.kld_q2p_term
         self.cg = ComputationGraph([dummy_cost])
         self.joint_params = self.get_model_params(ary_type='theano')
 
@@ -1219,8 +1182,6 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
         self.joint_cost = self.nll_term + \
                           (self.lam_kld_q2p[0] * self.kld_q2p_term) + \
                           (self.lam_kld_p2q[0] * self.kld_p2q_term) + \
-                          (self.lam_kld_amu[0] * self.kld_amu_term) + \
-                          (self.lam_kld_alv[0] * self.kld_alv_term) + \
                           self.reg_term
         self.joint_cost.name = "joint_cost"
 
@@ -1243,21 +1204,23 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
         self.update_norm = sum([tensor.sum(u**2.0) for u in applied_updates])
 
         # collect the outputs to return from this function
-        outputs = [self.joint_cost, self.nll_term, \
+        train_outputs = [self.joint_cost, self.nll_term, \
                    self.kld_q2p_term, self.kld_p2q_term, \
-                   self.kld_amu_term, self.kld_alv_term, \
                    self.reg_term, self.grad_norm, self.update_norm]
+        bound_outputs = [self.joint_cost, self.nll_term, \
+                   self.kld_q2p_term, self.kld_p2q_term, \
+                   self.reg_term]
         # collect the required inputs
         inputs = [x_sym, y_sym]
 
         # compile the theano functions for computing stuff, like for real
         print("Compiling model training/update function...")
         self.train_joint = theano.function(inputs=inputs, \
-                                           outputs=outputs, \
+                                           outputs=train_outputs, \
                                            updates=self.joint_updates)
         print("Compiling model cost estimator function...")
         self.compute_nll_bound = theano.function(inputs=inputs, \
-                                                 outputs=outputs)
+                                                 outputs=bound_outputs)
         return
 
     def build_attention_funcs(self):
@@ -1273,7 +1236,7 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
             x_sym = tensor.matrix('x_sym_att_funcs')
             y_sym = tensor.matrix('y_sym_att_funcs')
         # collect estimates of y given x produced by this model
-        xs, cs, c_as_ys, nlls, kl_q2ps, kl_p2qs, kl_amus, kl_alvs, att_maps, read_imgs = \
+        xs, y_preds, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
                 self.process_inputs(x_sym, y_sym)
 
         # get the expected NLL part of the VFE bound
@@ -1284,19 +1247,14 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
         self.kld_q2p_term.name = "kld_q2p_term"
         self.kld_p2q_term = kl_p2qs.sum(axis=0).mean()
         self.kld_p2q_term.name = "kld_p2q_term"
-        # get KLd terms on attention placement
-        self.kld_amu_term = kl_amus.sum(axis=0).mean()
-        self.kld_amu_term.name = "kld_amu_term"
-        self.kld_alv_term = kl_alvs.sum(axis=0).mean()
-        self.kld_alv_term.name = "kld_alv_term"
         # grab handles for all the optimizable parameters in our cost
-        dummy_cost = self.nll_term + self.kld_q2p_term + self.kld_amu_term
+        dummy_cost = self.nll_term + self.kld_q2p_term
         self.cg = ComputationGraph([dummy_cost])
 
         # build the function for computing the attention trajectories
         print("Compiling attention tracker...")
         inputs = [x_sym, y_sym]
-        outputs = [c_as_ys, att_maps, read_imgs, xs]
+        outputs = [y_preds, att_maps, read_imgs, xs]
         sample_func = theano.function(inputs=inputs, \
                                       outputs=outputs)
         def switchy_sampler(x, y, sample_source='q'):
@@ -1304,7 +1262,6 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
             old_switch = self.train_switch.get_value()
             if sample_source == 'p':
                 # take samples from the primary policy
-                print("Sampling primary policy!")
                 zeros_ary = numpy.zeros((1,)).astype(theano.config.floatX)
                 self.train_switch.set_value(zeros_ary)
             else:
@@ -1317,7 +1274,7 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
             # set sample source switch back to previous value
             self.train_switch.set_value(old_switch)
             # grab prediction values
-            y_preds = outs[0]
+            ypreds = outs[0]
             # aggregate sequential attention maps
             obs_dim = self.x_dim
             seq_len = self.total_steps
@@ -1340,7 +1297,7 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
                     for s2 in range(seq_len):
                         r_outs[s2,s1,:] = r_outs[s2,s1,:] + \
                                           outs[2][s2,s1,start_idx:end_idx]
-            result = [y_preds, a_maps, r_outs, xs]
+            result = [ypreds, a_maps, r_outs, xs]
             return result
         self.sample_attention = switchy_sampler
         return
