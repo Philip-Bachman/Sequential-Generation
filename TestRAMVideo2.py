@@ -247,8 +247,8 @@ def test_seq_cond_gen_alt(use_var=True, use_att=True,
     writer_mlp = MLP([Rectifier(), Identity()], [rnn_dim, mlp_dim, obs_dim], \
                      name="writer_mlp", **inits)
 
-    # MLP for transforming z into an attention spec
-    att_spec_mlp = MLP([Rectifier(), Identity()], [z_dim, mlp_dim, att_spec_dim], \
+    # MLP for transforming shared dynamics state into an attention spec
+    att_spec_mlp = MLP([Rectifier(), Identity()], [rnn_dim, mlp_dim, att_spec_dim], \
                        name="att_spec_mlp", **inits)
 
     # mlps for processing inputs to LSTMs (find dimensions)
@@ -612,7 +612,7 @@ def test_seq_cond_gen_alu(use_var=True, use_att=True,
     read_dim = reader_mlp.read_dim # total number of "pixels" read by reader
 
     # MLP for transforming z into attention specs
-    dec_mlp_attn = MLP([Rectifier(), Identity()], [z_dim, mlp_dim, att_spec_dim],
+    dec_mlp_attn = MLP([Rectifier(), Identity()], [rnn_dim, mlp_dim, att_spec_dim],
                        name="dec_mlp_attn", **inits)
     # MLP for transforming z into self loop information
     dec_mlp_self = MLP([Rectifier(), Identity()], [z_dim, mlp_dim, z_dim],
@@ -623,11 +623,11 @@ def test_seq_cond_gen_alu(use_var=True, use_att=True,
 
     # mlps for processing inputs to LSTMs (find dimensions)
     if use_att:
-        pol1_input_dim = read_dim + att_spec_dim + z_dim
-        var1_input_dim = y_dim + read_dim + att_spec_dim + z_dim
+        pol1_input_dim = read_dim + att_spec_dim + rnn_dim
+        var1_input_dim = y_dim + read_dim + att_spec_dim + rnn_dim
     else:
-        pol1_input_dim = x_dim + z_dim
-        var1_input_dim = y_dim + x_dim + z_dim
+        pol1_input_dim = x_dim + rnn_dim
+        var1_input_dim = y_dim + x_dim + rnn_dim
     pol2_input_dim = z_dim + rnn_dim
     var2_input_dim = y_dim + z_dim + rnn_dim
     # mlps for processing inputs to LSTMs (make models)
@@ -789,6 +789,6 @@ if __name__=="__main__":
     #################################
     # TEST WITH GUIDE OBSERVER ONLY #
     #################################
-    test_seq_cond_gen_alu(use_var=True, use_att=True, traj_len=15, \
+    test_seq_cond_gen_alt(use_var=True, use_att=True, traj_len=15, \
                           x_objs=['t-up', 't-down', 'circle'], y_objs=[0,1], \
                           res_tag="T3", sample_pretrained=False)

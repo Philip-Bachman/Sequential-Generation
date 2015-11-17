@@ -907,8 +907,8 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
         Allocate shared parameters used by this model.
         """
         # initial attention spec
-        as_dim = self.att_spec_dim
-        self.as_0 = shared_floatx_nans((1,as_dim), name='as_0')
+        z_dim = self.get_dim('z')
+        self.z_0 = shared_floatx_nans((1,z_dim), name='z_0')
 
         # initial state of primary policy LSTM (1)
         hp1_dim = self.get_dim('h_pol1')
@@ -949,7 +949,7 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
         add_role(self.cd_0, PARAMETER)
 
         # add the theano shared variables to our parameter lists
-        self.params.extend([ self.as_0, \
+        self.params.extend([ self.z_0, \
                              self.hp1_0, self.hp2_0, self.hv1_0, self.hv2_0,
                              self.cp1_0, self.cp2_0, self.cv1_0, self.cv2_0,
                              self.hd_0, self.cd_0 ])
@@ -1003,9 +1003,11 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
     #------------------------------------------------------------------------
 
     @recurrent(sequences=['x', 'y', 'u', 'nll_scale'], contexts=[],
-               states=['att_spec', 'h_pol1', 'c_pol1', 'h_pol2', 'c_pol2', 'h_var1', 'c_var1', 'h_var2', 'c_var2', 'h_dyn', 'c_dyn'],
-               outputs=['att_spec', 'h_pol1', 'c_pol1', 'h_pol2', 'c_pol2', 'h_var1', 'c_var1', 'h_var2', 'c_var2', 'h_dyn', 'c_dyn', 'y_pred', 'nll', 'kl_q2p', 'kl_p2q', 'att_map', 'read_img'])
-    def apply(self, x, y, u, nll_scale, att_spec, h_pol1, c_pol1, h_pol2, c_pol2, h_var1, c_var1, h_var2, c_var2, h_dyn, c_dyn):
+               states=['z', 'h_pol1', 'c_pol1', 'h_pol2', 'c_pol2', 'h_var1', 'c_var1', 'h_var2', 'c_var2', 'h_dyn', 'c_dyn'],
+               outputs=['z', 'h_pol1', 'c_pol1', 'h_pol2', 'c_pol2', 'h_var1', 'c_var1', 'h_var2', 'c_var2', 'h_dyn', 'c_dyn', 'y_pred', 'nll', 'kl_q2p', 'kl_p2q', 'att_map', 'read_img'])
+    def apply(self, x, y, u, nll_scale, z, h_pol1, c_pol1, h_pol2, c_pol2, h_var1, c_var1, h_var2, c_var2, h_dyn, c_dyn):
+        # decode attention placement from state of shared dynamics
+        att_spec = self.att_spec_mlp.apply(h_dyn)
         if self.use_att:
             # apply the attention-based reader to the input in x
             read_out = self.reader_mlp.apply(x, x, att_spec)
@@ -1060,11 +1062,9 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
         kl_p2q = tensor.sum(gaussian_kld(p_z_mean, p_z_logvar, \
                             q_z_mean, q_z_logvar), axis=1)
 
-        # decode z into an input to the shared dynamics and an attention spec
-        att_spec = self.att_spec_mlp.apply(z)
-        i_dyn = self.dyn_mlp_in.apply(z)
-
         # update the shared dynamics LSTM state
+        inp_dyn = tensor.concatenate([z], axis=1)
+        i_dyn = self.dyn_mlp_in.apply(inp_dyn)
         h_dyn, c_dyn = self.dyn_rnn.apply(states=h_dyn, cells=c_dyn, \
                                           inputs=i_dyn, iterate=False)
 
@@ -1075,7 +1075,7 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
         # each step is rescaled by a factor such that the sum of the factors
         # for all steps is 1, and all factors are non-negative.
         nll = -nll_scale * tensor.flatten(log_prob_bernoulli(y, y_pred))
-        return att_spec, h_pol1, c_pol1, h_pol2, c_pol2, h_var1, c_var1, h_var2, c_var2, h_dyn, c_dyn, y_pred, nll, kl_q2p, kl_p2q, att_map, read_img
+        return z, h_pol1, c_pol1, h_pol2, c_pol2, h_var1, c_var1, h_var2, c_var2, h_dyn, c_dyn, y_pred, nll, kl_q2p, kl_p2q, att_map, read_img
 
     #------------------------------------------------------------------------
 
@@ -1105,7 +1105,7 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
             y = y.dimshuffle('x',0,1).repeat(self.total_steps, axis=0)
 
         # get initial states for all model components
-        as0 = self.as_0.repeat(batch_size, axis=0)
+        z0 = self.z_0.repeat(batch_size, axis=0)
         hp10 = self.hp1_0.repeat(batch_size, axis=0)
         cp10 = self.cp1_0.repeat(batch_size, axis=0)
         hp20 = self.hp2_0.repeat(batch_size, axis=0)
@@ -1125,7 +1125,7 @@ class SeqCondGenALT(BaseRecurrent, Initializable, Random):
         # run the multi-stage guided generative process
         _, _, _, _, _, _, _, _, _, _, _, y_preds, nlls, kl_q2ps, kl_p2qs, att_maps, read_imgs = \
                 self.apply(x=x, y=y, u=u, nll_scale=self.nll_scales,
-                           att_spec=as0,
+                           z=z0,
                            h_pol1=hp10, c_pol1=cp10,
                            h_pol2=hp20, c_pol2=cp20,
                            h_var1=hv10, c_var1=cv10,
@@ -1634,7 +1634,7 @@ class SeqCondGenALU(BaseRecurrent, Initializable, Random):
         # convert z into some "self information" (i.e. recurrent feedback)
         self_info = self.dec_mlp_self.apply(z)
         # convert z into an attention spec
-        att_spec = self.dec_mlp_attn.apply(z)
+        att_spec = self.dec_mlp_attn.apply(h_pol2)
         if self.use_att:
             # apply the attention-based reader to the input in x
             read_out = self.reader_mlp.apply(x, x, att_spec)
@@ -1642,15 +1642,15 @@ class SeqCondGenALU(BaseRecurrent, Initializable, Random):
             att_map = self.reader_mlp.att_map(att_spec)
             read_img = self.reader_mlp.write(read_out, att_spec)
             # construct inputs to pol and var nets using attention
-            pol1_inp = tensor.concatenate([read_out, att_spec, self_info], axis=1)
-            var1_inp = tensor.concatenate([y, read_out, att_spec, self_info], axis=1)
+            pol1_inp = tensor.concatenate([read_out, att_spec, h_pol2], axis=1)
+            var1_inp = tensor.concatenate([y, read_out, att_spec, h_pol2], axis=1)
         else:
             # dummy outputs for attention visualization
             att_map = (0.0 * x) + 0.5
             read_img = x
             # construct inputs to obs and var nets using full observation
-            pol1_inp = tensor.concatenate([x, self_info], axis=1)
-            var1_inp = tensor.concatenate([y, x, self_info], axis=1)
+            pol1_inp = tensor.concatenate([x, h_pol2], axis=1)
+            var1_inp = tensor.concatenate([y, x, h_pol2], axis=1)
 
         # update the primary policy's first layer LSTM state
         i_pol1 = self.pol1_mlp_in.apply(pol1_inp)
