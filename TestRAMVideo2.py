@@ -420,7 +420,7 @@ BREAK_STR = """
 #############################################################################
 """
 
-def test_seq_cond_gen_alt(use_var=True, use_att=True,
+def test_seq_cond_gen_alu(use_var=True, use_att=True,
                           traj_len=15, x_objs=['circle'], y_objs=[0],
                           res_tag="AAA", sample_pretrained=False):
     ##############################
@@ -629,7 +629,7 @@ def test_seq_cond_gen_alt(use_var=True, use_att=True,
         pol1_input_dim = x_dim + z_dim
         var1_input_dim = y_dim + x_dim + z_dim
     pol2_input_dim = z_dim + rnn_dim
-    var2_input_dim = z_dim + rnn_dim
+    var2_input_dim = y_dim + z_dim + rnn_dim
     # mlps for processing inputs to LSTMs (make models)
     pol1_mlp_in = MLP([Identity()], [pol1_input_dim, 4*rnn_dim], \
                       name="pol1_mlp_in", **inits)

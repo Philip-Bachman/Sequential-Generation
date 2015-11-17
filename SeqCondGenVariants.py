@@ -1698,7 +1698,7 @@ class SeqCondGenALU(BaseRecurrent, Initializable, Random):
 
         if self.use_var:
             # update the guide policy's second layer LSTM state
-            var2_inp = tensor.concatenate([zin, h_var1], axis=1)
+            var2_inp = tensor.concatenate([y, zin, h_var1], axis=1)
             i_var2 = self.var2_mlp_in.apply(var2_inp)
             h_var2, c_var2 = self.var2_rnn.apply(states=h_var2, cells=c_var2,
                                                  inputs=i_var2, iterate=False)
