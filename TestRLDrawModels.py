@@ -86,7 +86,7 @@ def test_rldraw_classic(step_type='add', use_pol=True):
     # Make a tag for identifying result files #
     ###########################################
     pol_tag = "yp" if use_pol else "np"
-    res_tag = "TRLD_SPLIT_{}_{}".format(step_type, pol_tag)
+    res_tag = "TRLD_SPLIT_E010_{}_{}".format(step_type, pol_tag)
 
     ##########################
     # Get some training data #
@@ -200,7 +200,7 @@ def test_rldraw_classic(step_type='add', use_pol=True):
             batch_idx = np.arange(batch_size)
         # set sgd and objective function hyperparams for this update
         draw.set_sgd_params(lr=scale*learn_rate, mom_1=scale*momentum, mom_2=0.98)
-        draw.set_lam_kld(lam_kld_q2p=1.0, lam_kld_p2q=0.0, lam_neg_ent=0.05)
+        draw.set_lam_kld(lam_kld_q2p=1.0, lam_kld_p2q=0.0, lam_neg_ent=0.1)
         # perform a minibatch update and record the cost for this batch
         Xb = to_fX(Xtr.take(batch_idx, axis=0))
         result = draw.train_joint(Xb)
@@ -232,7 +232,7 @@ def test_rldraw_classic(step_type='add', use_pol=True):
             str2 = "    va_nll_term  : {}".format(va_costs[2])
             str3 = "    va_kld_q2p   : {}".format(va_costs[3])
             str4 = "    va_neg_ent   : {}".format(va_costs[5])
-            joint_str = "\n".join([str1, str2, str3])
+            joint_str = "\n".join([str1, str2, str3, str4])
             print(joint_str)
             out_file.write(joint_str+"\n")
             out_file.flush()

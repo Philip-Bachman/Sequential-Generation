@@ -1783,7 +1783,7 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         s = self.theano_rng.uniform(size=cxs_from_p.shape, low=0.0, high=1.0, \
                                     dtype=theano.config.floatX)
         e = (s < cxs_from_p) - cxs_from_p
-        bxs_from_p = cxs_from_p + theano.gradient.disconnected_gradient(e)
+        bxs_from_p = cxs_from_p + theano.gradient.disconnected_grad(e)
 
         # process binary-valued xs with q
         self.use_q = True
@@ -1860,10 +1860,10 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         self.reg_term.name = "reg_term"
 
         # compute the full cost w.r.t. which we will optimize params
-        self.joint_cost = self.nll_term +
-                          (self.lam_kld_q2p[0] * self.kld_q2p_term) +
-                          (self.lam_kld_p2q[0] * self.kld_p2q_term) +
-                          (self.lam_neg_ent[0] * self.neg_ent_term) +
+        self.joint_cost = self.nll_term + \
+                          (self.lam_kld_q2p[0] * self.kld_q2p_term) + \
+                          (self.lam_kld_p2q[0] * self.kld_p2q_term) + \
+                          (self.lam_neg_ent[0] * self.neg_ent_term) + \
                           self.reg_term
         self.joint_cost.name = "joint_cost"
 
@@ -1892,7 +1892,7 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
                          self.grad_norm, self.update_norm]
         bound_outputs = [self.joint_cost, self.nll_bound,
                          self.nll_term, self.kld_q2p_term, self.kld_p2q_term,
-                         self.neg_eng_term, self.reg_term]
+                         self.neg_ent_term, self.reg_term]
         # collect the required inputs
         inputs = [x_in_sym]
 
