@@ -1804,7 +1804,7 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         #                                                                     #
         ######################################################################
         log_p_xgz = log_prob_bernoulli(bxs_from_p, cxs_from_p)    # shape: (batch_size, 1)
-        log_rat_ent = log_prob_q_zs_from_p - log_prob_p_zs_from_p # shape: (n_iter, batch_size)
+        log_rat_ent = log_prob_p_zs_from_p - log_prob_q_zs_from_p # shape: (n_iter, batch_size)
 
         # compute the NLL for the reconstruction pass (i.e. Wake mode)
         cs = cs_from_q
