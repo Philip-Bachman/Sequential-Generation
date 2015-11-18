@@ -104,8 +104,8 @@ def test_rldraw_classic(step_type='add', use_pol=True):
     # Setup some parameters for the Iterative Refinement Model #
     ############################################################
     x_dim = Xtr.shape[1]
-    write_dim = 250
-    rnn_dim = 250
+    write_dim = 300
+    rnn_dim = 300
     z_dim = 100
     n_iter = 20
 
@@ -200,6 +200,7 @@ def test_rldraw_classic(step_type='add', use_pol=True):
             batch_idx = np.arange(batch_size)
         # set sgd and objective function hyperparams for this update
         draw.set_sgd_params(lr=scale*learn_rate, mom_1=scale*momentum, mom_2=0.98)
+        draw.set_lam_kld(lam_kld_q2p=1.0, lam_kld_p2q=0.0, lam_neg_ent=0.05)
         # perform a minibatch update and record the cost for this batch
         Xb = to_fX(Xtr.take(batch_idx, axis=0))
         result = draw.train_joint(Xb)
@@ -214,8 +215,9 @@ def test_rldraw_classic(step_type='add', use_pol=True):
             str4 = "    nll_term  : {0:.4f}".format(costs[2])
             str5 = "    kld_q2p   : {0:.4f}".format(costs[3])
             str6 = "    kld_p2q   : {0:.4f}".format(costs[4])
-            str7 = "    reg_term  : {0:.4f}".format(costs[5])
-            joint_str = "\n".join([str1, str2, str3, str4, str5, str6, str7])
+            str7 = "    neg_ent   : {0:.4f}".format(costs[5])
+            str8 = "    reg_term  : {0:.4f}".format(costs[6])
+            joint_str = "\n".join([str1, str2, str3, str4, str5, str6, str7, str8])
             print(joint_str)
             out_file.write(joint_str+"\n")
             out_file.flush()
@@ -229,6 +231,7 @@ def test_rldraw_classic(step_type='add', use_pol=True):
             str1 = "    va_nll_bound : {}".format(va_costs[1])
             str2 = "    va_nll_term  : {}".format(va_costs[2])
             str3 = "    va_kld_q2p   : {}".format(va_costs[3])
+            str4 = "    va_neg_ent   : {}".format(va_costs[5])
             joint_str = "\n".join([str1, str2, str3])
             print(joint_str)
             out_file.write(joint_str+"\n")
