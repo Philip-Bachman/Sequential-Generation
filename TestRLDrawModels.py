@@ -104,8 +104,8 @@ def test_rldraw_classic(step_type='add', use_pol=True):
     # Setup some parameters for the Iterative Refinement Model #
     ############################################################
     x_dim = Xtr.shape[1]
-    write_dim = 300
-    rnn_dim = 300
+    write_dim = 500
+    rnn_dim = 500
     z_dim = 100
     n_iter = 20
 
@@ -200,7 +200,7 @@ def test_rldraw_classic(step_type='add', use_pol=True):
             batch_idx = np.arange(batch_size)
         # set sgd and objective function hyperparams for this update
         draw.set_sgd_params(lr=scale*learn_rate, mom_1=scale*momentum, mom_2=0.98)
-        draw.set_lam_kld(lam_kld_q2p=1.0, lam_kld_p2q=0.0, lam_neg_ent=0.1)
+        draw.set_lam_kld(lam_kld_q2p=1.0, lam_kld_p2q=0.0, lam_neg_ent=0.10)
         # perform a minibatch update and record the cost for this batch
         Xb = to_fX(Xtr.take(batch_idx, axis=0))
         result = draw.train_joint(Xb)
