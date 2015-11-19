@@ -45,6 +45,7 @@ def test_two_stage_model1():
     x_dim = Xtr.shape[1]
     z_dim = 50
     h_dim = 100
+    h_det_dim = 50
     x_type = 'bernoulli'
 
     # some InfNet instances to build the TwoStageModel from
@@ -115,7 +116,7 @@ def test_two_stage_model1():
     # q_h_given_z_x #
     #################
     params = {}
-    shared_config = [(2*h_dim + x_dim), 200, 200]
+    shared_config = [(z_dim + x_dim), 200, 200]
     top_config = [shared_config[-1], h_dim]
     params['shared_config'] = shared_config
     params['mu_config'] = top_config
@@ -139,25 +140,25 @@ def test_two_stage_model1():
     tsm_params = {}
     tsm_params['x_type'] = x_type
     tsm_params['obs_transform'] = 'sigmoid'
-    TSM = TwoStageModel1(rng=rng, x_in=xin_sym, x_out=xout_sym, \
-            x_dim=x_dim, z_dim=z_dim, h_dim=h_dim, \
-            q_z_given_x=q_z_given_x, \
-            q_h_given_z_x=q_h_given_z_x, \
-            p_h_given_z=p_h_given_z, \
-            p_x_given_h=p_x_given_h, \
+    TSM = TwoStageModel1(rng=rng, x_in=xin_sym, x_out=xout_sym,
+            x_dim=x_dim, z_dim=z_dim, h_dim=h_dim, h_det_dim=h_det_dim,
+            q_z_given_x=q_z_given_x,
+            q_h_given_z_x=q_h_given_z_x,
+            p_h_given_z=p_h_given_z,
+            p_x_given_h=p_x_given_h,
             params=tsm_params)
 
     ################################################################
     # Apply some updates, to check that they aren't totally broken #
     ################################################################
-    log_name = "{}_RESULTS.txt".format("TSM1_TEST")
+    log_name = "{}_RESULTS.txt".format("TSM1B_TEST")
     out_file = open(log_name, 'wb')
     costs = [0. for i in range(10)]
-    learn_rate = 0.00015
+    learn_rate = 0.001
     momentum = 0.9
     batch_idx = np.arange(batch_size) + tr_samples
     for i in range(500000):
-        scale = min(0.5, ((i+1) / 10000.0))
+        scale = min(0.5, ((i+1) / 5000.0))
         if (((i + 1) % 10000) == 0):
             learn_rate = learn_rate * 0.95
         # get the indices of training samples for this batch update
@@ -197,7 +198,7 @@ def test_two_stage_model1():
             # draw some independent random samples from the model
             samp_count = 300
             model_samps = TSM.sample_from_prior(samp_count)
-            file_name = "TSM1_SAMPLES_b{0:d}.png".format(i)
+            file_name = "TSM1B_SAMPLES_b{0:d}.png".format(i)
             utils.visualize_samples(model_samps, file_name, num_rows=15)
             # compute free energy estimate for validation samples
             Xva = row_shuffle(Xva)
