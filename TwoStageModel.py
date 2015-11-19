@@ -140,9 +140,9 @@ class TwoStageModel1(object):
         self.kld_z_p2q = gaussian_kld(z_p_mean, z_p_logvar, \
                                       z_q_mean, z_q_logvar)
         # samples of "hidden" latent state (from both p and q)
-        h_p_mean, h_p_logvar, h_p = self.p_h_given_z.apply(0.0*self.z)
+        h_p_mean, h_p_logvar, h_p = self.p_h_given_z.apply(self.z)
         h_q_mean, h_q_logvar, h_q = self.q_h_given_z_x.apply( \
-                T.concatenate([0.0*self.z, self.x_out], axis=1))
+                T.concatenate([self.z, self.x_out], axis=1))
         # compute "stochastic" and "deterministic" parts of latent state
         h_sto = (self.train_switch[0] * h_q) + \
                 ((1.0 - self.train_switch[0]) * h_p)

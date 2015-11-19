@@ -36,7 +36,7 @@ def test_two_stage_model1():
     #del Xte
     tr_samples = Xtr.shape[0]
     va_samples = Xva.shape[0]
-    batch_size = 2500
+    batch_size = 200
     batch_reps = 1
 
     ###############################################
@@ -45,7 +45,8 @@ def test_two_stage_model1():
     x_dim = Xtr.shape[1]
     z_dim = 50
     h_dim = 100
-    h_det_dim = 50
+    h_det_dim = None
+    #h_det_dim = 50
     x_type = 'bernoulli'
 
     # some InfNet instances to build the TwoStageModel from
@@ -151,7 +152,7 @@ def test_two_stage_model1():
     ################################################################
     # Apply some updates, to check that they aren't totally broken #
     ################################################################
-    log_name = "{}_RESULTS.txt".format("TSM1B_TEST")
+    log_name = "{}_RESULTS.txt".format("TSM1A_TEST")
     out_file = open(log_name, 'wb')
     costs = [0. for i in range(10)]
     learn_rate = 0.001
@@ -198,7 +199,7 @@ def test_two_stage_model1():
             # draw some independent random samples from the model
             samp_count = 300
             model_samps = TSM.sample_from_prior(samp_count)
-            file_name = "TSM1B_SAMPLES_b{0:d}.png".format(i)
+            file_name = "TSM1A_SAMPLES_b{0:d}.png".format(i)
             utils.visualize_samples(model_samps, file_name, num_rows=15)
             # compute free energy estimate for validation samples
             Xva = row_shuffle(Xva)
@@ -227,7 +228,7 @@ def test_two_stage_model2():
     #del Xte
     tr_samples = Xtr.shape[0]
     va_samples = Xva.shape[0]
-    batch_size = 100
+    batch_size = 200
     batch_reps = 1
 
     ###############################################
@@ -341,14 +342,14 @@ def test_two_stage_model2():
     ################################################################
     # Apply some updates, to check that they aren't totally broken #
     ################################################################
-    log_name = "{}_RESULTS.txt".format("TSM2_TEST")
+    log_name = "{}_RESULTS.txt".format("TSM2A_TEST")
     out_file = open(log_name, 'wb')
     costs = [0. for i in range(10)]
-    learn_rate = 0.00015
+    learn_rate = 0.001
     momentum = 0.9
     batch_idx = np.arange(batch_size) + tr_samples
     for i in range(500000):
-        scale = min(1.0, ((i+1) / 10000.0))
+        scale = min(1.0, ((i+1) / 5000.0))
         if (((i + 1) % 10000) == 0):
             learn_rate = learn_rate * 0.95
         # get the indices of training samples for this batch update
@@ -388,7 +389,7 @@ def test_two_stage_model2():
             # draw some independent random samples from the model
             samp_count = 300
             model_samps = TSM.sample_from_prior(samp_count)
-            file_name = "TSM2_SAMPLES_b{0:d}.png".format(i)
+            file_name = "TSM2A_SAMPLES_b{0:d}.png".format(i)
             utils.visualize_samples(model_samps, file_name, num_rows=15)
             # compute free energy estimate for validation samples
             Xva = row_shuffle(Xva)
@@ -402,5 +403,5 @@ def test_two_stage_model2():
 
 
 if __name__=="__main__":
-    test_two_stage_model1()
-    #test_two_stage_model2()
+    #test_two_stage_model1()
+    test_two_stage_model2()
