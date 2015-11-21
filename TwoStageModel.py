@@ -58,6 +58,7 @@ class TwoStageModel1(object):
             x_dim=None, \
             z_dim=None, \
             h_dim=None, \
+            h_det_dim=None, \
             params=None, \
             shared_param_dicts=None):
         # setup a rng for this GIPair
@@ -84,6 +85,7 @@ class TwoStageModel1(object):
         self.x_dim = x_dim
         self.z_dim = z_dim
         self.h_dim = h_dim
+        self.h_det_dim = h_det_dim
 
         # grab handles to the relevant InfNets
         self.q_z_given_x = q_z_given_x
@@ -140,9 +142,18 @@ class TwoStageModel1(object):
         # samples of "hidden" latent state (from both p and q)
         h_p_mean, h_p_logvar, h_p = self.p_h_given_z.apply(self.z)
         h_q_mean, h_q_logvar, h_q = self.q_h_given_z_x.apply( \
-                T.horizontal_stack(h_p_mean, h_p_logvar, self.x_out))
-        self.h = (self.train_switch[0] * h_q) + \
-                 ((1.0 - self.train_switch[0]) * h_p)
+                T.concatenate([self.z, self.x_out], axis=1))
+        # compute "stochastic" and "deterministic" parts of latent state
+        h_sto = (self.train_switch[0] * h_q) + \
+                ((1.0 - self.train_switch[0]) * h_p)
+        h_det = h_p_mean
+        if self.h_det_dim is None:
+            # don't pass forward any deterministic state
+            self.h = h_sto
+        else:
+            # pass forward some deterministic state
+            self.h = T.concatenate([h_det[:,:self.h_det_dim],
+                                    h_sto[:,self.h_det_dim:]], axis=1)
         # compute relevant KLds for this step
         self.kld_h_q2p = gaussian_kld(h_q_mean, h_q_logvar, \
                                       h_p_mean, h_p_logvar)
@@ -721,7 +732,7 @@ class TwoStageModel2(object):
         br = T.lscalar()
         # collect the outputs to return from this function
         outputs = [self.joint_cost, self.nll_cost, self.kld_cost, \
-                   self.reg_cost, self.obs_costs]
+                   self.reg_cost, self.nll_costs, self.kld_z, self.kld_h]
         # compile the theano function
         func = theano.function(inputs=[ xi, xo, br ], \
                 outputs=outputs, \
