@@ -1995,3 +1995,457 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         self.set_model_params(numpy_params)
         pickle_file.close()
         return
+
+
+
+####################################################
+####################################################
+## Structured prediction via iterative refinement ##
+####################################################
+####################################################
+
+class IRStructPredModel(BaseRecurrent, Initializable, Random):
+    def __init__(self, n_iter, step_type,
+                 reader_mlp, writer_mlp,
+                 pol_mlp_in, pol_rnn, pol_mlp_out,
+                 var_mlp_in, var_rnn, var_mlp_out,
+                 dec_mlp_in, dec_rnn, dec_mlp_out,
+                 **kwargs):
+        super(IRStructPredModel, self).__init__(**kwargs)
+        if not ((step_type == 'add') or (step_type == 'jump')):
+            raise ValueError('step_type must be jump or add')
+        # record the basic model format params
+        self.n_iter = n_iter
+        self.step_type = step_type
+        # grab handles for submodels
+        self.reader_mlp = reader_mlp
+        self.writer_mlp = writer_mlp
+        self.pol_mlp_in = pol_mlp_in
+        self.pol_rnn = pol_rnn
+        self.pol_mlp_out = pol_mlp_out
+        self.var_mlp_in = var_mlp_in
+        self.var_rnn = var_rnn
+        self.var_mlp_out = var_mlp_out
+        self.dec_mlp_in = dec_mlp_in
+        self.dec_rnn = dec_rnn
+        self.dec_mlp_out = dec_mlp_out
+
+        # create a shared variable switch for controlling sampling
+        ones_ary = numpy.ones((1,)).astype(theano.config.floatX)
+        self.train_switch = theano.shared(value=ones_ary, name='train_switch')
+
+        # shared var learning rate for generator and inferencer
+        zero_ary = to_fX( numpy.zeros((1,)) )
+        self.lr = theano.shared(value=zero_ary, name='rld_lr')
+        # shared var momentum parameters for generator and inferencer
+        self.mom_1 = theano.shared(value=zero_ary, name='rld_mom_1')
+        self.mom_2 = theano.shared(value=zero_ary, name='rld_mom_2')
+
+        # regularization noise on RNN states
+        zero_ary = to_fX(numpy.zeros((1,)))
+        self.rnn_noise = theano.shared(value=zero_ary, name='rnn_noise')
+
+        # regularization noise on gradient estimates
+        zero_ary = to_fX(numpy.zeros((1,)))
+        self.grad_noise = theano.shared(value=zero_ary, name='grad_noise')
+
+        # create shared variables for controlling KL and entropy cost terms
+        self.lam_kld_q2p = theano.shared(value=ones_ary, name='lam_kld_q2p')
+        self.lam_kld_p2q = theano.shared(value=ones_ary, name='lam_kld_p2q')
+        # set weights for KL and entropy terms in the joint cost
+        self.set_lam_kld(lam_kld_q2p=1.0, lam_kld_p2q=0.0)
+
+
+        # list for holding references to model params
+        self.params = []
+        # record the sub-models that underlie this model
+        self.children = [self.reader_mlp, self.writer_mlp,
+                         self.pol_mlp_in, self.pol_rnn, self.pol_mlp_out,
+                         self.var_mlp_in, self.var_rnn, self.var_mlp_out,
+                         self.dec_mlp_in, self.dec_rnn, self.dec_mlp_out]
+        return
+
+    def _allocate(self):
+        """
+        Allocate shared parameters used by this model.
+        """
+        # get size information for the desired parameters
+        c_dim = self.get_dim('c')
+        cp_dim = self.get_dim('c_pol')
+        hp_dim = self.get_dim('h_pol')
+        cv_dim = self.get_dim('c_var')
+        hv_dim = self.get_dim('h_var')
+        cd_dim = self.get_dim('c_dec')
+        hd_dim = self.get_dim('h_dec')
+        # self.c_0 provides initial state of the next column prediction
+        self.c_0 = shared_floatx_nans((1,c_dim), name='c_0')
+        add_role(self.c_0, PARAMETER)
+        # self.cp_0/self.hp_0 provides initial state of the primary policy
+        self.cp_0 = shared_floatx_nans((1,cp_dim), name='cp_0')
+        add_role(self.cp_0, PARAMETER)
+        self.hp_0 = shared_floatx_nans((1,hp_dim), name='hp_0')
+        add_role(self.hp_0, PARAMETER)
+        # self.cv_0/self.hv_0 provides initial state of the guide policy
+        self.cv_0 = shared_floatx_nans((1,cv_dim), name='cv_0')
+        add_role(self.cv_0, PARAMETER)
+        self.hv_0 = shared_floatx_nans((1,hv_dim), name='hv_0')
+        add_role(self.hv_0, PARAMETER)
+        # self.cd_0/self.hd_0 provides initial state of the shared dynamics
+        self.cd_0 = shared_floatx_nans((1,cd_dim), name='cd_0')
+        add_role(self.cd_0, PARAMETER)
+        self.hd_0 = shared_floatx_nans((1,hd_dim), name='hd_0')
+        add_role(self.hd_0, PARAMETER)
+        # add the theano shared variables to our parameter lists
+        self.params.extend([ self.c_0,
+                             self.cp_0, self.cv_0, self.cd_0,
+                             self.hp_0, self.hv_0, self.hd_0 ])
+        return
+
+    def _initialize(self):
+        # initialize to all parameters zeros...
+        for p in self.params:
+            p_nan = p.get_value(borrow=False)
+            p_zeros = numpy.zeros(p_nan.shape)
+            p.set_value(p_zeros.astype(theano.config.floatX))
+        return
+
+    def get_dim(self, name):
+        if name == 'x':
+            return self.reader_mlp.get_dim('input')
+        elif name == 'y':
+            return self.writer_mlp.get_dim('output')
+        elif name == 'h_pol':
+            return self.pol_rnn.get_dim('states')
+        elif name == 'c_pol':
+            return self.pol_rnn.get_dim('cells')
+        elif name == 'h_var':
+            return self.var_rnn.get_dim('states')
+        elif name == 'c_var':
+            return self.var_rnn.get_dim('cells')
+        elif name == 'h_dec':
+            return self.dec_rnn.get_dim('states')
+        elif name == 'c_dec':
+            return self.dec_rnn.get_dim('cells')
+        elif name == 'z':
+            return self.var_mlp_out.get_dim('output')
+        elif name in ['nll', 'kl_q2p', 'kl_p2q']:
+            return 0
+        else:
+            super(IRStructPredModel, self).get_dim(name)
+        return
+
+    def set_sgd_params(self, lr=0.01, mom_1=0.9, mom_2=0.999):
+        """
+        Set learning rate and momentum parameter for all updates.
+        """
+        zero_ary = numpy.zeros((1,))
+        # set learning rate
+        new_lr = zero_ary + lr
+        self.lr.set_value(to_fX(new_lr))
+        # set momentums (use first and second order "momentum")
+        new_mom_1 = zero_ary + mom_1
+        self.mom_1.set_value(to_fX(new_mom_1))
+        new_mom_2 = zero_ary + mom_2
+        self.mom_2.set_value(to_fX(new_mom_2))
+        return
+
+    def set_lam_kld(self, lam_kld_q2p=1.0, lam_kld_p2q=0.0):
+        """
+        Set the relative weight of various terms in the joint cost.
+        """
+        zero_ary = numpy.zeros((1,))
+        new_lam = zero_ary + lam_kld_q2p
+        self.lam_kld_q2p.set_value(to_fX(new_lam))
+        new_lam = zero_ary + lam_kld_p2q
+        self.lam_kld_p2q.set_value(to_fX(new_lam))
+        return
+
+    def set_rnn_noise(self, rnn_noise=0.0):
+        """
+        Set the standard deviation of "RNN dynamics noise".
+        """
+        zero_ary = numpy.zeros((1,))
+        new_val = zero_ary + rnn_noise
+        self.rnn_noise.set_value(to_fX(new_val))
+        return
+
+    def set_grad_noise(self, grad_noise=0.0):
+        """
+        Set the standard deviation of "gradient noise".
+        """
+        zero_ary = numpy.zeros((1,))
+        new_val = zero_ary + grad_noise
+        self.grad_noise.set_value(to_fX(new_val))
+        return
+
+    #------------------------------------------------------------------------
+
+    @recurrent(sequences=['u'], contexts=['f_x', 'y'],
+               states=['c', 'h_pol', 'c_pol', 'h_var', 'c_var', 'h_dec', 'c_dec', 'nll', 'kl_q2p', 'kl_p2q'],
+               outputs=['c', 'h_pol', 'c_pol', 'h_var', 'c_var', 'h_dec', 'c_dec', 'nll', 'kl_q2p', 'kl_p2q'])
+    def apply(self, u, c, h_pol, c_pol, h_var, c_var, h_dec, c_dec, nll, kl_q2p, kl_p2q, f_x, y):
+        # get current state of the x under construction
+        if self.step_type == 'add':
+            c = c
+        else:
+            c = self.writer_mlp.apply(h_dec)
+        c_as_y = tensor.nnet.sigmoid(tanh_clip(c, clip_val=15.0))
+
+        # update the primary policy state
+        pol_inp = tensor.concatenate([c_as_y, f_x, h_dec], axis=1)
+        i_pol = self.pol_mlp_in.apply(pol_inp)
+        h_pol, c_pol = self.pol_rnn.apply(states=h_pol, cells=c_pol,
+                                          inputs=i_pol, iterate=False)
+
+        # update the guide policy state
+        var_inp = tensor.concatenate([y, c_as_y, f_x, h_dec], axis=1)
+        i_var = self.var_mlp_in.apply(var_inp)
+        h_var, c_var = self.var_rnn.apply(states=h_var, cells=c_var,
+                                          inputs=i_var, iterate=False)
+
+        # estimate primary policy's conditional over z
+        p_z_mean, p_z_logvar, p_z = self.pol_mlp_out.apply(h_pol, u)
+        # estimate guide policy's conditional over z
+        q_z_mean, q_z_logvar, q_z = self.var_mlp_out.apply(h_var, u)
+
+        # mix samples from p/q based on value of self.train_switch
+        z = (self.train_switch[0] * q_z) + \
+            ((1.0 - self.train_switch[0]) * p_z)
+
+        # update the shared dynamics' state
+        dec_inp = tensor.concatenate([z], axis=1)
+        i_dec = self.dec_mlp_in.apply(dec_inp)
+        h_dec, c_dec = self.dec_rnn.apply(states=h_dec, cells=c_dec, \
+                                          inputs=i_dec, iterate=False)
+
+        # get current state of the x under construction
+        if self.step_type == 'add':
+            c = c + self.writer_mlp.apply(h_dec)
+        else:
+            c = self.writer_mlp.apply(h_dec)
+        # compute the NLL of the reconstruction as of this step
+        c_as_y = tensor.nnet.sigmoid(tanh_clip(c, clip_val=15.0))
+        nll = -1.0 * tensor.flatten(log_prob_bernoulli(y, c_as_y))
+        # compute KL(q || p) and KL(p || q) for this step
+        kl_q2p = tensor.sum(gaussian_kld(q_z_mean, q_z_logvar, \
+                            p_z_mean, p_z_logvar), axis=1)
+        kl_p2q = tensor.sum(gaussian_kld(p_z_mean, p_z_logvar, \
+                            q_z_mean, q_z_logvar), axis=1)
+        return c, h_pol, c_pol, h_var, c_var, h_dec, c_dec, nll, kl_q2p, kl_p2q
+
+    #------------------------------------------------------------------------
+
+    @application(inputs=['x', 'y'],
+                 outputs=['cs', 'nll', 'kl_q2ps', 'kl_p2qs'])
+    def run_model_simul(self, x, y):
+        # get important size and shape information
+        batch_size = x.shape[0]
+        z_dim = self.get_dim('z')
+        cp_dim = self.get_dim('c_pol')
+        cv_dim = self.get_dim('c_var')
+        cd_dim = self.get_dim('c_dec')
+        hp_dim = self.get_dim('h_pol')
+        hv_dim = self.get_dim('h_var')
+        hd_dim = self.get_dim('h_dec')
+
+        # get initial states for all model components
+        c0 = self.c_0.repeat(batch_size, axis=0)
+        cp0 = self.cp_0.repeat(batch_size, axis=0)
+        hp0 = self.hp_0.repeat(batch_size, axis=0)
+        cv0 = self.cv_0.repeat(batch_size, axis=0)
+        hv0 = self.hv_0.repeat(batch_size, axis=0)
+        cd0 = self.cd_0.repeat(batch_size, axis=0)
+        hd0 = self.hd_0.repeat(batch_size, axis=0)
+
+        # get zero-mean, unit-std. Gaussian noise for use in scan op
+        u = self.theano_rng.normal(
+                    size=(self.n_iter, batch_size, z_dim),
+                    avg=0., std=1.)
+
+        # extract features from x, for conditioning our predictions
+        f_x = self.reader_mlp.apply(x)
+
+        # run the multi-stage guided generative process
+        cs, _, _, _, _, _, _, nlls, kl_q2ps, kl_p2qs = \
+                self.apply(u=u, c=c0,
+                           h_pol=hp0, c_pol=cp0,
+                           h_var=hv0, c_var=cv0,
+                           h_dec=hd0, c_dec=cd0, f_x=f_x, y=y)
+        nll = tensor.flatten(nlls[-1,:]) # NLL following last refinement step
+
+        # add name tags to the constructed symbolic variables
+        cs.name = "cs"
+        nll.name = "nll"
+        kl_q2ps.name = "kl_q2ps"
+        kl_p2qs.name = "kl_p2qs"
+        return cs, nll, kl_q2ps, kl_p2qs
+
+
+    def build_model_funcs(self):
+        """
+        Build the symbolic costs and theano functions relevant to this model.
+        """
+        # symbolic variable for providing inputs
+        x_sym = tensor.matrix('x_sym')
+        y_sym = tensor.matrix('y_sym')
+
+        # collect symbolic vars for model samples and costs (given x/y)
+        cs, nll, kl_q2ps, kl_p2qs = self.run_model_simul(x_sym, y_sym)
+
+        # get the expected NLL part of the VFE bound
+        self.nll_term = tensor.mean(nll)
+        self.nll_term.name = "nll_term"
+
+        # get KL(q || p) and KL(p || q)
+        self.kld_q2p_term = kl_q2ps.sum(axis=0).mean()
+        self.kld_q2p_term.name = "kld_q2p_term"
+        self.kld_p2q_term = kl_p2qs.sum(axis=0).mean()
+        self.kld_p2q_term.name = "kld_p2q_term"
+
+        # construct the proper VFE bound on NLL
+        self.nll_bound = self.nll_term + self.kld_q2p_term
+
+        # grab handles for all the optimizable parameters in our cost
+        self.cg = ComputationGraph([self.nll_bound])
+        self.joint_params = self.get_model_params(ary_type='theano')
+
+        # apply some l2 regularization to the model parameters
+        self.reg_term = (1e-5 * sum([tensor.sum(p**2.0) for p in self.joint_params]))
+        self.reg_term.name = "reg_term"
+
+        # compute the full cost w.r.t. which we will optimize params
+        self.joint_cost = self.nll_term + \
+                          (self.lam_kld_q2p[0] * self.kld_q2p_term) + \
+                          (self.lam_kld_p2q[0] * self.kld_p2q_term) + \
+                          self.reg_term
+        self.joint_cost.name = "joint_cost"
+
+        # get the gradient of the joint cost for all optimizable parameters
+        print("Computing gradients of joint_cost...")
+        self.joint_grads = OrderedDict()
+        grad_list = tensor.grad(self.joint_cost, self.joint_params)
+        for i, p in enumerate(self.joint_params):
+            self.joint_grads[p] = grad_list[i]
+
+        # construct the updates for all trainable parameters
+        self.joint_updates, applied_updates = get_adam_updates_X( \
+                params=self.joint_params, \
+                grads=self.joint_grads, alpha=self.lr, \
+                beta1=self.mom_1, beta2=self.mom_2, \
+                mom2_init=1e-3, smoothing=1e-4, max_grad_norm=10.0)
+
+        # get the total grad norm and (post ADAM scaling) update norm.
+        self.grad_norm = sum([tensor.sum(g**2.0) for g in grad_list])
+        self.update_norm = sum([tensor.sum(u**2.0) for u in applied_updates])
+
+        # collect the outputs to return from this function
+        train_outputs = [self.joint_cost, self.nll_bound,
+                         self.nll_term, self.kld_q2p_term, self.kld_p2q_term,
+                         self.reg_term, self.grad_norm, self.update_norm]
+        bound_outputs = [self.joint_cost, self.nll_bound,
+                         self.nll_term, self.kld_q2p_term, self.kld_p2q_term,
+                         self.reg_term]
+        # collect the required inputs
+        inputs = [x_sym, y_sym]
+
+        # compile the theano functions for computing stuff, like for real
+        print("Compiling model training/update function...")
+        self.train_joint = theano.function(inputs=inputs,
+                                           outputs=train_outputs,
+                                           updates=self.joint_updates)
+        print("Compiling model cost estimator function...")
+        self.compute_nll_bound = theano.function(inputs=inputs,
+                                                 outputs=bound_outputs)
+        return
+
+    def build_sampling_funcs(self):
+        """
+        Build functions for visualizing the behavior of this model.
+        """
+        # symbolic variable for providing inputs
+        x_sym = tensor.matrix('x_sym')
+        y_sym = tensor.matrix('y_sym')
+        # collect symbolic vars for model samples and costs (given x/y)
+        cs, nll, kl_q2ps, kl_p2qs = self.run_model_simul(x_sym, y_sym)
+        cs_as_ys = tensor.nnet.sigmoid(tanh_clip(cs, clip_val=15.0))
+
+        # get important parts of the VFE bound
+        nll_term = nll.mean()
+        kl_term = kl_q2ps.mean()
+        # grab handle for the computation graph for this model's cost
+        dummy_cost = nll_term + kl_term
+        self.cg = ComputationGraph([dummy_cost])
+
+        # build the function for computing the prediction trajectories
+        print("Compiling model sampler...")
+        inputs = [x_sym, y_sym]
+        sample_func = theano.function(inputs=inputs, outputs=cs_as_ys)
+        def switchy_sampler(x=None, y=None, sample_source='q'):
+            assert (not (x is None)), "input x is required, sorry"
+            assert (not (y is None)), "input y is required, sorry"
+            # store value of sample source switch, to restore later
+            old_switch = self.train_switch.get_value()
+            if sample_source == 'p':
+                # take samples from the primary policy
+                zeros_ary = numpy.zeros((1,)).astype(theano.config.floatX)
+                self.train_switch.set_value(zeros_ary)
+            else:
+                # take samples from the guide policy
+                ones_ary = numpy.ones((1,)).astype(theano.config.floatX)
+                self.train_switch.set_value(ones_ary)
+            # sample prediction and attention trajectories
+            samps = sample_func(x, y)
+            # set sample source switch back to previous value
+            self.train_switch.set_value(old_switch)
+            return samps
+        self.sample_model = switchy_sampler
+        return
+
+    def get_model_params(self, ary_type='numpy'):
+        """
+        Get the optimizable parameters in this model. This returns a list
+        and, to reload this model's parameters, the list must stay in order.
+
+        This can provide shared variables or numpy arrays.
+        """
+        if self.cg is None:
+            self.build_model_funcs()
+        joint_params = VariableFilter(roles=[PARAMETER])(self.cg.variables)
+        if ary_type == 'numpy':
+            for i, p in enumerate(joint_params):
+                joint_params[i] = p.get_value(borrow=False)
+        return joint_params
+
+    def set_model_params(self, numpy_param_list):
+        """
+        Set the optimizable parameters in this model. This requires a list
+        and, to reload this model's parameters, the list must be in order.
+        """
+        if self.cg is None:
+            self.build_model_funcs()
+        # grab handles for all the optimizable parameters in our cost
+        joint_params = VariableFilter(roles=[PARAMETER])(self.cg.variables)
+        for i, p in enumerate(joint_params):
+            joint_params[i].set_value(to_fX(numpy_param_list[i]))
+        return joint_params
+
+    def save_model_params(self, f_name=None):
+        """
+        Save model parameters to a pickle file, in numpy form.
+        """
+        numpy_params = self.get_model_params(ary_type='numpy')
+        f_handle = file(f_name, 'wb')
+        # dump the dict self.params, which just holds "simple" python values
+        cPickle.dump(numpy_params, f_handle, protocol=-1)
+        f_handle.close()
+        return
+
+    def load_model_params(self, f_name=None):
+        """
+        Load model parameters from a pickle file, in numpy form.
+        """
+        pickle_file = open(f_name)
+        numpy_params = cPickle.load(pickle_file)
+        self.set_model_params(numpy_params)
+        pickle_file.close()
+        return
