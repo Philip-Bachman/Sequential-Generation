@@ -730,9 +730,13 @@ class TwoStageModel2(object):
         xi = T.matrix()
         xo = T.matrix()
         br = T.lscalar()
+        #
+        nll = self.nll_costs
+        kldz = T.sum(self.kld_z, axis=1)
+        kldh = T.sum(self.kld_h, axis=1)
         # collect the outputs to return from this function
         outputs = [self.joint_cost, self.nll_cost, self.kld_cost, \
-                   self.reg_cost, self.nll_costs, self.kld_z, self.kld_h]
+                   self.reg_cost, self.nll_costs, kldz, kldh]
         # compile the theano function
         func = theano.function(inputs=[ xi, xo, br ], \
                 outputs=outputs, \
