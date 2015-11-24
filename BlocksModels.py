@@ -2005,7 +2005,7 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
 ####################################################
 
 class IRStructPredModel(BaseRecurrent, Initializable, Random):
-    def __init__(self, n_iter, step_type,
+    def __init__(self, n_iter, step_type, use_pol,
                  reader_mlp, writer_mlp,
                  pol_mlp_in, pol_rnn, pol_mlp_out,
                  var_mlp_in, var_rnn, var_mlp_out,
@@ -2017,6 +2017,7 @@ class IRStructPredModel(BaseRecurrent, Initializable, Random):
         # record the basic model format params
         self.n_iter = n_iter
         self.step_type = step_type
+        self.use_pol = use_pol
         # grab handles for submodels
         self.reader_mlp = reader_mlp
         self.writer_mlp = writer_mlp
@@ -2111,9 +2112,9 @@ class IRStructPredModel(BaseRecurrent, Initializable, Random):
 
     def get_dim(self, name):
         if name == 'x':
-            return self.reader_mlp.get_dim('input')
-        elif name == 'y':
-            return self.writer_mlp.get_dim('output')
+            return self.reader_mlp.input_dim
+        elif name in ['c', 'y']:
+            return self.writer_mlp.output_dim
         elif name == 'h_pol':
             return self.pol_rnn.get_dim('states')
         elif name == 'c_pol':
@@ -2207,6 +2208,10 @@ class IRStructPredModel(BaseRecurrent, Initializable, Random):
         p_z_mean, p_z_logvar, p_z = self.pol_mlp_out.apply(h_pol, u)
         # estimate guide policy's conditional over z
         q_z_mean, q_z_logvar, q_z = self.var_mlp_out.apply(h_var, u)
+        if not self.use_pol:
+            # use a deterministic model
+            q_z_mean, q_z_logvar = p_z_mean, p_z_logvar
+            p_z, q_z = p_z_mean, p_z_mean
 
         # mix samples from p/q based on value of self.train_switch
         z = (self.train_switch[0] * q_z) + \
@@ -2328,11 +2333,12 @@ class IRStructPredModel(BaseRecurrent, Initializable, Random):
             self.joint_grads[p] = grad_list[i]
 
         # construct the updates for all trainable parameters
-        self.joint_updates, applied_updates = get_adam_updates_X( \
-                params=self.joint_params, \
-                grads=self.joint_grads, alpha=self.lr, \
-                beta1=self.mom_1, beta2=self.mom_2, \
-                mom2_init=1e-3, smoothing=1e-4, max_grad_norm=10.0)
+        self.joint_updates, applied_updates = get_adam_updates_X(
+                params=self.joint_params,
+                grads=self.joint_grads, alpha=self.lr,
+                beta1=self.mom_1, beta2=self.mom_2,
+                mom2_init=1e-3, smoothing=1e-4, max_grad_norm=10.0,
+                theano_rng=self.theano_rng, noise_std=self.grad_noise)
 
         # get the total grad norm and (post ADAM scaling) update norm.
         self.grad_norm = sum([tensor.sum(g**2.0) for g in grad_list])
@@ -2394,10 +2400,11 @@ class IRStructPredModel(BaseRecurrent, Initializable, Random):
                 ones_ary = numpy.ones((1,)).astype(theano.config.floatX)
                 self.train_switch.set_value(ones_ary)
             # sample prediction and attention trajectories
-            samps = sample_func(x, y)
+            y_samps = sample_func(x, y)
+            x_samps = x[numpy.newaxis,:,:].repeat(y_samps.shape[0], axis=0)
             # set sample source switch back to previous value
             self.train_switch.set_value(old_switch)
-            return samps
+            return x_samps, y_samps
         self.sample_model = switchy_sampler
         return
 

@@ -37,7 +37,7 @@ def test_mnist(step_type='add',
     # Format the result tag more thoroughly #
     #########################################
     dp_int = int(100.0 * drop_prob)
-    result_tag = "{}NEW_GPSI_OD{}_DP{}_IS{}_{}_NA".format(RESULT_PATH, occ_dim, dp_int, imp_steps, step_type)
+    result_tag = "{}GPSI_OD{}_DP{}_IS{}_{}_NA".format(RESULT_PATH, occ_dim, dp_int, imp_steps, step_type)
 
     ##########################
     # Get some training data #
@@ -349,14 +349,14 @@ if __name__=="__main__":
     # MNIST #
     #########
     # TRAINING
-    #test_mnist(step_type='add', occ_dim=14, drop_prob=0.0)
-    #test_mnist(step_type='add', occ_dim=16, drop_prob=0.0)
-    #test_mnist(step_type='add', occ_dim=0, drop_prob=0.6)
-    #test_mnist(step_type='add', occ_dim=0, drop_prob=0.8)
-    #test_mnist(step_type='jump', occ_dim=14, drop_prob=0.0)
-    #test_mnist(step_type='jump', occ_dim=16, drop_prob=0.0)
-    #test_mnist(step_type='jump', occ_dim=0, drop_prob=0.6)
-    #test_mnist(step_type='jump', occ_dim=0, drop_prob=0.8)
+    # test_mnist(step_type='add', occ_dim=14, drop_prob=0.0)
+    # test_mnist(step_type='add', occ_dim=16, drop_prob=0.0)
+    # test_mnist(step_type='add', occ_dim=0, drop_prob=0.6)
+    # test_mnist(step_type='add', occ_dim=0, drop_prob=0.8)
+    # test_mnist(step_type='jump', occ_dim=14, drop_prob=0.0)
+    # test_mnist(step_type='jump', occ_dim=16, drop_prob=0.0)
+    # test_mnist(step_type='jump', occ_dim=0, drop_prob=0.6)
+    # test_mnist(step_type='jump', occ_dim=0, drop_prob=0.8)
     # test_mnist(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
     # test_mnist(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
     # test_mnist(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
@@ -365,13 +365,13 @@ if __name__=="__main__":
     # test_mnist(step_type='jump', imp_steps=5, occ_dim=0, drop_prob=0.9)
     # test_mnist(step_type='jump', imp_steps=2, occ_dim=0, drop_prob=0.9)
     # test_mnist(step_type='jump', imp_steps=1, occ_dim=0, drop_prob=0.9)
-    test_mnist(step_type='jump', imp_steps=10, occ_dim=0, drop_prob=0.9)
+    # test_mnist(step_type='jump', imp_steps=10, occ_dim=0, drop_prob=0.9)
     # test_mnist(step_type='jump', imp_steps=15, occ_dim=0, drop_prob=0.9)
     # test_mnist(step_type='lstm', imp_steps=5, occ_dim=0, drop_prob=0.9)
     # test_mnist(step_type='lstm', imp_steps=2, occ_dim=0, drop_prob=0.9)
     # test_mnist(step_type='lstm', imp_steps=1, occ_dim=0, drop_prob=0.9)
     # test_mnist(step_type='lstm', imp_steps=10, occ_dim=0, drop_prob=0.9)
-    # test_mnist(step_type='layer', imp_steps=10, occ_dim=0, drop_prob=0.9)
+    # test_mnist(step_type='lstm', imp_steps=15, occ_dim=0, drop_prob=0.9)
 
     # RESULTS
     # test_mnist_results(step_type='add', occ_dim=14, drop_prob=0.0)
