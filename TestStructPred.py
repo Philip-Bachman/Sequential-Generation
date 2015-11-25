@@ -145,11 +145,11 @@ def test_lstm_structpred(step_type='add', use_pol=True, use_binary=False):
     ############################################################
     # Setup some parameters for the Iterative Refinement Model #
     ############################################################
-    read_dim = 250
-    write_dim = 250
-    mlp_dim = 250
-    rnn_dim = 250
-    z_dim = 100
+    read_dim = 128
+    write_dim = 128
+    mlp_dim = 128
+    rnn_dim = 128
+    z_dim = 64
     n_iter = 15
 
     rnninits = {
@@ -323,6 +323,7 @@ if __name__=="__main__":
     # Train "binarized MNIST" generative models (open loopish LSTM quartet) #
     #########################################################################
     test_lstm_structpred(step_type='add', use_pol=True, use_binary=True)
+    #test_lstm_structpred(step_type='add', use_pol=False, use_binary=True)
     #test_lstm_structpred(step_type='add', use_pol=False)
 
 
