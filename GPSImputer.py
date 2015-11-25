@@ -43,7 +43,7 @@ class GPSImputer(object):
                 s_dim: dimension of space for hypothesis construction
                 use_p_x_given_si: boolean for whether to use ----
                 imp_steps: number of reconstruction steps to perform
-                step_type: either "add", "jump", or "lstm"
+                step_type: either "add", "jump", "lstm", or "layer"
                 x_type: can be "bernoulli" or "gaussian"
                 obs_transform: can be 'none' or 'sigmoid'
     """
@@ -85,9 +85,6 @@ class GPSImputer(object):
         if self.x_type == 'bernoulli':
             self.obs_transform = lambda x: T.nnet.sigmoid(x)
         self.shared_param_dicts = shared_param_dicts
-
-        assert((self.step_type == 'add') or (self.step_type == 'jump') \
-               or (self.step_type == 'lstm'))
 
         # grab handles to the relevant InfNets
         self.p_zi_given_xi = p_zi_given_xi
@@ -170,11 +167,17 @@ class GPSImputer(object):
             elif (self.step_type == 'add'):
                 # add steps just update the guesses additively
                 sip1 = si + si_step
-            else:
+            elif (self.step_type == 'lstm'):
                 # LSTM-style updates with write and erase gates
                 write_gate = 1.2 * T.nnet.sigmoid(1.0 + hydra_out[1])
                 erase_gate = 1.2 * T.nnet.sigmoid(1.0 + hydra_out[2])
                 sip1 = (erase_gate * si) + (write_gate * si_step)
+            elif (self.step_type == 'layer'):
+                alpha_gate = T.nnet.sigmoid(hydra_out[1])
+                sip1 = (alpha_gate * si) + ((1.0 - alpha_gate) * si_step)
+            else:
+                assert False, "Unknown step type!"
+
             # compute NLL for the current imputation
             nlli = self._construct_nll_costs(sip1, self.x_out, self.x_mask)
             return sip1, nlli, kldi_q2p, kldi_p2q, kldi_p2g
@@ -263,7 +266,7 @@ class GPSImputer(object):
         self.joint_updates = get_adam_updates(params=self.joint_params, \
                 grads=self.joint_grads, alpha=self.lr, \
                 beta1=self.mom_1, beta2=self.mom_2, \
-                mom2_init=1e-3, smoothing=1e-5, max_grad_norm=10.0)
+                mom2_init=1e-3, smoothing=1e-4, max_grad_norm=10.0)
         for k, v in self.scan_updates.items():
             self.joint_updates[k] = v
 

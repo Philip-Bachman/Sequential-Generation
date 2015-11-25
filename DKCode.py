@@ -137,9 +137,10 @@ def get_adam_updates(params=None, grads=None, \
 
     return updates
 
-def get_adam_updates_X(params=None, grads=None, \
-        alpha=None, beta1=None, beta2=None, \
-        mom2_init=1e-3, smoothing=1e-6, max_grad_norm=10000.0):
+def get_adam_updates_X(params=None, grads=None,
+        alpha=None, beta1=None, beta2=None,
+        mom2_init=1e-3, smoothing=1e-6, max_grad_norm=10000.0,
+        theano_rng=None, noise_std=None):
     """
     Get the Theano updates to perform ADAM optimization of the shared-var
     parameters in params, given the shaared-var gradients in grads.
@@ -148,6 +149,8 @@ def get_adam_updates_X(params=None, grads=None, \
     a dict containing the grads for all values in params, and the remaining
     arguments should be theano shared variable arrays.
     """
+    # determine whether to use noisy updates
+    use_noise = theano_rng is None
 
     # make an OrderedDict to hold the updates
     updates = OrderedDict()
@@ -181,7 +184,12 @@ def get_adam_updates_X(params=None, grads=None, \
         effgrad = mom1_new / (T.sqrt(mom2_new) + smoothing)
 
         # do update
-        p_new = p - (lr_t * effgrad)
+        if use_noise:
+            zmuv_noise = theano_rng.normal(size=effgrad.shape, avg=0., std=1.)
+            nzygrad = effgrad + (noise_std[0] * zmuv_noise)
+            p_new = p - (lr_t * nzygrad)
+        else:
+            p_new = p - (lr_t * effgrad)
 
         # apply updates
         updates[p] = p_new
