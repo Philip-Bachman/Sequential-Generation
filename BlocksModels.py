@@ -1732,7 +1732,7 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
                 self.run_after(z=zs_from_q,
                           h_dec=hds_from_q_for_p,
                           h_pol=hp0, c_pol=cp0,
-                          h_var=hv0, c_var=cv0, x=x_in)
+                          h_ent=he0, c_ent=ce0, x=x_in)
 
         ################
         # RUN P THEN Q # -- for variational bound on model entropy
