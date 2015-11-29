@@ -1405,9 +1405,9 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         self.mom_1 = theano.shared(value=zero_ary, name='rld_mom_1')
         self.mom_2 = theano.shared(value=zero_ary, name='rld_mom_2')
 
-        # regularization noise on RNN states
+        # standard deviation for noise on gradients
         zero_ary = to_fX(numpy.zeros((1,)))
-        self.rnn_noise = theano.shared(value=zero_ary, name='rnn_noise')
+        self.grad_noise = theano.shared(value=zero_ary, name='grad_noise')
 
         # create shared variables for controlling KL and entropy cost terms
         self.lam_kld_q2p = theano.shared(value=ones_ary, name='lam_kld_q2p')
@@ -1536,13 +1536,13 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         self.lam_neg_ent.set_value(to_fX(new_lam))
         return
 
-    def set_rnn_noise(self, rnn_noise=0.0):
+    def set_grad_noise(self, grad_noise=0.0):
         """
-        Set the standard deviation of "regularizing noise".
+        Set the standard deviation of "gradient noise".
         """
         zero_ary = numpy.zeros((1,))
-        new_val = zero_ary + rnn_noise
-        self.rnn_noise.set_value(to_fX(new_val))
+        new_val = zero_ary + grad_noise
+        self.grad_noise.set_value(to_fX(new_val))
         return
 
     #------------------------------------------------------------------------
@@ -1849,11 +1849,12 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
             self.joint_grads[p] = grad_list[i]
 
         # construct the updates for all trainable parameters
-        self.joint_updates, applied_updates = get_adam_updates_X( \
-                params=self.joint_params, \
-                grads=self.joint_grads, alpha=self.lr, \
-                beta1=self.mom_1, beta2=self.mom_2, \
-                mom2_init=1e-3, smoothing=1e-4, max_grad_norm=10.0)
+        self.joint_updates, applied_updates = get_adam_updates_X(
+                params=self.joint_params,
+                grads=self.joint_grads, alpha=self.lr,
+                beta1=self.mom_1, beta2=self.mom_2,
+                mom2_init=1e-3, smoothing=1e-4, max_grad_norm=10.0,
+                theano_rng=self.theano_rng, noise_std=self.grad_noise))
 
         # get the total grad norm and (post ADAM scaling) update norm.
         self.grad_norm = sum([tensor.sum(g**2.0) for g in grad_list])
