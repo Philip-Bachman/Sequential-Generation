@@ -129,17 +129,22 @@ def test_rldraw_classic(step_type='add', use_pol=True):
                      name="pol_mlp_in", **inits)
     var_mlp_in = MLP([Identity()], [(x_dim + rnn_dim), 4*rnn_dim],
                      name="var_mlp_in", **inits)
+    ent_mlp_in = MLP([Identity()], [(x_dim + rnn_dim), 4*rnn_dim],
+                     name="ent_mlp_in", **inits)
     dec_mlp_in = MLP([Identity()], [z_dim, 4*rnn_dim],
                      name="dec_mlp_in", **inits)
     # setup submodels for turning LSTM states into conditionals over z
     pol_mlp_out = CondNet([], [rnn_dim, z_dim], name="pol_mlp_out", **inits)
     var_mlp_out = CondNet([], [rnn_dim, z_dim], name="var_mlp_out", **inits)
+    ent_mlp_out = CondNet([], [rnn_dim, z_dim], name="ent_mlp_out", **inits)
     dec_mlp_out = CondNet([], [rnn_dim, z_dim], name="dec_mlp_out", **inits)
     # setup the LSTMs for primary policy, guide policy, and shared dynamics
     pol_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
                          name="pol_rnn", **rnninits)
     var_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
                          name="var_rnn", **rnninits)
+    ent_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
+                         name="ent_rnn", **rnninits)
     dec_rnn = BiasedLSTM(dim=rnn_dim, ig_bias=2.0, fg_bias=2.0, \
                          name="dec_rnn", **rnninits)
 
@@ -157,7 +162,10 @@ def test_rldraw_classic(step_type='add', use_pol=True):
                 var_rnn=var_rnn,
                 dec_mlp_in=dec_mlp_in,
                 dec_mlp_out=dec_mlp_out,
-                dec_rnn=dec_rnn)
+                dec_rnn=dec_rnn,
+                ent_mlp_in=ent_mlp_in,
+                ent_mlp_out=ent_mlp_out,
+                ent_rnn=ent_rnn)
     draw.initialize()
 
     compile_start_time = time.time()
