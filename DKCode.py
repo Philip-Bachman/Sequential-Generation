@@ -150,7 +150,7 @@ def get_adam_updates_X(params=None, grads=None,
     arguments should be theano shared variable arrays.
     """
     # determine whether to use noisy updates
-    use_noise = theano_rng is None
+    use_noise = not (theano_rng is None)
 
     # make an OrderedDict to hold the updates
     updates = OrderedDict()
