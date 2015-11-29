@@ -103,7 +103,7 @@ def test_lstm_structpred(step_type='add', use_pol=True, use_binary=False):
     ###########################################
     pol_tag = "P1" if use_pol else "P0"
     bin_tag = "B1" if use_binary else "B0"
-    res_tag = "SP_LSTM_{}_{}_{}".format(step_type, pol_tag, bin_tag)
+    res_tag = "STRUCT_PRED_RESULTS/SP_LSTM_{}_{}_{}".format(step_type, pol_tag, bin_tag)
 
     if use_binary:
         ############################
@@ -322,9 +322,10 @@ if __name__=="__main__":
     #########################################################################
     # Train "binarized MNIST" generative models (open loopish LSTM quartet) #
     #########################################################################
-    test_lstm_structpred(step_type='add', use_pol=True, use_binary=True)
-    #test_lstm_structpred(step_type='add', use_pol=False, use_binary=True)
-    #test_lstm_structpred(step_type='add', use_pol=False)
+    #test_lstm_structpred(step_type='add', use_pol=True, use_binary=False)
+    #test_lstm_structpred(step_type='add', use_pol=False, use_binary=False)
+    test_lstm_structpred(step_type='jump', use_pol=True, use_binary=False)
+    test_lstm_structpred(step_type='jump', use_pol=False, use_binary=False)
 
 
 
