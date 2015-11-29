@@ -1854,7 +1854,7 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
                 grads=self.joint_grads, alpha=self.lr,
                 beta1=self.mom_1, beta2=self.mom_2,
                 mom2_init=1e-3, smoothing=1e-4, max_grad_norm=10.0,
-                theano_rng=self.theano_rng, noise_std=self.grad_noise))
+                theano_rng=self.theano_rng, noise_std=self.grad_noise)
 
         # get the total grad norm and (post ADAM scaling) update norm.
         self.grad_norm = sum([tensor.sum(g**2.0) for g in grad_list])
