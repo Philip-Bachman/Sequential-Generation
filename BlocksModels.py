@@ -1369,6 +1369,7 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
                  pol_mlp_in, pol_rnn, pol_mlp_out,
                  var_mlp_in, var_rnn, var_mlp_out,
                  dec_mlp_in, dec_rnn, dec_mlp_out,
+                 ent_mlp_in, ent_rnn, ent_mlp_out,
                  **kwargs):
         super(RLDrawModel, self).__init__(**kwargs)
         if not ((step_type == 'add') or (step_type == 'jump')):
@@ -1389,6 +1390,9 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         self.dec_mlp_in = dec_mlp_in
         self.dec_rnn = dec_rnn
         self.dec_mlp_out = dec_mlp_out
+        self.ent_mlp_in = ent_mlp_in
+        self.ent_rnn = ent_rnn
+        self.ent_mlp_out = ent_mlp_out
 
         # create a shared variable switch for controlling sampling
         ones_ary = numpy.ones((1,)).astype(theano.config.floatX)
@@ -1422,7 +1426,8 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         self.children = [self.reader_mlp, self.writer_mlp,
                          self.pol_mlp_in, self.pol_rnn, self.pol_mlp_out,
                          self.var_mlp_in, self.var_rnn, self.var_mlp_out,
-                         self.dec_mlp_in, self.dec_rnn, self.dec_mlp_out]
+                         self.dec_mlp_in, self.dec_rnn, self.dec_mlp_out,
+                         self.ent_mlp_in, self.ent_rnn, self.ent_mlp_out]
         return
 
     def _allocate(self):
@@ -1437,6 +1442,8 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         hv_dim = self.get_dim('h_var')
         cd_dim = self.get_dim('c_dec')
         hd_dim = self.get_dim('h_dec')
+        ce_dim = self.get_dim('c_ent')
+        he_dim = self.get_dim('h_ent')
         # self.c_0 provides initial state of the next column prediction
         self.c_0 = shared_floatx_nans((1,c_dim), name='c_0')
         add_role(self.c_0, PARAMETER)
@@ -1455,10 +1462,15 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         add_role(self.cd_0, PARAMETER)
         self.hd_0 = shared_floatx_nans((1,hd_dim), name='hd_0')
         add_role(self.hd_0, PARAMETER)
+        # self.ce_0/self.he_0 provides initial state of the entropy helper
+        self.ce_0 = shared_floatx_nans((1,ce_dim), name='ce_0')
+        add_role(self.ce_0, PARAMETER)
+        self.he_0 = shared_floatx_nans((1,he_dim), name='he_0')
+        add_role(self.he_0, PARAMETER)
         # add the theano shared variables to our parameter lists
         self.params.extend([ self.c_0,
-                             self.cp_0, self.cv_0, self.cd_0,
-                             self.hp_0, self.hv_0, self.hd_0 ])
+                             self.cp_0, self.cv_0, self.cd_0, self.ce_0,
+                             self.hp_0, self.hv_0, self.hd_0, self.he_0 ])
         return
 
     def _initialize(self):
@@ -1484,6 +1496,10 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
             return self.dec_rnn.get_dim('states')
         elif name == 'c_dec':
             return self.dec_rnn.get_dim('cells')
+        elif name == 'h_ent':
+            return self.ent_rnn.get_dim('states')
+        elif name == 'c_ent':
+            return self.ent_rnn.get_dim('cells')
         elif name == 'z':
             return self.var_mlp_out.get_dim('output')
         elif name in ['nll', 'kl_q2p', 'kl_p2q']:
@@ -1635,17 +1651,17 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         return c, h_pol, c_pol, h_var, c_var, h_dec, c_dec, z, log_prob_z
 
     @recurrent(sequences=['z', 'h_dec'], contexts=['x'],
-               states=['h_pol', 'c_pol', 'h_var', 'c_var'],
-               outputs=['h_pol', 'c_pol', 'h_var', 'c_var', 'log_prob_z'])
-    def run_after(self, z, h_dec, h_pol, c_pol, h_var, c_var, x):
+               states=['h_pol', 'c_pol', 'h_ent', 'c_ent'],
+               outputs=['h_pol', 'c_pol', 'h_ent', 'c_ent', 'log_prob_z'])
+    def run_after(self, z, h_dec, h_pol, c_pol, h_ent, c_ent, x):
         if self.use_q:
             # update the guide policy state
-            var_inp = tensor.concatenate([x, h_dec], axis=1)
-            i_var = self.var_mlp_in.apply(var_inp)
-            h_var, c_var = self.var_rnn.apply(states=h_var, cells=c_var,
-                                              inputs=i_var, iterate=False)
+            ent_inp = tensor.concatenate([x, h_dec], axis=1)
+            i_ent = self.ent_mlp_in.apply(ent_inp)
+            h_ent, c_ent = self.ent_rnn.apply(states=h_ent, cells=c_ent,
+                                              inputs=i_ent, iterate=False)
             # estimate guide policy's conditional over z
-            z_mean, z_logvar, _ = self.var_mlp_out.apply(h_var, 0.0*z)
+            z_mean, z_logvar, _ = self.ent_mlp_out.apply(h_ent, 0.0*z)
         elif self.use_p:
             # update the primary policy state
             pol_inp = tensor.concatenate([h_dec], axis=1)
@@ -1662,55 +1678,9 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
             assert False, "Run flags not set properly!"
         # compute log(prob(z | h))
         log_prob_z = tensor.flatten(log_prob_gaussian2(z, z_mean, z_logvar))
-        return h_pol, c_pol, h_var, c_var, log_prob_z
+        return h_pol, c_pol, h_ent, c_ent, log_prob_z
 
     #------------------------------------------------------------------------
-
-    @application(inputs=['x_in'],
-                 outputs=['cs', 'nll', 'kl_q2ps', 'kl_p2qs', 'neg_ent'])
-    def run_model_simul(self, x_in):
-        # get important size and shape information
-        batch_size = x_in.shape[0]
-        z_dim = self.get_dim('z')
-        cp_dim = self.get_dim('c_pol')
-        cv_dim = self.get_dim('c_var')
-        cd_dim = self.get_dim('c_dec')
-        hp_dim = self.get_dim('h_pol')
-        hv_dim = self.get_dim('h_var')
-        hd_dim = self.get_dim('h_dec')
-
-        # get initial states for all model components
-        c0 = self.c_0.repeat(batch_size, axis=0)
-        cp0 = self.cp_0.repeat(batch_size, axis=0)
-        hp0 = self.hp_0.repeat(batch_size, axis=0)
-        cv0 = self.cv_0.repeat(batch_size, axis=0)
-        hv0 = self.hv_0.repeat(batch_size, axis=0)
-        cd0 = self.cd_0.repeat(batch_size, axis=0)
-        hd0 = self.hd_0.repeat(batch_size, axis=0)
-
-        # get zero-mean, unit-std. Gaussian noise for use in scan op
-        u = self.theano_rng.normal(
-                    size=(self.n_iter, batch_size, z_dim),
-                    avg=0., std=1.)
-
-        # run the multi-stage guided generative process
-        cs, _, _, _, _, _, _, nlls, kl_q2ps, kl_p2qs = \
-                self.apply(u=u, c=c0,
-                           h_pol=hp0, c_pol=cp0,
-                           h_var=hv0, c_var=cv0,
-                           h_dec=hd0, c_dec=cd0, x=x_in)
-        # can't compute negative entropy in simultaenous pass
-        nll = tensor.flatten(nlls[-1,:])
-        neg_ent = 0.0 * nll
-
-        # add name tags to the constructed symbolic variables
-        cs.name = "cs"
-        nll.name = "nll"
-        kl_q2ps.name = "kl_q2ps"
-        kl_p2qs.name = "kl_p2qs"
-        neg_ent.name = "neg_ent"
-        return cs, nll, kl_q2ps, kl_p2qs, neg_ent
-
 
     @application(inputs=['x_in'],
                  outputs=['cs', 'nll', 'kl_q2ps', 'kl_p2qs', 'neg_ent'])
@@ -1721,9 +1691,11 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         cp_dim = self.get_dim('c_pol')
         cv_dim = self.get_dim('c_var')
         cd_dim = self.get_dim('c_dec')
+        ce_dim = self.get_dim('c_ent')
         hp_dim = self.get_dim('h_pol')
         hv_dim = self.get_dim('h_var')
         hd_dim = self.get_dim('h_dec')
+        he_dim = self.get_dim('h_ent')
 
         # get initial states for all model components
         c0 = self.c_0.repeat(batch_size, axis=0)
@@ -1733,9 +1705,11 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
         hv0 = self.hv_0.repeat(batch_size, axis=0)
         cd0 = self.cd_0.repeat(batch_size, axis=0)
         hd0 = self.hd_0.repeat(batch_size, axis=0)
+        ce0 = self.ce_0.repeat(batch_size, axis=0)
+        he0 = self.he_0.repeat(batch_size, axis=0)
 
         ################
-        # RUN Q THEN P #
+        # RUN Q THEN P # -- for variational bound on log likelihood
         ################
         # get zero-mean, unit-std. Gaussian noise for use in scan op
         u_for_q = self.theano_rng.normal(
@@ -1761,7 +1735,7 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
                           h_var=hv0, c_var=cv0, x=x_in)
 
         ################
-        # RUN P THEN Q #
+        # RUN P THEN Q # -- for variational bound on model entropy
         ################
         # get zero-mean, unit-std. Gaussian noise for use in scan op
         u_for_p = self.theano_rng.normal(
@@ -1778,7 +1752,7 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
 
         # get the continous-valued observations generated by p
         cxs_from_p = tensor.nnet.sigmoid(tanh_clip(cs_from_p[-1,:,:], clip_val=15.0))
-        # convert continous-valued xs to binary xs
+        # convert continuous-valued xs to binary xs
         #   -- for use with the (biased) "pass-through" gradient estimator
         s = self.theano_rng.uniform(size=cxs_from_p.shape, low=0.0, high=1.0, \
                                     dtype=theano.config.floatX)
@@ -1794,7 +1768,7 @@ class RLDrawModel(BaseRecurrent, Initializable, Random):
                 self.run_after(z=zs_from_p,
                           h_dec=hds_from_p_for_q,
                           h_pol=hp0, c_pol=cp0,
-                          h_var=hv0, c_var=cv0, x=bxs_from_p)
+                          h_ent=he0, c_ent=ce0, x=bxs_from_p)
         ###############################################
         # To maximize variational entropy lower bound: #
         #----------------------------------------------#######################
