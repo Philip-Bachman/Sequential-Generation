@@ -532,9 +532,9 @@ class TwoStageModel2(object):
         self.h = (self.train_switch[0] * h_q) + \
                  ((1.0 - self.train_switch[0]) * h_p)
         # compute KLds for "prior" and "hidden" latent distributions
-        self.kld_z_q2p = log_prob_gaussian2(self.z, z_q_mean, z_q_logvar) -
+        self.kld_z_q2p = log_prob_gaussian2(self.z, z_q_mean, z_q_logvar) - \
                          log_prob_gaussian2(self.z, z_p_mean, z_p_logvar)
-        self.kld_h_q2p = log_prob_gaussian2(self.h, h_q_mean, h_q_logvar) -
+        self.kld_h_q2p = log_prob_gaussian2(self.h, h_q_mean, h_q_logvar) - \
                          log_prob_gaussian2(self.h, h_p_mean, h_p_logvar)
         self.kld_z_p2q = self.kld_z_q2p
         self.kld_h_p2q = self.kld_h_p2q

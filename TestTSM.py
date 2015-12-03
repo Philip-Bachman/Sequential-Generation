@@ -45,8 +45,8 @@ def test_two_stage_model1():
     x_dim = Xtr.shape[1]
     z_dim = 50
     h_dim = 100
-    h_det_dim = None
-    #h_det_dim = 50
+    #h_det_dim = None
+    h_det_dim = 50
     x_type = 'bernoulli'
 
     # some InfNet instances to build the TwoStageModel from
@@ -58,8 +58,10 @@ def test_two_stage_model1():
     ###############
     params = {}
     shared_config = [z_dim, 100, 100]
+    shared_bn = [True, True]
     top_config = [shared_config[-1], h_dim]
     params['shared_config'] = shared_config
+    params['shared_bn'] = shared_bn
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
     params['activation'] = tanh_actfun
@@ -78,8 +80,10 @@ def test_two_stage_model1():
     ###############
     params = {}
     shared_config = [h_dim, 200, 200]
+    shared_bn = [True, True]
     top_config = [shared_config[-1], x_dim]
     params['shared_config'] = shared_config
+    params['shared_bn'] = shared_bn
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
     params['activation'] = tanh_actfun
@@ -98,8 +102,10 @@ def test_two_stage_model1():
     ###############
     params = {}
     shared_config = [x_dim, 200, 200]
+    shared_bn = [True, True]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
+    params['shared_bn'] = shared_bn
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
     params['activation'] = tanh_actfun
@@ -118,8 +124,10 @@ def test_two_stage_model1():
     #################
     params = {}
     shared_config = [(z_dim + x_dim), 200, 200]
+    shared_bn = [True, True]
     top_config = [shared_config[-1], h_dim]
     params['shared_config'] = shared_config
+    params['shared_bn'] = shared_bn
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
     params['activation'] = tanh_actfun
@@ -152,10 +160,10 @@ def test_two_stage_model1():
     ################################################################
     # Apply some updates, to check that they aren't totally broken #
     ################################################################
-    log_name = "{}_RESULTS.txt".format("TSM1A_TEST")
+    log_name = "{}_RESULTS.txt".format("TSM1B_TEST")
     out_file = open(log_name, 'wb')
     costs = [0. for i in range(10)]
-    learn_rate = 0.001
+    learn_rate = 0.0005
     momentum = 0.9
     batch_idx = np.arange(batch_size) + tr_samples
     for i in range(500000):
@@ -199,7 +207,7 @@ def test_two_stage_model1():
             # draw some independent random samples from the model
             samp_count = 300
             model_samps = TSM.sample_from_prior(samp_count)
-            file_name = "TSM1A_SAMPLES_b{0:d}.png".format(i)
+            file_name = "TSM1B_SAMPLES_b{0:d}.png".format(i)
             utils.visualize_samples(model_samps, file_name, num_rows=15)
             # compute free energy estimate for validation samples
             Xva = row_shuffle(Xva)
@@ -403,5 +411,5 @@ def test_two_stage_model2():
 
 
 if __name__=="__main__":
-    #test_two_stage_model1()
-    test_two_stage_model2()
+    test_two_stage_model1()
+    #test_two_stage_model2()

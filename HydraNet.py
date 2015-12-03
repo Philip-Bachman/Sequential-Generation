@@ -54,6 +54,7 @@ class HydraNet(object):
             input_noise: standard dev for noise on the input of this net
             bias_noise: standard dev for noise on the biases of hidden layers
             shared_config: list of "layer descriptions" for shared part
+            shared_bn: flags for where to apply batch normalization
             output_config: list of dimensions for the output layers
             activation: "function handle" for the desired non-linearity
             init_scale: scaling factor for hidden layer weights (__ * 0.01)
@@ -64,7 +65,7 @@ class HydraNet(object):
             Xd=None, \
             params=None, \
             shared_param_dicts=None):
-        # Setup a shared random generator for this network 
+        # Setup a shared random generator for this network
         self.rng = RandStream(rng.randint(1000000))
         # Grab the symbolic input matrix
         self.Xd = Xd
@@ -115,6 +116,12 @@ class HydraNet(object):
         # depth of the mlp is one less than the number of layer configs.
         self.shared_config = params['shared_config']
         self.output_config = params['output_config']
+        if 'shared_bn' in params:
+            assert (len(params['shared_bn']) == len(self.shared_config)-1), \
+                    "shared_bn must be suitable for shared_config."
+            self.shared_bn = params['shared_bn']
+        else:
+            self.shared_bn = [False for _ in self.shared_config[:-1]]
         if 'activation' in params:
             self.activation = params['activation']
         else:
@@ -126,13 +133,13 @@ class HydraNet(object):
             #########################################
             # Initialize the shared part of network #
             #########################################
-            layer_def_pairs = zip(self.shared_config[:-1],self.shared_config[1:])
+            layer_defs = zip(self.shared_config[:-1],self.shared_config[1:],self.shared_bn)
             layer_num = 0
             # Construct input to the inference network
             next_input = self.Xd
-            for in_def, out_def in layer_def_pairs:
+            for in_def, out_def, apply_bn in layer_defs:
                 first_layer = (layer_num == 0)
-                last_layer = (layer_num == (len(layer_def_pairs) - 1))
+                last_layer = (layer_num == (len(layer_defs) - 1))
                 l_name = "shared_layer_{0:d}".format(layer_num)
                 if (type(in_def) is list) or (type(in_def) is tuple):
                     # Receiving input from a poolish layer...
@@ -169,7 +176,7 @@ class HydraNet(object):
                             activation=self.activation, pool_size=pool_size, \
                             drop_rate=d_rate, input_noise=i_noise, bias_noise=b_noise, \
                             in_dim=in_dim, out_dim=out_dim, \
-                            name=l_name, W_scale=i_scale)
+                            name=l_name, W_scale=i_scale, apply_bn=apply_bn)
                     self.shared_layers.append(new_layer)
                     self.shared_param_dicts['shared'].append( \
                             new_layer.shared_param_dicts)
@@ -184,7 +191,7 @@ class HydraNet(object):
                             in_dim=in_dim, out_dim=out_dim, \
                             W=init_params['W'], b=init_params['b'], \
                             b_in=init_params['b_in'], s_in=init_params['s_in'], \
-                            name=l_name, W_scale=i_scale)
+                            name=l_name, W_scale=i_scale, apply_bn=apply_bn)
                     self.shared_layers.append(new_layer)
                 next_input = self.shared_layers[-1].output
                 # Acknowledge layer completion

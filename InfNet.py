@@ -53,8 +53,11 @@ class InfNet(object):
             input_noise: standard dev for noise on the input of this net
             bias_noise: standard dev for noise on the biases of hidden layers
             shared_config: list of "layer descriptions" for shared part
+            shared_bn: flags for where to use batch normalization
             mu_config: list of "layer descriptions" for mu part
+            mu_bn: flags for where to use batch normalization
             sigma_config: list of "layer descriptions" for sigma part
+            sigma_bn: flags for where to use batch normalization
             activation: "function handle" for the desired non-linearity
             init_scale: scaling factor for hidden layer weights (__ * 0.01)
             shared_logvar: boolean for whether to used shared logvar
@@ -125,6 +128,24 @@ class InfNet(object):
         self.shared_config = params['shared_config']
         self.mu_config = params['mu_config']
         self.sigma_config = params['sigma_config']
+        if 'shared_bn' in params:
+            assert (len(params['shared_bn']) == len(self.shared_config)-1), \
+                    "shared_bn must be suitable for shared_config."
+            self.shared_bn = params['shared_bn']
+        else:
+            self.shared_bn = [False for _ in self.shared_config[:-1]]
+        if 'mu_bn' in params:
+            assert (len(params['mu_bn']) == len(self.mu_config)-1), \
+                    "mu_bn must be suitable for mu_config."
+            self.mu_bn = params['mu_bn']
+        else:
+            self.mu_bn = [False for _ in self.mu_config[:-1]]
+        if 'sigma_bn' in params:
+            assert (len(params['sigma_bn']) == len(self.sigma_config)-1), \
+                    "sigma_bn must be suitable for sigma_config."
+            self.sigma_bn = params['sigma_bn']
+        else:
+            self.sigma_bn = [False for _ in self.sigma_config[:-1]]
         if 'activation' in params:
             self.activation = params['activation']
         else:
@@ -133,13 +154,13 @@ class InfNet(object):
         # Initialize the shared part of network #
         #########################################
         self.shared_layers = []
-        layer_def_pairs = zip(self.shared_config[:-1],self.shared_config[1:])
+        layer_defs = zip(self.shared_config[:-1],self.shared_config[1:], self.shared_bn)
         layer_num = 0
         # Construct input to the inference network
         next_input = self.Xd
-        for in_def, out_def in layer_def_pairs:
+        for in_def, out_def, apply_bn in layer_defs:
             first_layer = (layer_num == 0)
-            last_layer = (layer_num == (len(layer_def_pairs) - 1))
+            last_layer = (layer_num == (len(layer_defs) - 1))
             l_name = "share_layer_{0:d}".format(layer_num)
             if (type(in_def) is list) or (type(in_def) is tuple):
                 # Receiving input from a poolish layer...
@@ -176,7 +197,7 @@ class InfNet(object):
                         activation=self.activation, pool_size=pool_size, \
                         drop_rate=d_rate, input_noise=i_noise, bias_noise=b_noise, \
                         in_dim=in_dim, out_dim=out_dim, \
-                        name=l_name, W_scale=i_scale)
+                        name=l_name, W_scale=i_scale, apply_bn=apply_bn)
                 self.shared_layers.append(new_layer)
                 self.shared_param_dicts['shared'].append( \
                         new_layer.shared_param_dicts)
@@ -191,7 +212,7 @@ class InfNet(object):
                         in_dim=in_dim, out_dim=out_dim, \
                         W=init_params['W'], b=init_params['b'], \
                         b_in=init_params['b_in'], s_in=init_params['s_in'], \
-                        name=l_name, W_scale=i_scale)
+                        name=l_name, W_scale=i_scale, apply_bn=apply_bn)
                 self.shared_layers.append(new_layer)
             next_input = self.shared_layers[-1].output
             # Acknowledge layer completion
@@ -200,13 +221,13 @@ class InfNet(object):
         # Initialize the mu part of network #
         #####################################
         self.mu_layers = []
-        layer_def_pairs = zip(self.mu_config[:-1],self.mu_config[1:])
+        layer_defs = zip(self.mu_config[:-1],self.mu_config[1:], self.mu_bn)
         layer_num = 0
         # Take input from the output of the shared network
         next_input = self.shared_layers[-1].output
-        for in_def, out_def in layer_def_pairs:
+        for in_def, out_def, apply_bn in layer_defs:
             first_layer = (layer_num == 0)
-            last_layer = (layer_num == (len(layer_def_pairs) - 1))
+            last_layer = (layer_num == (len(layer_defs) - 1))
             l_name = "mu_layer_{0:d}".format(layer_num)
             if (type(in_def) is list) or (type(in_def) is tuple):
                 # Receiving input from a poolish layer...
@@ -236,7 +257,7 @@ class InfNet(object):
                         activation=self.activation, pool_size=pool_size, \
                         drop_rate=d_rate, input_noise=i_noise, bias_noise=b_noise, \
                         in_dim=in_dim, out_dim=out_dim, \
-                        name=l_name, W_scale=i_scale)
+                        name=l_name, W_scale=i_scale, apply_bn=apply_bn)
                 self.mu_layers.append(new_layer)
                 self.shared_param_dicts['mu'].append( \
                         new_layer.shared_param_dicts)
@@ -251,7 +272,7 @@ class InfNet(object):
                         in_dim=in_dim, out_dim=out_dim, \
                         W=init_params['W'], b=init_params['b'], \
                         b_in=init_params['b_in'], s_in=init_params['s_in'], \
-                        name=l_name, W_scale=i_scale)
+                        name=l_name, W_scale=i_scale, apply_bn=apply_bn)
                 self.mu_layers.append(new_layer)
             next_input = self.mu_layers[-1].output
             # Acknowledge layer completion
@@ -260,13 +281,13 @@ class InfNet(object):
         # Initialize the sigma part of network #
         ########################################
         self.sigma_layers = []
-        layer_def_pairs = zip(self.sigma_config[:-1],self.sigma_config[1:])
+        layer_defs = zip(self.sigma_config[:-1],self.sigma_config[1:],self.sigma_bn)
         layer_num = 0
         # Take input from the output of the shared network
         next_input = self.shared_layers[-1].output
-        for in_def, out_def in layer_def_pairs:
+        for in_def, out_def, apply_bn in layer_defs:
             first_layer = (layer_num == 0)
-            last_layer = (layer_num == (len(layer_def_pairs) - 1))
+            last_layer = (layer_num == (len(layer_defs) - 1))
             l_name = "sigma_layer_{0:d}".format(layer_num)
             if (type(in_def) is list) or (type(in_def) is tuple):
                 # Receiving input from a poolish layer...
@@ -299,7 +320,7 @@ class InfNet(object):
                         activation=self.activation, pool_size=pool_size, \
                         drop_rate=d_rate, input_noise=i_noise, bias_noise=b_noise, \
                         in_dim=in_dim, out_dim=out_dim, \
-                        name=l_name, W_scale=i_scale)
+                        name=l_name, W_scale=i_scale, apply_bn=apply_bn)
                 self.sigma_layers.append(new_layer)
                 self.shared_param_dicts['sigma'].append( \
                         new_layer.shared_param_dicts)
@@ -314,7 +335,7 @@ class InfNet(object):
                         in_dim=in_dim, out_dim=out_dim, \
                         W=init_params['W'], b=init_params['b'], \
                         b_in=init_params['b_in'], s_in=init_params['s_in'], \
-                        name=l_name, W_scale=i_scale)
+                        name=l_name, W_scale=i_scale, apply_bn=apply_bn)
                 self.sigma_layers.append(new_layer)
             next_input = self.sigma_layers[-1].output
             # Acknowledge layer completion

@@ -78,8 +78,10 @@ def test_mnist(step_type='add',
     #################
     params = {}
     shared_config = [x_dim, 800, 800]
+    shared_bn = [True, True]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
+    params['shared_bn'] = shared_bn
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
     params['activation'] = relu_actfun
@@ -97,8 +99,10 @@ def test_mnist(step_type='add',
     ###################
     params = {}
     shared_config = [z_dim, 800, 800]
+    shared_bn = [True, True]
     output_config = [s_dim, s_dim, s_dim]
     params['shared_config'] = shared_config
+    params['shared_bn'] = shared_bn
     params['output_config'] = output_config
     params['activation'] = relu_actfun
     params['init_scale'] = init_scale
@@ -133,8 +137,10 @@ def test_mnist(step_type='add',
     #################
     params = {}
     shared_config = [(x_dim + x_dim), 800, 800]
+    shared_bn = [True, True]
     top_config = [shared_config[-1], z_dim]
     params['shared_config'] = shared_config
+    params['shared_bn'] = shared_bn
     params['mu_config'] = top_config
     params['sigma_config'] = top_config
     params['activation'] = relu_actfun
@@ -367,7 +373,7 @@ if __name__=="__main__":
     # test_mnist(step_type='jump', imp_steps=1, occ_dim=0, drop_prob=0.9)
     # test_mnist(step_type='jump', imp_steps=10, occ_dim=0, drop_prob=0.9)
     # test_mnist(step_type='jump', imp_steps=15, occ_dim=0, drop_prob=0.9)
-    # test_mnist(step_type='lstm', imp_steps=5, occ_dim=0, drop_prob=0.9)
+    test_mnist(step_type='lstm', imp_steps=5, occ_dim=0, drop_prob=0.9)
     # test_mnist(step_type='lstm', imp_steps=2, occ_dim=0, drop_prob=0.9)
     # test_mnist(step_type='lstm', imp_steps=1, occ_dim=0, drop_prob=0.9)
     # test_mnist(step_type='lstm', imp_steps=10, occ_dim=0, drop_prob=0.9)

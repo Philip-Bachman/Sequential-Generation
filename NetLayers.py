@@ -5,9 +5,7 @@ import theano.tensor as T
 #from theano.tensor.shared_randomstreams import RandomStreams as RandStream
 from theano.sandbox.cuda.rng_curand import CURAND_RandomStreams as RandStream
 
-#from pylearn2.sandbox.cuda_convnet.filter_acts import FilterActs
-#from pylearn2.sandbox.cuda_convnet.pool import MaxPool
-#from theano.sandbox.cuda.basic_ops import gpu_contiguous
+
 
 ###############################
 # ACTIVATIONS AND OTHER STUFF #
@@ -182,6 +180,42 @@ def glorot_matrix(shape):
     W = npr.uniform(low=-w_scale, high=w_scale, size=shape)
     return W
 
+def batchnorm(X, rescale=None, reshift=None, u=None, s=None, e=1e-8):
+    """
+    batchnorm with support for not using scale and shift parameters
+    as well as inference values (u and s) and partial batchnorm (via a)
+    will detect and use convolutional or fully connected version
+    """
+    g = rescale
+    b = reshift
+    if X.ndim == 4:
+        if u is not None and s is not None:
+            # use normalization params given a priori
+            b_u = u.dimshuffle('x', 0, 'x', 'x')
+            b_s = s.dimshuffle('x', 0, 'x', 'x')
+        else:
+            # compute normalization params from input
+            b_u = T.mean(X, axis=[0, 2, 3]).dimshuffle('x', 0, 'x', 'x')
+            b_s = T.mean(T.sqr(X - b_u), axis=[0, 2, 3]).dimshuffle('x', 0, 'x', 'x')
+        # batch normalize
+        X = (X - b_u) / T.sqrt(b_s + e)
+        if g is not None and b is not None:
+            # apply rescale and reshift
+            X = X*T.exp(0.2*g.dimshuffle('x', 0, 'x', 'x')) + b.dimshuffle('x', 0, 'x', 'x')
+    elif X.ndim == 2:
+        if u is None and s is None:
+            # compute normalization params from input
+            u = T.mean(X, axis=0)
+            s = T.mean(T.sqr(X - u), axis=0)
+        # batch normalize
+        X = (X - u) / T.sqrt(s + e)
+        if g is not None and b is not None:
+            # apply rescale and reshift
+            X = X*T.exp(0.2*g) + b
+    else:
+        raise NotImplementedError
+    return X
+
 ######################################
 # BASIC FULLY-CONNECTED HIDDEN LAYER #
 ######################################
@@ -191,7 +225,7 @@ class HiddenLayer(object):
                  activation=None, pool_size=0, \
                  drop_rate=0., input_noise=0., bias_noise=0., \
                  W=None, b=None, b_in=None, s_in=None, \
-                 name="", W_scale=1.0):
+                 name="", W_scale=1.0, apply_bn=False):
 
         # Setup a shared random generator for this layer
         self.rng = RandStream(rng.randint(1000000))
@@ -204,15 +238,16 @@ class HiddenLayer(object):
                 name="{0:s}_bias_noise".format(name))
         self.drop_rate = theano.shared(value=(zero_ary+drop_rate), \
                 name="{0:s}_drop_rate".format(name))
+        self.apply_bn = apply_bn
 
         # setup scale and bias params for the input
         if b_in is None:
-            # input biases are always initialized to zero
-            ary = np.zeros((in_dim,), dtype=theano.config.floatX)
+            # batch normalization reshifts are initialized to zero
+            ary = np.zeros((out_dim,), dtype=theano.config.floatX)
             b_in = theano.shared(value=ary, name="{0:s}_b_in".format(name))
         if s_in is None:
-            # input scales are always initialized to one
-            ary = 0.541325 * np.ones((in_dim,), dtype=theano.config.floatX)
+            # batch normalization rescales are initialized to zero
+            ary = np.zeros((out_dim,), dtype=theano.config.floatX)
             s_in = theano.shared(value=ary, name="{0:s}_s_in".format(name))
         self.b_in = b_in
         self.s_in = s_in
@@ -267,10 +302,10 @@ class HiddenLayer(object):
 
         # Conveniently package layer parameters
         self.params = [self.W, self.b, self.b_in, self.s_in]
-        self.shared_param_dicts = { \
-                'W': self.W, \
-                'b': self.b, \
-                'b_in': self.b_in, \
+        self.shared_param_dicts = {
+                'W': self.W,
+                'b': self.b,
+                'b_in': self.b_in,
                 's_in': self.s_in }
         # Layer construction complete...
         return
@@ -280,14 +315,12 @@ class HiddenLayer(object):
         Apply feedforward to this input, returning several partial results.
         """
         # Add gaussian noise to the input (if desired)
-        #fancy_input = T.nnet.softplus(self.s_in) * (input + self.b_in)
-        fancy_input = input
         if use_in:
-            fuzzy_input = fancy_input + self.input_noise[0] * \
+            fuzzy_input = input + self.input_noise[0] * \
                     self.rng.normal(size=fancy_input.shape, avg=0.0, std=1.0, \
                     dtype=theano.config.floatX)
         else:
-            fuzzy_input = fancy_input
+            fuzzy_input = input
         # Apply masking noise to the input (if desired)
         if use_drop:
             noisy_input = self._drop_from_input(fuzzy_input, self.drop_rate[0])
@@ -296,6 +329,10 @@ class HiddenLayer(object):
         self.noisy_input = noisy_input
         # Compute linear "pre-activation" for this layer
         linear_output = T.dot(noisy_input, self.W) + self.b
+        # Apply batch normalization if desired
+        if self.apply_bn:
+            linear_output = batchnorm(linear_output, rescale=self.s_in,
+                                      reshift=self.b_in, u=None, s=None)
         # Add noise to the pre-activation features (if desired)
         if use_bn:
             noisy_linear = linear_output + self.bias_noise[0] * \
