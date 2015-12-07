@@ -152,6 +152,7 @@ class HydraNet(object):
         # Initialize the output layers #
         ################################
         self.output_layers = []
+        i_scale = self.init_scale
         # take input from the output of the shared network
         if len(self.shared_config) > 1:
             in_dim = self.shared_layers[-1].out_dim

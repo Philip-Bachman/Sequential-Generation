@@ -14,7 +14,6 @@ import theano.tensor as T
 # phil's sweetness
 import utils
 from NetLayers import relu_actfun, softplus_actfun, tanh_actfun
-from InfNet import InfNet
 from HydraNet import HydraNet
 from GPSImputer import GPSImputer, load_gpsimputer_from_file
 from load_data import load_udm, load_tfd, load_svhn_gray, load_binarized_mnist
@@ -67,7 +66,7 @@ def test_mnist(step_type='add',
     s_dim = x_dim
     #s_dim = 300
     z_dim = 100
-    init_scale = 0.8
+    init_scale = 1.0
 
     x_in_sym = T.matrix('x_in_sym')
     x_out_sym = T.matrix('x_out_sym')
@@ -79,21 +78,16 @@ def test_mnist(step_type='add',
     params = {}
     shared_config = [x_dim, 800, 800]
     shared_bn = [True, True]
-    top_config = [shared_config[-1], z_dim]
+    output_config = [z_dim, z_dim]
     params['shared_config'] = shared_config
     params['shared_bn'] = shared_bn
-    params['mu_config'] = top_config
-    params['sigma_config'] = top_config
+    params['output_config'] = output_config
     params['activation'] = relu_actfun
     params['init_scale'] = init_scale
-    params['vis_drop'] = 0.0
-    params['hid_drop'] = 0.0
-    params['bias_noise'] = 0.0
-    params['input_noise'] = 0.0
     params['build_theano_funcs'] = False
-    p_zi_given_xi = InfNet(rng=rng, Xd=x_in_sym, \
+    p_zi_given_xi = HydraNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
-    p_zi_given_xi.init_biases(0.2)
+    p_zi_given_xi.init_biases(0.0)
     ###################
     # p_sip1_given_zi #
     ###################
@@ -106,10 +100,6 @@ def test_mnist(step_type='add',
     params['output_config'] = output_config
     params['activation'] = relu_actfun
     params['init_scale'] = init_scale
-    params['vis_drop'] = 0.0
-    params['hid_drop'] = 0.0
-    params['bias_noise'] = 0.0
-    params['input_noise'] = 0.0
     params['build_theano_funcs'] = False
     p_sip1_given_zi = HydraNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
@@ -124,10 +114,6 @@ def test_mnist(step_type='add',
     params['output_config'] = output_config
     params['activation'] = relu_actfun
     params['init_scale'] = init_scale
-    params['vis_drop'] = 0.0
-    params['hid_drop'] = 0.0
-    params['bias_noise'] = 0.0
-    params['input_noise'] = 0.0
     params['build_theano_funcs'] = False
     p_x_given_si = HydraNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
@@ -138,19 +124,14 @@ def test_mnist(step_type='add',
     params = {}
     shared_config = [(x_dim + x_dim), 800, 800]
     shared_bn = [True, True]
-    top_config = [shared_config[-1], z_dim]
+    output_config = [z_dim, z_dim]
     params['shared_config'] = shared_config
     params['shared_bn'] = shared_bn
-    params['mu_config'] = top_config
-    params['sigma_config'] = top_config
+    params['output_config'] = output_config
     params['activation'] = relu_actfun
     params['init_scale'] = init_scale
-    params['vis_drop'] = 0.0
-    params['hid_drop'] = 0.0
-    params['bias_noise'] = 0.0
-    params['input_noise'] = 0.0
     params['build_theano_funcs'] = False
-    q_zi_given_xi = InfNet(rng=rng, Xd=x_in_sym, \
+    q_zi_given_xi = HydraNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
     q_zi_given_xi.init_biases(0.2)
 
@@ -169,12 +150,12 @@ def test_mnist(step_type='add',
     gpsi_params['x_type'] = 'bernoulli'
     gpsi_params['obs_transform'] = 'sigmoid'
     GPSI = GPSImputer(rng=rng,
-            x_in=x_in_sym, x_out=x_out_sym, x_mask=x_mask_sym, \
-            p_zi_given_xi=p_zi_given_xi, \
-            p_sip1_given_zi=p_sip1_given_zi, \
-            p_x_given_si=p_x_given_si, \
-            q_zi_given_xi=q_zi_given_xi, \
-            params=gpsi_params, \
+            x_in=x_in_sym, x_out=x_out_sym, x_mask=x_mask_sym,
+            p_zi_given_xi=p_zi_given_xi,
+            p_sip1_given_zi=p_sip1_given_zi,
+            p_x_given_si=p_x_given_si,
+            q_zi_given_xi=q_zi_given_xi,
+            params=gpsi_params,
             shared_param_dicts=None)
 
     ################################################################
@@ -373,10 +354,10 @@ if __name__=="__main__":
     # test_mnist(step_type='jump', imp_steps=1, occ_dim=0, drop_prob=0.9)
     # test_mnist(step_type='jump', imp_steps=10, occ_dim=0, drop_prob=0.9)
     # test_mnist(step_type='jump', imp_steps=15, occ_dim=0, drop_prob=0.9)
-    test_mnist(step_type='lstm', imp_steps=5, occ_dim=0, drop_prob=0.9)
+    # test_mnist(step_type='lstm', imp_steps=5, occ_dim=0, drop_prob=0.9)
     # test_mnist(step_type='lstm', imp_steps=2, occ_dim=0, drop_prob=0.9)
     # test_mnist(step_type='lstm', imp_steps=1, occ_dim=0, drop_prob=0.9)
-    # test_mnist(step_type='lstm', imp_steps=10, occ_dim=0, drop_prob=0.9)
+    test_mnist(step_type='lstm', imp_steps=10, occ_dim=0, drop_prob=0.9)
     # test_mnist(step_type='lstm', imp_steps=15, occ_dim=0, drop_prob=0.9)
 
     # RESULTS
@@ -405,5 +386,5 @@ if __name__=="__main__":
     # test_mnist_results(step_type='lstm', imp_steps=1, occ_dim=0, drop_prob=0.9)
     # test_mnist_results(step_type='lstm', imp_steps=2, occ_dim=0, drop_prob=0.9)
     # test_mnist_results(step_type='lstm', imp_steps=5, occ_dim=0, drop_prob=0.9)
-    # test_mnist_results(step_type='lstm', imp_steps=10, occ_dim=0, drop_prob=0.9)
+    test_mnist_results(step_type='lstm', imp_steps=10, occ_dim=0, drop_prob=0.9)
     # test_mnist_results(step_type='lstm', imp_steps=15, occ_dim=0, drop_prob=0.9)

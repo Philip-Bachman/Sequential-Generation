@@ -220,10 +220,18 @@ def batchnorm(X, rescale=None, reshift=None, u=None, s=None, e=1e-8):
 # BASIC FULLY-CONNECTED HIDDEN LAYER #
 ######################################
 
+#
+# layer_description = {
+#     'in_chans': 
+#     'out_chans':
+#     'filt_dim': 
+#     'out_shape':
+# }
+#
+
 class HiddenLayer(object):
-    def __init__(self, rng, input, in_dim, out_dim,
-                 activation=None, pool_size=0,
-                 drop_rate=0.,
+    def __init__(self, rng, input, layer_description,
+                 activation=None, drop_rate=0.,
                  W=None, b=None, b_in=None, s_in=None,
                  name="", W_scale=1.0, apply_bn=False):
 
@@ -249,21 +257,12 @@ class HiddenLayer(object):
         self.s_in = s_in
 
         # Set some basic layer properties
-        self.pool_size = pool_size
         self.in_dim = in_dim
         self.out_dim = out_dim
-        if self.pool_size <= 1:
-            self.filt_count = self.out_dim
-        else:
-            self.filt_count = self.out_dim * self.pool_size
-        self.pool_count = self.filt_count / max(self.pool_size, 1)
+        self.filt_count = self.out_dim
         if activation is None:
             activation = relu_actfun
-        if self.pool_size <= 1:
-            self.activation = activation
-        else:
-            self.activation = lambda x: \
-                    maxout_actfun(x, self.pool_size, self.filt_count)
+        self.activation = activation
 
         # Get some random initial weights and biases, if not given
         if W is None:
@@ -310,16 +309,30 @@ class HiddenLayer(object):
         # Apply masking noise to the input (if desired)
         if use_drop:
             input = self._drop_from_input(input, self.drop_rate[0])
-        # Compute linear "pre-activation" for this layer
-        linear_output = T.dot(input, self.W) + self.b
-        # Apply batch normalization if desired
-        if self.apply_bn:
-            linear_output = batchnorm(linear_output, rescale=self.s_in,
-                                      reshift=self.b_in, u=None, s=None)
-        # Apply activation function
-        final_output = self.activation(linear_output)
-        # package partial results for easy return
-        results = [final_output, linear_output]
+        if self.layer_type == 'FC':
+            # Compute linear "pre-activation" for this layer
+            linear_output = T.dot(input, self.W) + self.b
+            # Apply batch normalization if desired
+            if self.apply_bn:
+                linear_output = batchnorm(linear_output, rescale=self.s_in,
+                                          reshift=self.b_in, u=None, s=None)
+            # Apply activation function
+            final_output = self.activation(linear_output)
+            # package partial results for easy return
+            results = [final_output, linear_output]
+        elif self.layer_type == 'CONV':
+            # Compute linear "pre-activation" for this layer
+            linear_output = T.dot(input, self.W) + self.b
+            # Apply batch normalization if desired
+            if self.apply_bn:
+                linear_output = batchnorm(linear_output, rescale=self.s_in,
+                                          reshift=self.b_in, u=None, s=None)
+            # Apply activation function
+            final_output = self.activation(linear_output)
+            # package partial results for easy return
+            results = [final_output, linear_output]
+        else:
+            assert False, "Unknown layer type!"
         return results
 
     def _drop_from_input(self, input, p):
@@ -333,12 +346,6 @@ class HiddenLayer(object):
         # apply dropout mask and rescaling factor to the input
         droppy_input = drop_scale * input * drop_mask
         return droppy_input
-
-    def _noisy_params(self, P, noise_lvl=0.):
-        """Noisy weights, like convolving energy surface with a gaussian."""
-        P_nz = P + self.rng.normal(size=P.shape, avg=0.0, std=noise_lvl, \
-                dtype=theano.config.floatX)
-        return P_nz
 
 
 ######################################################
