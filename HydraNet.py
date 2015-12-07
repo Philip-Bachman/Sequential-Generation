@@ -18,23 +18,9 @@ from theano.sandbox.cuda.rng_curand import CURAND_RandomStreams as RandStream
 from NetLayers import HiddenLayer, relu_actfun, softplus_actfun
 from HelperFuncs import constFX, to_fX
 
-####################################
-# INFREENCE NETWORK IMPLEMENTATION #
-####################################
-
-def row_normalize(x):
-    """
-    Normalize rows of matrix x to unit (L2) norm.
-    """
-    x_normed = x / T.sqrt(T.sum(x**2.,axis=1,keepdims=1) + constFX(1e-8))
-    return x_normed
-
-def soft_abs(x, smoothing=1e-5):
-    """
-    Soft absolute value function applied to x.
-    """
-    sa_x = T.sqrt(x**2. + constFX(smoothing))
-    return sa_x
+######################################################
+# MULTI-PURPOSE, MULTI-HEADED NETWORK IMPLEMENTATION #
+######################################################
 
 class HydraNet(object):
     """
@@ -48,11 +34,6 @@ class HydraNet(object):
         rng: a numpy.random RandomState object
         Xd: symbolic input matrix for inputs
         params: a dict of parameters describing the desired network:
-            vis_drop: drop rate to use on observable variables
-            hid_drop: drop rate to use on hidden layer activations
-                -- note: vis_drop/hid_drop are optional, with defaults 0.0/0.0
-            input_noise: standard dev for noise on the input of this net
-            bias_noise: standard dev for noise on the biases of hidden layers
             shared_config: list of "layer descriptions" for shared part
             shared_bn: flags for where to apply batch normalization
             output_config: list of dimensions for the output layers
@@ -77,20 +58,6 @@ class HydraNet(object):
             self.build_theano_funcs = params['build_theano_funcs']
         else:
             self.build_theano_funcs = True
-        if 'vis_drop' in params:
-            self.vis_drop = params['vis_drop']
-        else:
-            self.vis_drop = 0.0
-        if 'hid_drop' in params:
-            self.hid_drop = params['hid_drop']
-        else:
-            self.hid_drop = 0.0
-        if 'input_noise' in params:
-            self.input_noise = params['input_noise']
-        else:
-            self.input_noise = 0.0
-        if 'bias_noise' in params:
-            self.bias_noise = params['bias_noise']
         else:
             self.bias_noise = 0.0
         if 'init_scale' in params:
@@ -155,42 +122,29 @@ class HydraNet(object):
                     # Not applying any pooling in this layer...
                     out_dim = out_def
                     pool_size = 0
-                # Select the appropriate noise to add to this layer
-                if first_layer:
-                    d_rate = self.vis_drop
-                else:
-                    d_rate = self.hid_drop
-                if first_layer:
-                    i_noise = self.input_noise
-                    b_noise = 0.0
-                else:
-                    i_noise = 0.0
-                    b_noise = self.bias_noise
                 # set in-bound weights to have norm self.init_scale
                 i_scale = self.init_scale
                 if not self.is_clone:
                     ##########################################
                     # Initialize a layer with new parameters #
                     ##########################################
-                    new_layer = HiddenLayer(rng=rng, input=next_input, \
-                            activation=self.activation, pool_size=pool_size, \
-                            drop_rate=d_rate, input_noise=i_noise, bias_noise=b_noise, \
-                            in_dim=in_dim, out_dim=out_dim, \
+                    new_layer = HiddenLayer(rng=rng, input=next_input,
+                            activation=self.activation, pool_size=pool_size,
+                            in_dim=in_dim, out_dim=out_dim,
                             name=l_name, W_scale=i_scale, apply_bn=apply_bn)
                     self.shared_layers.append(new_layer)
-                    self.shared_param_dicts['shared'].append( \
+                    self.shared_param_dicts['shared'].append(
                             new_layer.shared_param_dicts)
                 else:
                     ##################################################
                     # Initialize a layer with some shared parameters #
                     ##################################################
                     init_params = self.shared_param_dicts['shared'][layer_num]
-                    new_layer = HiddenLayer(rng=rng, input=next_input, \
-                            activation=self.activation, pool_size=pool_size, \
-                            drop_rate=d_rate, input_noise=i_noise, bias_noise=b_noise, \
-                            in_dim=in_dim, out_dim=out_dim, \
-                            W=init_params['W'], b=init_params['b'], \
-                            b_in=init_params['b_in'], s_in=init_params['s_in'], \
+                    new_layer = HiddenLayer(rng=rng, input=next_input,
+                            activation=self.activation, pool_size=pool_size,
+                            in_dim=in_dim, out_dim=out_dim,
+                            W=init_params['W'], b=init_params['b'],
+                            b_in=init_params['b_in'], s_in=init_params['s_in'],
                             name=l_name, W_scale=i_scale, apply_bn=apply_bn)
                     self.shared_layers.append(new_layer)
                 next_input = self.shared_layers[-1].output
@@ -211,33 +165,27 @@ class HydraNet(object):
             ol_name = "output_layer_{0:d}".format(ol_num)
             # Select the appropriate noise to add to this layer
             pool_size = 0
-            d_rate = self.hid_drop
-            i_noise = 0.0
-            b_noise = self.bias_noise
-            i_scale = self.init_scale
             if not self.is_clone:
                 ##########################################
                 # Initialize a layer with new parameters #
                 ##########################################
-                new_layer = HiddenLayer(rng=rng, input=ol_input, \
-                        activation=self.activation, pool_size=pool_size, \
-                        drop_rate=d_rate, input_noise=i_noise, bias_noise=b_noise, \
-                        in_dim=in_dim, out_dim=out_dim, \
+                new_layer = HiddenLayer(rng=rng, input=ol_input,
+                        activation=self.activation, pool_size=pool_size,
+                        in_dim=in_dim, out_dim=out_dim,
                         name=ol_name, W_scale=i_scale)
                 self.output_layers.append(new_layer)
-                self.shared_param_dicts['output'].append( \
+                self.shared_param_dicts['output'].append(
                         new_layer.shared_param_dicts)
             else:
                 ##################################################
                 # Initialize a layer with some shared parameters #
                 ##################################################
                 init_params = self.shared_param_dicts['output'][ol_num]
-                new_layer = HiddenLayer(rng=rng, input=ol_input, \
-                        activation=self.activation, pool_size=pool_size, \
-                        drop_rate=d_rate, input_noise=i_noise, bias_noise=b_noise, \
-                        in_dim=in_dim, out_dim=out_dim, \
-                        W=init_params['W'], b=init_params['b'], \
-                        b_in=init_params['b_in'], s_in=init_params['s_in'], \
+                new_layer = HiddenLayer(rng=rng, input=ol_input,
+                        activation=self.activation, pool_size=pool_size,
+                        in_dim=in_dim, out_dim=out_dim,
+                        W=init_params['W'], b=init_params['b'],
+                        b_in=init_params['b_in'], s_in=init_params['s_in'],
                         name=ol_name, W_scale=i_scale)
                 self.output_layers.append(new_layer)
 
@@ -252,22 +200,20 @@ class HydraNet(object):
         self.outputs = self.apply(Xd)
         return
 
-    def apply(self, X, use_bn=False, use_drop=False):
+    def apply(self, X):
         """
         Pass input X through this HydraNet and get the resulting outputs.
         """
         # pass activations through the shared layers
         shared_acts = [X]
         for layer in self.shared_layers:
-            _, _, layer_acts = layer.apply(shared_acts[-1], \
-                                       use_bn=use_bn, use_drop=use_drop)
+            layer_acts, _ = layer.apply(shared_acts[-1], use_drop=False)
             shared_acts.append(layer_acts)
         shared_output = shared_acts[-1]
         # compute outputs of the output layers
         outputs = []
         for layer in self.output_layers:
-            _, layer_acts, _ = layer.apply(shared_output, \
-                                       use_bn=use_bn, use_drop=use_drop)
+            _, layer_acts = layer.apply(shared_output, use_drop=False)
             outputs.append(layer_acts)
         return outputs
 
@@ -278,22 +224,10 @@ class HydraNet(object):
         # pass activations through the shared layers
         shared_acts = [X]
         for layer in self.shared_layers:
-            _, _, layer_acts = layer.apply(shared_acts[-1])
+            layer_acts, _ = layer.apply(shared_acts[-1])
             shared_acts.append(layer_acts)
         shared_output = shared_acts[-1]
         return shared_output
-
-    def set_bias_noise(self, bias_noise=0.0):
-        """
-        Set the bias noise in all hidden layers to the given value.
-        """
-        new_ary = np.zeros((1,)) + bias_noise
-        new_bn = to_fX( new_ary )
-        for layer in self.shared_layers:
-            layer.bias_noise.set_value(new_bn)
-        for layer in self.output_layers:
-            layer.bias_noise.set_value(new_bn)
-        return
 
     def init_biases(self, b_init=0.0, b_std=1e-2):
         """

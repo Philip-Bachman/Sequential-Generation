@@ -33,10 +33,10 @@ class GPSImputer(object):
         x_in: the initial state for imputation
         x_out: the goal state for imputation
         x_mask: mask for state dims to keep fixed during imputation
-        p_zi_given_xi: InfNet for stochastic part of step
-        p_sip1_given_zi: HydraNet for deterministic part of step
-        p_x_given_si: HydraNet for transform from s-space to x-space
-        q_zi_given_xi: InfNet for the guide policy
+        p_zi_given_xi: HydraNet for stochastic part of step (2 outputs)
+        p_sip1_given_zi: HydraNet for deterministic part of step (3 outputs)
+        p_x_given_si: HydraNet for transform from s-space to x-space (2 outputs)
+        q_zi_given_xi: HydraNet for the guide policy (2 outputs)
         params: REQUIRED PARAMS SHOWN BELOW
                 x_dim: dimension of inputs to reconstruct
                 z_dim: dimension of latent space for policy wobble
@@ -138,24 +138,22 @@ class GPSImputer(object):
             grad_unmasked = self.x_out - si_as_x
             grad_masked = self.x_mask * grad_unmasked
             # get samples of next zi, according to the global policy
-            zi_p_mean, zi_p_logvar = self.p_zi_given_xi.apply( \
-                    xi_masked, do_samples=False)
+            zi_p_mean, zi_p_logvar = self.p_zi_given_xi.apply(xi_masked)
             zi_p = zi_p_mean + (T.exp(0.5 * zi_p_logvar) * zi_zmuv)
             # get samples of next zi, according to the guide policy
-            zi_q_mean, zi_q_logvar = self.q_zi_given_xi.apply( \
-                    T.horizontal_stack(xi_masked, xi_unmasked), \
-                    do_samples=False)
+            zi_q_mean, zi_q_logvar = self.q_zi_given_xi.apply(
+                    T.horizontal_stack(xi_masked, xi_unmasked))
             zi_q = zi_q_mean + (T.exp(0.5 * zi_q_logvar) * zi_zmuv)
 
             # make zi samples that can be switched between zi_p and zi_q
             zi = ((self.train_switch[0] * zi_q) + \
                  ((1.0 - self.train_switch[0]) * zi_p))
             # compute relevant KLds for this step
-            kldi_q2p = gaussian_kld(zi_q_mean, zi_q_logvar, \
+            kldi_q2p = gaussian_kld(zi_q_mean, zi_q_logvar,
                                     zi_p_mean, zi_p_logvar) # KL(q || p)
-            kldi_p2q = gaussian_kld(zi_p_mean, zi_p_logvar, \
+            kldi_p2q = gaussian_kld(zi_p_mean, zi_p_logvar,
                                     zi_q_mean, zi_q_logvar) # KL(p || q)
-            kldi_p2g = gaussian_kld(zi_p_mean, zi_p_logvar, \
+            kldi_p2g = gaussian_kld(zi_p_mean, zi_p_logvar,
                                     0.0, 0.0) # KL(p || global prior)
 
             # compute the next si, given the sampled zi
@@ -620,7 +618,6 @@ def load_gpsimputer_from_file(f_name=None, rng=None):
     """
     Load a clone of some previously trained model.
     """
-    from InfNet import load_infnet_from_dict
     from HydraNet import load_hydranet_from_dict
     assert(not (f_name is None))
     pickle_file = open(f_name)
@@ -635,13 +632,13 @@ def load_gpsimputer_from_file(f_name=None, rng=None):
     # reload the child models
     child_model_dicts = cPickle.load(pickle_file)
     xd = T.matrix()
-    p_zi_given_xi = load_infnet_from_dict( \
+    p_zi_given_xi = load_hydranet_from_dict( \
             child_model_dicts['p_zi_given_xi'], rng=rng, Xd=xd)
     p_sip1_given_zi = load_hydranet_from_dict( \
             child_model_dicts['p_sip1_given_zi'], rng=rng, Xd=xd)
     p_x_given_si = load_hydranet_from_dict( \
             child_model_dicts['p_x_given_si'], rng=rng, Xd=xd)
-    q_zi_given_xi = load_infnet_from_dict( \
+    q_zi_given_xi = load_hydranet_from_dict( \
             child_model_dicts['q_zi_given_xi'], rng=rng, Xd=xd)
     # now, create a new GPSImputer based on the loaded data
     xi = T.matrix()

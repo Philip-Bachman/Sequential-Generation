@@ -9,6 +9,14 @@ import theano.tensor as T
 # MISCELLANEOUS HELPER FUNCTIONS #
 ##################################
 
+def reparametrize(z_mean, z_logvar, t_rng):
+    """
+    Gaussian reparametrization helper function.
+    """
+    zmuv_gauss = t_rng.normal(size=z_mean.shape, dtype=theano.config.floatX)
+    reparam_gauss = z_mean + (T.exp(0.5*z_logvar) * zmuv_gauss)
+    return reparam_gauss
+
 def tanh_clip(x, clip_val=10.0):
     x_clipped = clip_val * T.tanh((1. / clip_val) * x)
     return x_clipped

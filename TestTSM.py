@@ -14,7 +14,7 @@ import theano.tensor as T
 from LogPDFs import log_prob_bernoulli, log_prob_gaussian2, gaussian_kld
 from NetLayers import relu_actfun, softplus_actfun, tanh_actfun
 from HelperFuncs import apply_mask, binarize_data, row_shuffle, to_fX
-from InfNet import InfNet
+from HydraNet import HydraNet
 from TwoStageModel import TwoStageModel1, TwoStageModel2
 from load_data import load_udm, load_binarized_mnist
 import utils
@@ -36,7 +36,7 @@ def test_two_stage_model1():
     #del Xte
     tr_samples = Xtr.shape[0]
     va_samples = Xva.shape[0]
-    batch_size = 200
+    batch_size = 128
     batch_reps = 1
 
     ###############################################
@@ -59,20 +59,15 @@ def test_two_stage_model1():
     params = {}
     shared_config = [z_dim, 100, 100]
     shared_bn = [True, True]
-    top_config = [shared_config[-1], h_dim]
+    output_config = [h_dim, h_dim]
     params['shared_config'] = shared_config
     params['shared_bn'] = shared_bn
-    params['mu_config'] = top_config
-    params['sigma_config'] = top_config
+    params['output_config'] = output_config
     params['activation'] = tanh_actfun
-    params['init_scale'] = 'xg'
+    params['init_scale'] = 1.0
     params['lam_l2a'] = 0.0
-    params['vis_drop'] = 0.0
-    params['hid_drop'] = 0.0
-    params['bias_noise'] = 0.0
-    params['input_noise'] = 0.0
     params['build_theano_funcs'] = False
-    p_h_given_z = InfNet(rng=rng, Xd=xin_sym, \
+    p_h_given_z = HydraNet(rng=rng, Xd=xin_sym, \
             params=params, shared_param_dicts=None)
     p_h_given_z.init_biases(0.0)
     ###############
@@ -81,20 +76,15 @@ def test_two_stage_model1():
     params = {}
     shared_config = [h_dim, 200, 200]
     shared_bn = [True, True]
-    top_config = [shared_config[-1], x_dim]
+    output_config = [x_dim, x_dim]
     params['shared_config'] = shared_config
     params['shared_bn'] = shared_bn
-    params['mu_config'] = top_config
-    params['sigma_config'] = top_config
+    params['output_config'] = output_config
     params['activation'] = tanh_actfun
-    params['init_scale'] = 'xg'
+    params['init_scale'] = 1.0
     params['lam_l2a'] = 0.0
-    params['vis_drop'] = 0.0
-    params['hid_drop'] = 0.0
-    params['bias_noise'] = 0.0
-    params['input_noise'] = 0.0
     params['build_theano_funcs'] = False
-    p_x_given_h = InfNet(rng=rng, Xd=xin_sym, \
+    p_x_given_h = HydraNet(rng=rng, Xd=xin_sym, \
             params=params, shared_param_dicts=None)
     p_x_given_h.init_biases(0.0)
     ###############
@@ -103,20 +93,15 @@ def test_two_stage_model1():
     params = {}
     shared_config = [x_dim, 200, 200]
     shared_bn = [True, True]
-    top_config = [shared_config[-1], z_dim]
+    output_config = [z_dim, z_dim]
     params['shared_config'] = shared_config
     params['shared_bn'] = shared_bn
-    params['mu_config'] = top_config
-    params['sigma_config'] = top_config
+    params['output_config'] = output_config
     params['activation'] = tanh_actfun
-    params['init_scale'] = 'xg'
+    params['init_scale'] = 1.0
     params['lam_l2a'] = 0.0
-    params['vis_drop'] = 0.0
-    params['hid_drop'] = 0.0
-    params['bias_noise'] = 0.0
-    params['input_noise'] = 0.0
     params['build_theano_funcs'] = False
-    q_z_given_x = InfNet(rng=rng, Xd=xin_sym, \
+    q_z_given_x = HydraNet(rng=rng, Xd=xin_sym, \
             params=params, shared_param_dicts=None)
     q_z_given_x.init_biases(0.0)
     #################
@@ -125,20 +110,15 @@ def test_two_stage_model1():
     params = {}
     shared_config = [(z_dim + x_dim), 200, 200]
     shared_bn = [True, True]
-    top_config = [shared_config[-1], h_dim]
+    output_config = [h_dim, h_dim]
     params['shared_config'] = shared_config
     params['shared_bn'] = shared_bn
-    params['mu_config'] = top_config
-    params['sigma_config'] = top_config
+    params['output_config'] = output_config
     params['activation'] = tanh_actfun
-    params['init_scale'] = 'xg'
+    params['init_scale'] = 1.0
     params['lam_l2a'] = 0.0
-    params['vis_drop'] = 0.0
-    params['hid_drop'] = 0.0
-    params['bias_noise'] = 0.0
-    params['input_noise'] = 0.0
     params['build_theano_funcs'] = False
-    q_h_given_z_x = InfNet(rng=rng, Xd=xin_sym, \
+    q_h_given_z_x = HydraNet(rng=rng, Xd=xin_sym, \
             params=params, shared_param_dicts=None)
     q_h_given_z_x.init_biases(0.0)
 
@@ -236,7 +216,7 @@ def test_two_stage_model2():
     #del Xte
     tr_samples = Xtr.shape[0]
     va_samples = Xva.shape[0]
-    batch_size = 200
+    batch_size = 128
     batch_reps = 1
 
     ###############################################
@@ -256,19 +236,16 @@ def test_two_stage_model2():
     ###############
     params = {}
     shared_config = [z_dim, 100, 100]
-    top_config = [shared_config[-1], h_dim]
+    shared_bn = [True, True]
+    output_config = [h_dim, h_dim]
     params['shared_config'] = shared_config
-    params['mu_config'] = top_config
-    params['sigma_config'] = top_config
+    params['shared_bn'] = shared_bn
+    params['output_config'] = output_config
     params['activation'] = tanh_actfun
-    params['init_scale'] = 'xg'
+    params['init_scale'] = 1.0
     params['lam_l2a'] = 0.0
-    params['vis_drop'] = 0.0
-    params['hid_drop'] = 0.0
-    params['bias_noise'] = 0.0
-    params['input_noise'] = 0.0
     params['build_theano_funcs'] = False
-    p_h_given_z = InfNet(rng=rng, Xd=xin_sym, \
+    p_h_given_z = HydraNet(rng=rng, Xd=xin_sym,
             params=params, shared_param_dicts=None)
     p_h_given_z.init_biases(0.0)
     ###############
@@ -276,19 +253,16 @@ def test_two_stage_model2():
     ###############
     params = {}
     shared_config = [h_dim, 200, 200]
-    top_config = [shared_config[-1], x_dim]
+    shared_bn = [True, True]
+    output_config = [x_dim, x_dim]
     params['shared_config'] = shared_config
-    params['mu_config'] = top_config
-    params['sigma_config'] = top_config
+    params['shared_bn'] = shared_bn
+    params['output_config'] = output_config
     params['activation'] = tanh_actfun
-    params['init_scale'] = 'xg'
+    params['init_scale'] = 1.0
     params['lam_l2a'] = 0.0
-    params['vis_drop'] = 0.0
-    params['hid_drop'] = 0.0
-    params['bias_noise'] = 0.0
-    params['input_noise'] = 0.0
     params['build_theano_funcs'] = False
-    p_x_given_h = InfNet(rng=rng, Xd=xin_sym, \
+    p_x_given_h = HydraNet(rng=rng, Xd=xin_sym,
             params=params, shared_param_dicts=None)
     p_x_given_h.init_biases(0.0)
     ###############
@@ -296,19 +270,16 @@ def test_two_stage_model2():
     ###############
     params = {}
     shared_config = [x_dim, 200, 200]
-    top_config = [shared_config[-1], h_dim]
+    shared_bn = [True, True]
+    output_config = [h_dim, h_dim]
     params['shared_config'] = shared_config
-    params['mu_config'] = top_config
-    params['sigma_config'] = top_config
+    params['shared_bn'] = shared_bn
+    params['output_config'] = output_config
     params['activation'] = tanh_actfun
-    params['init_scale'] = 'xg'
+    params['init_scale'] = 1.0
     params['lam_l2a'] = 0.0
-    params['vis_drop'] = 0.0
-    params['hid_drop'] = 0.0
-    params['bias_noise'] = 0.0
-    params['input_noise'] = 0.0
     params['build_theano_funcs'] = False
-    q_h_given_x = InfNet(rng=rng, Xd=xin_sym, \
+    q_h_given_x = HydraNet(rng=rng, Xd=xin_sym,
             params=params, shared_param_dicts=None)
     q_h_given_x.init_biases(0.0)
     ###############
@@ -316,19 +287,16 @@ def test_two_stage_model2():
     ###############
     params = {}
     shared_config = [h_dim, 100, 100]
-    top_config = [shared_config[-1], z_dim]
+    shared_bn = [True, True]
+    output_config = [z_dim, z_dim]
     params['shared_config'] = shared_config
-    params['mu_config'] = top_config
-    params['sigma_config'] = top_config
+    params['shared_bn'] = shared_bn
+    params['output_config'] = output_config
     params['activation'] = tanh_actfun
-    params['init_scale'] = 'xg'
+    params['init_scale'] = 1.0
     params['lam_l2a'] = 0.0
-    params['vis_drop'] = 0.0
-    params['hid_drop'] = 0.0
-    params['bias_noise'] = 0.0
-    params['input_noise'] = 0.0
     params['build_theano_funcs'] = False
-    q_z_given_h = InfNet(rng=rng, Xd=xin_sym, \
+    q_z_given_h = HydraNet(rng=rng, Xd=xin_sym,
             params=params, shared_param_dicts=None)
     q_z_given_h.init_biases(0.0)
 
@@ -339,12 +307,12 @@ def test_two_stage_model2():
     tsm_params = {}
     tsm_params['x_type'] = x_type
     tsm_params['obs_transform'] = 'sigmoid'
-    TSM = TwoStageModel2(rng=rng, x_in=xin_sym, x_out=xout_sym, \
-            x_dim=x_dim, z_dim=z_dim, h_dim=h_dim, \
-            q_h_given_x=q_h_given_x, \
-            q_z_given_h=q_z_given_h, \
-            p_h_given_z=p_h_given_z, \
-            p_x_given_h=p_x_given_h, \
+    TSM = TwoStageModel2(rng=rng, x_in=xin_sym, x_out=xout_sym,
+            x_dim=x_dim, z_dim=z_dim, h_dim=h_dim,
+            q_h_given_x=q_h_given_x,
+            q_z_given_h=q_z_given_h,
+            p_h_given_z=p_h_given_z,
+            p_x_given_h=p_x_given_h,
             params=tsm_params)
 
     ################################################################
@@ -369,7 +337,7 @@ def test_two_stage_model2():
         Xb = to_fX( Xtr.take(batch_idx, axis=0) )
         #Xb = binarize_data(Xtr.take(batch_idx, axis=0))
         # set sgd and objective function hyperparams for this update
-        TSM.set_sgd_params(lr=scale*learn_rate, \
+        TSM.set_sgd_params(lr=scale*learn_rate,
                            mom_1=(scale*momentum), mom_2=0.98)
         TSM.set_train_switch(1.0)
         TSM.set_lam_nll(lam_nll=1.0)

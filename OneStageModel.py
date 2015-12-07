@@ -30,8 +30,8 @@ class OneStageModel(object):
     Parameters:
         rng: numpy.random.RandomState (for reproducibility)
         x_in: symbolic "data" input to this VAE
-        p_x_given_z: HydraNet for x given z
-        q_z_given_x: InfNet for z given x
+        p_x_given_z: HydraNet for x given z (2 outputs)
+        q_z_given_x: HydraNet for z given x (2 outputs)
         x_dim: dimension of the "observation" variables
         z_dim: dimension of the "latent" variables
         params:
@@ -85,18 +85,20 @@ class OneStageModel(object):
         # record the symbolic variables that will provide inputs to the
         # computation graph created to describe this OneStageModel
         self.x_in = x_in
-        
+
         #####################################################################
         # Setup the computation graph that provides values in our objective #
         #####################################################################
         # inferencer model for latent variables given observations
         self.q_z_given_x = q_z_given_x
-        self.z_mean, self.z_logvar, self.z = \
-                self.q_z_given_x.apply(self.x_in, do_samples=True)
+        self.z_mean, self.z_logvar = self.q_z_given_x.apply(self.x_in)
+        # reparametrize ZMUV Gaussian samples to get latent samples...
+        zmuv_gauss = self.rng.normal(size=self.z_mean.shape)
+        self.z = self.z_mean + (T.exp(0.5*self.z_logvar) * zmuv_gauss
+
         # generator model for observations given latent variables
         self.p_x_given_z = p_x_given_z
-        outputs = self.p_x_given_z.apply(self.z)
-        self.xt = outputs[-1]
+        self.xt, _ = self.p_x_given_z.apply(self.z)
 
         # construct the final output of generator, conditioned on z
         if self.x_type == 'bernoulli':

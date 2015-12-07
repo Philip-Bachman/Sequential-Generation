@@ -15,8 +15,7 @@ from theano.sandbox.cuda.rng_curand import CURAND_RandomStreams as RandStream
 
 # phil's sweetness
 from NetLayers import HiddenLayer, DiscLayer, relu_actfun, softplus_actfun
-from HelperFuncs import to_fX
-from InfNet import InfNet
+from HelperFuncs import to_fX, reparametrize
 from DKCode import get_adam_updates, get_adadelta_updates
 from LogPDFs import log_prob_bernoulli, log_prob_gaussian2, gaussian_kld
 
@@ -38,10 +37,10 @@ class TwoStageModel1(object):
         rng: numpy.random.RandomState (for reproducibility)
         x_in: the input data to encode
         x_out: the target output to decode
-        p_h_given_z: InfNet for h given z
-        p_x_given_h: InfNet for x given h
-        q_z_given_x: InfNet for z given x
-        q_h_given_z_x: InfNet for h given z and x
+        p_h_given_z: HydraNet for h given z (2 outputs)
+        p_x_given_h: HydraNet for x given h (2 outputs)
+        q_z_given_x: HydraNet for z given x (2 outputs)
+        q_h_given_z_x: HydraNet for h given z and x (2 outputs)
         x_dim: dimension of the "observation" space
         z_dim: dimension of the "prior" latent space
         h_dim: dimension of the "hidden" latent space
@@ -49,17 +48,17 @@ class TwoStageModel1(object):
                 x_type: can be "bernoulli" or "gaussian"
                 obs_transform: can be 'none' or 'sigmoid'
     """
-    def __init__(self, rng=None, \
-            x_in=None, x_out=None, \
-            p_h_given_z=None, \
-            p_x_given_h=None, \
-            q_z_given_x=None, \
-            q_h_given_z_x=None, \
-            x_dim=None, \
-            z_dim=None, \
-            h_dim=None, \
-            h_det_dim=None, \
-            params=None, \
+    def __init__(self, rng=None,
+            x_in=None, x_out=None,
+            p_h_given_z=None,
+            p_x_given_h=None,
+            q_z_given_x=None,
+            q_h_given_z_x=None,
+            x_dim=None,
+            z_dim=None,
+            h_dim=None,
+            h_det_dim=None,
+            params=None,
             shared_param_dicts=None):
         # setup a rng for this GIPair
         self.rng = RandStream(rng.randint(100000))
@@ -87,7 +86,7 @@ class TwoStageModel1(object):
         self.h_dim = h_dim
         self.h_det_dim = h_det_dim
 
-        # grab handles to the relevant InfNets
+        # grab handles to the relevant HydraNets
         self.q_z_given_x = q_z_given_x
         self.q_h_given_z_x = q_h_given_z_x
         self.p_h_given_z = p_h_given_z
@@ -125,24 +124,28 @@ class TwoStageModel1(object):
         ##############################################
         print("Building TSM...")
         # samples of "hidden" latent state (from both p and q)
-        z_q_mean, z_q_logvar, z_q = \
-                self.q_z_given_x.apply(self.x_in, do_samples=True)
+        z_q_mean, z_q_logvar = self.q_z_given_x.apply(self.x_in)
+        z_q = reparametrize(z_q_mean, z_q_logvar, self.rng)
+
         z_p_mean = self.p_z_mean.repeat(z_q.shape[0], axis=0)
         z_p_logvar = self.p_z_logvar.repeat(z_q.shape[0], axis=0)
-        zmuv = self.rng.normal(size=z_q.shape, avg=0.0, std=1.0, \
-                               dtype=theano.config.floatX)
-        z_p = (T.exp(0.5*z_p_logvar) * zmuv) + z_p_mean
+        z_p = reparametrize(z_p_mean, z_p_logvar, self.rng)
+
         self.z = (self.train_switch[0] * z_q) + \
                  ((1.0 - self.train_switch[0]) * z_p)
         # compute relevant KLds for this step
-        self.kld_z_q2p = gaussian_kld(z_q_mean, z_q_logvar, \
+        self.kld_z_q2p = gaussian_kld(z_q_mean, z_q_logvar,
                                       z_p_mean, z_p_logvar)
-        self.kld_z_p2q = gaussian_kld(z_p_mean, z_p_logvar, \
+        self.kld_z_p2q = gaussian_kld(z_p_mean, z_p_logvar,
                                       z_q_mean, z_q_logvar)
         # samples of "hidden" latent state (from both p and q)
-        h_p_mean, h_p_logvar, h_p = self.p_h_given_z.apply(self.z)
-        h_q_mean, h_q_logvar, h_q = self.q_h_given_z_x.apply( \
+        h_p_mean, h_p_logvar = self.p_h_given_z.apply(self.z)
+        h_p = reparametrize(h_p_mean, h_p_logvar, self.rng)
+
+        h_q_mean, h_q_logvar = self.q_h_given_z_x.apply(
                 T.concatenate([self.z, self.x_out], axis=1))
+        h_q = reparametrize(h_q_mean, h_q_logvar, self.rng)
+
         # compute "stochastic" and "deterministic" parts of latent state
         h_sto = (self.train_switch[0] * h_q) + \
                 ((1.0 - self.train_switch[0]) * h_p)
@@ -155,14 +158,14 @@ class TwoStageModel1(object):
             self.h = T.concatenate([h_det[:,:self.h_det_dim],
                                     h_sto[:,self.h_det_dim:]], axis=1)
         # compute relevant KLds for this step
-        self.kld_h_q2p = gaussian_kld(h_q_mean, h_q_logvar, \
+        self.kld_h_q2p = gaussian_kld(h_q_mean, h_q_logvar,
                                       h_p_mean, h_p_logvar)
-        self.kld_h_p2q = gaussian_kld(h_p_mean, h_p_logvar, \
+        self.kld_h_p2q = gaussian_kld(h_p_mean, h_p_logvar,
                                       h_q_mean, h_q_logvar)
 
         # p_x_given_h generates an observation x conditioned on the "hidden"
         # latent variables h.
-        self.x_gen, _ = self.p_x_given_h.apply(self.h, do_samples=False)
+        self.x_gen, _ = self.p_x_given_h.apply(self.h)
 
         ######################################################################
         # ALL SYMBOLIC VARS NEEDED FOR THE OBJECTIVE SHOULD NOW BE AVAILABLE #
@@ -233,9 +236,9 @@ class TwoStageModel1(object):
             self.joint_grads[p] = grad_list[i]
 
         # construct the updates for the generator and inferencer networks
-        all_updates = get_adam_updates(params=self.joint_params, \
-                grads=self.joint_grads, alpha=self.lr, \
-                beta1=self.mom_1, beta2=self.mom_2, \
+        all_updates = get_adam_updates(params=self.joint_params,
+                grads=self.joint_grads, alpha=self.lr,
+                beta1=self.mom_1, beta2=self.mom_2,
                 mom2_init=1e-3, smoothing=1e-4, max_grad_norm=5.0)
         self.joint_updates = OrderedDict()
         for k in all_updates:
@@ -316,8 +319,7 @@ class TwoStageModel1(object):
         if self.x_type == 'bernoulli':
             ll_costs = log_prob_bernoulli(xo, xh)
         else:
-            ll_costs = log_prob_gaussian2(xo, xh, \
-                    log_vars=self.bounded_logvar)
+            ll_costs = log_prob_gaussian2(xo, xh, log_vars=self.bounded_logvar)
         nll_costs = -ll_costs
         return nll_costs
 
@@ -351,13 +353,13 @@ class TwoStageModel1(object):
         kld_z = T.sum(self.kld_z_q2p, axis=1)
         kld_h = T.sum(self.kld_h_q2p, axis=1)
         # collect the outputs to return from this function
-        outputs = [self.joint_cost, self.nll_cost, self.kld_cost, \
+        outputs = [self.joint_cost, self.nll_cost, self.kld_cost,
                    self.reg_cost, nll, kld_z, kld_h]
         # compile the theano function
-        func = theano.function(inputs=[ xi, xo, br ], \
-                outputs=outputs, \
-                givens={ self.x_in: xi.repeat(br, axis=0), \
-                         self.x_out: xo.repeat(br, axis=0) }, \
+        func = theano.function(inputs=[ xi, xo, br ],
+                outputs=outputs,
+                givens={ self.x_in: xi.repeat(br, axis=0),
+                         self.x_out: xo.repeat(br, axis=0) },
                 updates=self.joint_updates)
         return func
 
@@ -370,7 +372,7 @@ class TwoStageModel1(object):
         kld_z = self.kld_z_q2p
         kld_h = self.kld_h_q2p
         # compile theano function for a one-sample free-energy estimate
-        fe_term_sample = theano.function(inputs=[self.x_in, self.x_out], \
+        fe_term_sample = theano.function(inputs=[self.x_in, self.x_out],
                                          outputs=[nll, kld_z, kld_h])
         # construct a wrapper function for multi-sample free-energy estimate
         def fe_term_estimator(XI, XO, sample_count):
@@ -396,9 +398,9 @@ class TwoStageModel1(object):
         distribution generated by this TwoStageModel.
         """
         x_sym = T.matrix()
-        sample_func = theano.function(inputs=[x_sym], \
-                outputs=self.obs_transform(self.x_gen), \
-                givens={self.x_in: T.zeros_like(x_sym), \
+        sample_func = theano.function(inputs=[x_sym],
+                outputs=self.obs_transform(self.x_gen),
+                givens={self.x_in: T.zeros_like(x_sym),
                         self.x_out: T.zeros_like(x_sym)})
         def prior_sampler(samp_count):
             x_samps = to_fX( np.zeros((samp_count, self.x_dim)) )
@@ -426,10 +428,10 @@ class TwoStageModel2(object):
         rng: numpy.random.RandomState (for reproducibility)
         x_in: the input data to encode
         x_out: the target output to decode
-        p_h_given_z: InfNet for h given z
-        p_x_given_h: InfNet for x given h
-        q_h_given_x: InfNet for h given x
-        q_z_given_h: InfNet for z given h
+        p_h_given_z: HydraNet for h given z (2 outputs)
+        p_x_given_h: HydraNet for x given h (2 outputs)
+        q_h_given_x: HydraNet for h given x (2 outputs)
+        q_z_given_h: HydraNet for z given h (2 outputs)
         x_dim: dimension of the "observation" space
         z_dim: dimension of the "prior" latent space
         h_dim: dimension of the "hidden" latent space
@@ -437,16 +439,16 @@ class TwoStageModel2(object):
                 x_type: can be "bernoulli" or "gaussian"
                 obs_transform: can be 'none' or 'sigmoid'
     """
-    def __init__(self, rng=None, \
-            x_in=None, x_out=None, \
-            p_h_given_z=None, \
-            p_x_given_h=None, \
-            q_h_given_x=None, \
-            q_z_given_h=None, \
-            x_dim=None, \
-            z_dim=None, \
-            h_dim=None, \
-            params=None, \
+    def __init__(self, rng=None,
+            x_in=None, x_out=None,
+            p_h_given_z=None,
+            p_x_given_h=None,
+            q_h_given_x=None,
+            q_z_given_h=None,
+            x_dim=None,
+            z_dim=None,
+            h_dim=None,
+            params=None,
             shared_param_dicts=None):
         # setup a rng for this GIPair
         self.rng = RandStream(rng.randint(100000))
@@ -473,7 +475,7 @@ class TwoStageModel2(object):
         self.z_dim = z_dim
         self.h_dim = h_dim
 
-        # grab handles to the relevant InfNets
+        # grab handles to the relevant HydraNets
         self.q_h_given_x = q_h_given_x
         self.q_z_given_h = q_z_given_h
         self.p_h_given_z = p_h_given_z
@@ -511,23 +513,21 @@ class TwoStageModel2(object):
         ##############################################
         print("Building TSM...")
         # samples of "hidden" latent state (from q)
-        h_q_mean, h_q_logvar, h_q = \
-                self.q_h_given_x.apply(self.x_in, do_samples=True)
+        h_q_mean, h_q_logvar = self.q_h_given_x.apply(self.x_in)
+        h_q = reparametrize(h_q_mean, h_q_logvar, self.rng)
         # samples of "prior" latent state (from q)
-        z_q_mean, z_q_logvar, z_q = \
-                self.q_z_given_h.apply(h_q, do_samples=True)
+        z_q_mean, z_q_logvar = self.q_z_given_h.apply(h_q)
+        z_q = reparametrize(z_q_mean, z_q_logvar, self.rng)
         # samples of "prior" latent state (from p)
         z_p_mean = self.p_z_mean.repeat(z_q.shape[0], axis=0)
         z_p_logvar = self.p_z_logvar.repeat(z_q.shape[0], axis=0)
-        zmuv = self.rng.normal(size=z_q.shape, avg=0.0, std=1.0, \
-                               dtype=theano.config.floatX)
-        z_p = (T.exp(0.5*z_p_logvar) * zmuv) + z_p_mean
+        z_p = reparametrize(z_p_mean, z_p_logvar, self.rng)
         # samples from z -- switched between q/p
         self.z = (self.train_switch[0] * z_q) + \
                  ((1.0 - self.train_switch[0]) * z_p)
         # samples of "hidden" latent state (from p)
-        h_p_mean, h_p_logvar, h_p = \
-                self.p_h_given_z.apply(self.z, do_samples=True)
+        h_p_mean, h_p_logvar = self.p_h_given_z.apply(self.z)
+        h_p = reparametrize(h_p_mean, h_p_logvar, self.rng)
         # samples from h -- switched between q/p
         self.h = (self.train_switch[0] * h_q) + \
                  ((1.0 - self.train_switch[0]) * h_p)
@@ -541,7 +541,7 @@ class TwoStageModel2(object):
 
         # p_x_given_h generates an observation x conditioned on the "hidden"
         # latent variables h.
-        self.x_gen, _ = self.p_x_given_h.apply(self.h, do_samples=False)
+        self.x_gen, _ = self.p_x_given_h.apply(self.h)
 
 
         ######################################################################
@@ -614,9 +614,9 @@ class TwoStageModel2(object):
             self.joint_grads[p] = grad_list[i]
 
         # construct the updates for the generator and inferencer networks
-        all_updates = get_adam_updates(params=self.joint_params, \
-                grads=self.joint_grads, alpha=self.lr, \
-                beta1=self.mom_1, beta2=self.mom_2, \
+        all_updates = get_adam_updates(params=self.joint_params,
+                grads=self.joint_grads, alpha=self.lr,
+                beta1=self.mom_1, beta2=self.mom_2,
                 mom2_init=1e-3, smoothing=1e-4, max_grad_norm=5.0)
         self.joint_updates = OrderedDict()
         for k in all_updates:
@@ -697,8 +697,7 @@ class TwoStageModel2(object):
         if self.x_type == 'bernoulli':
             ll_costs = log_prob_bernoulli(xo, xh)
         else:
-            ll_costs = log_prob_gaussian2(xo, xh, \
-                    log_vars=self.bounded_logvar)
+            ll_costs = log_prob_gaussian2(xo, xh, log_vars=self.bounded_logvar)
         nll_costs = -ll_costs
         return nll_costs
 
@@ -733,13 +732,13 @@ class TwoStageModel2(object):
         kldz = T.sum(self.kld_z, axis=1)
         kldh = T.sum(self.kld_h, axis=1)
         # collect the outputs to return from this function
-        outputs = [self.joint_cost, self.nll_cost, self.kld_cost, \
+        outputs = [self.joint_cost, self.nll_cost, self.kld_cost,
                    self.reg_cost, self.nll_costs, kldz, kldh]
         # compile the theano function
-        func = theano.function(inputs=[ xi, xo, br ], \
-                outputs=outputs, \
-                givens={ self.x_in: xi.repeat(br, axis=0), \
-                         self.x_out: xo.repeat(br, axis=0) }, \
+        func = theano.function(inputs=[ xi, xo, br ],
+                outputs=outputs,
+                givens={ self.x_in: xi.repeat(br, axis=0),
+                         self.x_out: xo.repeat(br, axis=0) },
                 updates=self.joint_updates)
         return func
 
@@ -752,7 +751,7 @@ class TwoStageModel2(object):
         kld_z = self.kld_z_q2p
         kld_h = self.kld_h_q2p
         # compile theano function for a one-sample free-energy estimate
-        fe_term_sample = theano.function(inputs=[self.x_in, self.x_out], \
+        fe_term_sample = theano.function(inputs=[self.x_in, self.x_out],
                                          outputs=[nll, kld_z, kld_h])
         # construct a wrapper function for multi-sample free-energy estimate
         def fe_term_estimator(XI, XO, sample_count):
@@ -776,9 +775,9 @@ class TwoStageModel2(object):
         distribution generated by this TwoStageModel.
         """
         x_sym = T.matrix()
-        sample_func = theano.function(inputs=[x_sym], \
-                outputs=self.obs_transform(self.x_gen), \
-                givens={self.x_in: T.zeros_like(x_sym), \
+        sample_func = theano.function(inputs=[x_sym],
+                outputs=self.obs_transform(self.x_gen),
+                givens={self.x_in: T.zeros_like(x_sym),
                         self.x_out: T.zeros_like(x_sym)})
         def prior_sampler(samp_count):
             x_samps = to_fX( np.zeros((samp_count, self.x_dim)) )
