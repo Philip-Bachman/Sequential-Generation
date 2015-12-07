@@ -108,7 +108,7 @@ def test_two_stage_model1():
     # q_h_given_z_x #
     #################
     params = {}
-    shared_config = [(z_dim + x_dim), 200, 200]
+    shared_config = [(h_dim + x_dim), 200, 200]
     shared_bn = [True, True]
     output_config = [h_dim, h_dim]
     params['shared_config'] = shared_config

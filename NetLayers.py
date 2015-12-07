@@ -287,11 +287,11 @@ class HiddenLayer(object):
 
         # Feedforward through the layer
         use_drop = drop_rate > 0.001
-        self.linear_output, self.noisy_linear, self.output = \
+        self.output, self.linear_output = \
                 self.apply(input, use_drop=use_drop)
 
         # Compute some properties of the activations, probably to regularize
-        self.act_l2_sum = T.sum(self.noisy_linear**2.) / self.output.size
+        self.act_l2_sum = T.sum(self.linear_output**2.) / self.output.size
 
         # Conveniently package layer parameters
         self.params = [self.W, self.b, self.b_in, self.s_in]

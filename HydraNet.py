@@ -58,8 +58,6 @@ class HydraNet(object):
             self.build_theano_funcs = params['build_theano_funcs']
         else:
             self.build_theano_funcs = True
-        else:
-            self.bias_noise = 0.0
         if 'init_scale' in params:
             self.init_scale = params['init_scale']
         else:

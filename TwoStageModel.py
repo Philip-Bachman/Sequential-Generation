@@ -143,7 +143,7 @@ class TwoStageModel1(object):
         h_p = reparametrize(h_p_mean, h_p_logvar, self.rng)
 
         h_q_mean, h_q_logvar = self.q_h_given_z_x.apply(
-                T.concatenate([self.z, self.x_out], axis=1))
+                T.concatenate([h_p_mean, self.x_out], axis=1))
         h_q = reparametrize(h_q_mean, h_q_logvar, self.rng)
 
         # compute "stochastic" and "deterministic" parts of latent state
