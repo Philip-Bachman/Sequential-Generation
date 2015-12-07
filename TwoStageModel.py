@@ -537,7 +537,7 @@ class TwoStageModel2(object):
         self.kld_h_q2p = log_prob_gaussian2(self.h, h_q_mean, h_q_logvar) - \
                          log_prob_gaussian2(self.h, h_p_mean, h_p_logvar)
         self.kld_z_p2q = self.kld_z_q2p
-        self.kld_h_p2q = self.kld_h_p2q
+        self.kld_h_p2q = self.kld_h_q2p
 
         # p_x_given_h generates an observation x conditioned on the "hidden"
         # latent variables h.

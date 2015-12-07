@@ -379,5 +379,5 @@ def test_two_stage_model2():
 
 
 if __name__=="__main__":
-    test_two_stage_model1()
-    #test_two_stage_model2()
+    #test_two_stage_model1()
+    test_two_stage_model2()
