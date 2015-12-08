@@ -57,15 +57,31 @@ def test_two_stage_model1():
     # p_h_given_z #
     ###############
     params = {}
-    shared_config = [z_dim, 100, 100]
-    shared_bn = [True, True]
-    output_config = [h_dim, h_dim]
+    shared_config = \
+    [ {'layer_type': fc,
+       'in_chans': z_dim,
+       'out_chans': 100,
+       'activation': tanh_actfun,
+       'apply_bn': True}, \
+      {'layer_type': fc,
+       'in_chans': 100,
+       'out_chans': 100,
+       'activation': tanh_actfun,
+       'apply_bn': True} ]
+    output_config = \
+    [ {'layer_type': fc,
+       'in_chans': 100,
+       'out_chans': h_dim,
+       'activation': tanh_actfun,
+       'apply_bn': True}, \
+      {'layer_type': fc,
+       'in_chans': 100,
+       'out_chans': h_dim,
+       'activation': tanh_actfun,
+       'apply_bn': True} ]
     params['shared_config'] = shared_config
-    params['shared_bn'] = shared_bn
     params['output_config'] = output_config
-    params['activation'] = tanh_actfun
     params['init_scale'] = 1.0
-    params['lam_l2a'] = 0.0
     params['build_theano_funcs'] = False
     p_h_given_z = HydraNet(rng=rng, Xd=xin_sym, \
             params=params, shared_param_dicts=None)
@@ -74,15 +90,31 @@ def test_two_stage_model1():
     # p_x_given_h #
     ###############
     params = {}
-    shared_config = [h_dim, 200, 200]
-    shared_bn = [True, True]
-    output_config = [x_dim, x_dim]
+    shared_config = \
+    [ {'layer_type': fc,
+       'in_chans': h_dim,
+       'out_chans': 200,
+       'activation': tanh_actfun,
+       'apply_bn': True}, \
+      {'layer_type': fc,
+       'in_chans': 200,
+       'out_chans': 200,
+       'activation': tanh_actfun,
+       'apply_bn': True} ]
+    output_config = \
+    [ {'layer_type': fc,
+       'in_chans': 200,
+       'out_chans': x_dim,
+       'activation': tanh_actfun,
+       'apply_bn': True}, \
+      {'layer_type': fc,
+       'in_chans': 200,
+       'out_chans': x_dim,
+       'activation': tanh_actfun,
+       'apply_bn': True} ]
     params['shared_config'] = shared_config
-    params['shared_bn'] = shared_bn
     params['output_config'] = output_config
-    params['activation'] = tanh_actfun
     params['init_scale'] = 1.0
-    params['lam_l2a'] = 0.0
     params['build_theano_funcs'] = False
     p_x_given_h = HydraNet(rng=rng, Xd=xin_sym, \
             params=params, shared_param_dicts=None)
@@ -91,15 +123,31 @@ def test_two_stage_model1():
     # q_z_given_x #
     ###############
     params = {}
-    shared_config = [x_dim, 200, 200]
-    shared_bn = [True, True]
-    output_config = [z_dim, z_dim]
+    shared_config = \
+    [ {'layer_type': fc,
+       'in_chans': x_dim,
+       'out_chans': 200,
+       'activation': tanh_actfun,
+       'apply_bn': True}, \
+      {'layer_type': fc,
+       'in_chans': 200,
+       'out_chans': 200,
+       'activation': tanh_actfun,
+       'apply_bn': True} ]
+    output_config = \
+    [ {'layer_type': fc,
+       'in_chans': 200,
+       'out_chans': z_dim,
+       'activation': tanh_actfun,
+       'apply_bn': True}, \
+      {'layer_type': fc,
+       'in_chans': 200,
+       'out_chans': z_dim,
+       'activation': tanh_actfun,
+       'apply_bn': True} ]
     params['shared_config'] = shared_config
-    params['shared_bn'] = shared_bn
     params['output_config'] = output_config
-    params['activation'] = tanh_actfun
     params['init_scale'] = 1.0
-    params['lam_l2a'] = 0.0
     params['build_theano_funcs'] = False
     q_z_given_x = HydraNet(rng=rng, Xd=xin_sym, \
             params=params, shared_param_dicts=None)
@@ -108,15 +156,32 @@ def test_two_stage_model1():
     # q_h_given_z_x #
     #################
     params = {}
-    shared_config = [(h_dim + x_dim), 200, 200]
-    shared_bn = [True, True]
-    output_config = [h_dim, h_dim]
+    params = {}
+    shared_config = \
+    [ {'layer_type': fc,
+       'in_chans': (h_dim + x_dim),
+       'out_chans': 200,
+       'activation': tanh_actfun,
+       'apply_bn': True}, \
+      {'layer_type': fc,
+       'in_chans': 200,
+       'out_chans': 200,
+       'activation': tanh_actfun,
+       'apply_bn': True} ]
+    output_config = \
+    [ {'layer_type': fc,
+       'in_chans': 200,
+       'out_chans': h_dim,
+       'activation': tanh_actfun,
+       'apply_bn': True}, \
+      {'layer_type': fc,
+       'in_chans': 200,
+       'out_chans': h_dim,
+       'activation': tanh_actfun,
+       'apply_bn': True} ]
     params['shared_config'] = shared_config
-    params['shared_bn'] = shared_bn
     params['output_config'] = output_config
-    params['activation'] = tanh_actfun
     params['init_scale'] = 1.0
-    params['lam_l2a'] = 0.0
     params['build_theano_funcs'] = False
     q_h_given_z_x = HydraNet(rng=rng, Xd=xin_sym, \
             params=params, shared_param_dicts=None)
@@ -379,5 +444,5 @@ def test_two_stage_model2():
 
 
 if __name__=="__main__":
-    #test_two_stage_model1()
-    test_two_stage_model2()
+    test_two_stage_model1()
+    #test_two_stage_model2()

@@ -4,7 +4,12 @@ import theano
 import theano.tensor as T
 #from theano.tensor.shared_randomstreams import RandomStreams as RandStream
 from theano.sandbox.cuda.rng_curand import CURAND_RandomStreams as RandStream
-from theano.sandbox.cuda.dnn import dnn_conv, dnn_pool
+from theano.sandbox.cuda.basic_ops import (as_cuda_ndarray_variable,
+                                           host_from_gpu,
+                                           gpu_contiguous, HostFromGpu,
+                                           gpu_alloc_empty)
+from theano.sandbox.cuda.dnn import (GpuDnnConvDesc, GpuDnnConv,
+                                     GpuDnnConvGradI, dnn_conv, dnn_pool)
 
 
 ###############################
@@ -216,81 +221,72 @@ def batchnorm(X, rescale=None, reshift=None, u=None, s=None, e=1e-8):
         raise NotImplementedError
     return X
 
-######################################
-# BASIC FULLY-CONNECTED HIDDEN LAYER #
-######################################
+def deconv(X, w, subsample=(1, 1), border_mode=(0, 0), conv_mode='conv'):
+    """
+    sets up dummy convolutional forward pass and uses its grad as deconv
+    currently only tested/working with same padding
+    """
+    img = gpu_contiguous(X)
+    kerns = gpu_contiguous(w.dimshuffle(1,0,2,3))
+    desc = GpuDnnConvDesc(border_mode=border_mode, subsample=subsample,
+                          conv_mode=conv_mode)(gpu_alloc_empty(img.shape[0], kerns.shape[1], img.shape[2]*subsample[0], img.shape[3]*subsample[1]).shape, kerns.shape)
+    out = gpu_alloc_empty(img.shape[0], kerns.shape[1], img.shape[2]*subsample[0], img.shape[3]*subsample[1])
+    d_img = GpuDnnConvGradI()(kerns, img, out, desc)
+    return d_img
+
+##############################
+# MULTI-PURPOSE HIDDEN LAYER #
+##############################
 
 #
 # layer_description = {
-#     'in_chans': 
-#     'out_chans':
-#     'filt_dim': 
-#     'out_shape':
+#     'layer_type':  required -- must be 'fc' or 'conv'
+#     'in_chans':    required -- number of channels/neurons in preceeding layer
+#     'out_chans':   required -- number of channels/neurons in this layer
+#     'activation':  required -- element-wise non-linearity for outputs
+#     'filt_dim':    required for conv layers -- size for square conv filters
+#     'conv_stride': required for conv layers -- 'half', 'single', or 'double'
+#     'apply_bn':    optional -- whether or not to apply batch normalization
+#     'drop_rate':   optional -- dropout rate for this layer
+#     'shape_func_in':  partially applied T.reshape(...) or T.flatten(...) to
+#                       apply to outputs from this layer (optional)
+#     'shape_func_out': partially applied T.reshape(...) or T.flatten(...) to
+#                       apply to outputs from this layer (optional)
 # }
 #
 
 class HiddenLayer(object):
-    def __init__(self, rng, input, layer_description,
-                 activation=None, drop_rate=0.,
+    def __init__(self, rng, layer_description,
                  W=None, b=None, b_in=None, s_in=None,
-                 name="", W_scale=1.0, apply_bn=False):
+                 name="", W_scale=1.0):
+        # parse options from layer_description
+        assert 'layer_type' in layer_description, \
+                "layer_description must provide layer_type"
+        assert ((layer_description['layer_type'] == 'fc') or \
+                (layer_description['layer_type'] == 'conv')) \
+                "layer_type must be fc or conv"
+
+        self.layer_description = layer_description
+        self.layer_type = layer_description['layer_type']
+        self.in_chans = layer_description['in_chans']
+        self.out_chans = layer_description['out_chans']
+        self.activation = layer_description['activation']
+        self.filt_dim = layer_description.get('filt_dim', None)
+        self.conv_stride = layer_description.get('conv_stride', None)
+        self.apply_bn = layer_descriptions.get('apply_bn', False)
+        self.drop_rate = layer_descriptions.get('drop_rate', 0.0)
+        self.shape_func_in = layer_description.get('shape_func_in', None)
+        self.shape_func_out = layer_description.get('shape_func_out', None)
 
         # Setup a shared random generator for this layer
         self.rng = RandStream(rng.randint(1000000))
 
-        # setup parameters for controlling
-        zero_ary = np.zeros((1,)).astype(theano.config.floatX)
-        self.drop_rate = theano.shared(value=(zero_ary+drop_rate),
-                name="{0:s}_drop_rate".format(name))
-        self.apply_bn = apply_bn
-
-        # setup scale and bias params for the input
-        if b_in is None:
-            # batch normalization reshifts are initialized to zero
-            ary = np.zeros((out_dim,), dtype=theano.config.floatX)
-            b_in = theano.shared(value=ary, name="{0:s}_b_in".format(name))
-        if s_in is None:
-            # batch normalization rescales are initialized to zero
-            ary = np.zeros((out_dim,), dtype=theano.config.floatX)
-            s_in = theano.shared(value=ary, name="{0:s}_s_in".format(name))
-        self.b_in = b_in
-        self.s_in = s_in
-
-        # Set some basic layer properties
-        self.in_dim = in_dim
-        self.out_dim = out_dim
-        self.filt_count = self.out_dim
-        if activation is None:
-            activation = relu_actfun
-        self.activation = activation
-
-        # Get some random initial weights and biases, if not given
-        if W is None:
-            # Generate initial filters using orthogonal random trick
-            W_shape = (self.in_dim, self.filt_count)
-            if W_scale == 'xg':
-                W_init = glorot_matrix(W_shape)
-            else:
-                #W_init = (W_scale * (1.0 / np.sqrt(self.in_dim))) * \
-                #          npr.normal(0.0, 1.0, W_shape)
-                W_init = ortho_matrix(shape=W_shape, gain=W_scale)
-            W_init = W_init.astype(theano.config.floatX)
-            W = theano.shared(value=W_init, name="{0:s}_W".format(name))
-        if b is None:
-            b_init = np.zeros((self.filt_count,), dtype=theano.config.floatX)
-            b = theano.shared(value=b_init, name="{0:s}_b".format(name))
-
-        # Set layer weights and biases
-        self.W = W
-        self.b = b
-
-        # Feedforward through the layer
-        use_drop = drop_rate > 0.001
-        self.output, self.linear_output = \
-                self.apply(input, use_drop=use_drop)
-
-        # Compute some properties of the activations, probably to regularize
-        self.act_l2_sum = T.sum(self.linear_output**2.) / self.output.size
+        if self.layer_type == 'fc':
+            self.W, self.b, self.b_in, self.s_in = \
+                    self._init_fc_params(W=W, b=b, b_in=b_in, s_in=s_in)
+        else:
+            self.W, self.b, self.b_in, self.s_in = \
+                    self._init_conv_params(W=W, b=b, b_in=b_in, s_in=s_in)
 
         # Conveniently package layer parameters
         self.params = [self.W, self.b, self.b_in, self.s_in]
@@ -302,38 +298,109 @@ class HiddenLayer(object):
         # Layer construction complete...
         return
 
+    def _init_fc_params(self, W=None, b=None, b_in=None, s_in=None):
+        """
+        Initialize all parameters that may be required for feedforward through
+        a fully-connected hidden layer.
+        """
+        # Get some random initial weights and biases, if not given
+        if W is None:
+            # Generate initial filters using orthogonal random trick
+            W_shape = (self.in_chans, self.out_chans)
+            if W_scale == 'xg':
+                W_init = glorot_matrix(W_shape)
+            else:
+                #W_init = (W_scale * (1.0 / np.sqrt(self.in_dim))) * \
+                #          npr.normal(0.0, 1.0, W_shape)
+                W_init = ortho_matrix(shape=W_shape, gain=W_scale)
+            W_init = W_init.astype(theano.config.floatX)
+            W = theano.shared(value=W_init, name="{0:s}_W".format(name))
+        if b is None:
+            b_init = np.zeros((self.out_chans,), dtype=theano.config.floatX)
+            b = theano.shared(value=b_init, name="{0:s}_b".format(name))
+        # setup scale and bias params for the input
+        if b_in is None:
+            # batch normalization reshifts are initialized to zero
+            ary = np.zeros((self.out_chans,), dtype=theano.config.floatX)
+            b_in = theano.shared(value=ary, name="{0:s}_b_in".format(name))
+        if s_in is None:
+            # batch normalization rescales are initialized to zero
+            ary = np.zeros((self.out_chans,), dtype=theano.config.floatX)
+            s_in = theano.shared(value=ary, name="{0:s}_s_in".format(name))
+        return W, b, b_in, s_in
+
+    def _init_conv_params(self, W=None, b=None, b_in=None, s_in=None):
+        """
+        Initialize all parameters that may be required for feedforward through
+        a convolutional hidden layer.
+        """
+        # Get some random initial weights and biases, if not given
+        if W is None:
+            # Generate initial filters using orthogonal random trick
+            W_shape = (self.in_chans, self.out_chans)
+            if W_scale == 'xg':
+                W_init = glorot_matrix(W_shape)
+            else:
+                #W_init = (W_scale * (1.0 / np.sqrt(self.in_dim))) * \
+                #          npr.normal(0.0, 1.0, W_shape)
+                W_init = ortho_matrix(shape=W_shape, gain=W_scale)
+            W_init = W_init.astype(theano.config.floatX)
+            W = theano.shared(value=W_init, name="{0:s}_W".format(name))
+        if b is None:
+            b_init = np.zeros((self.out_chans,), dtype=theano.config.floatX)
+            b = theano.shared(value=b_init, name="{0:s}_b".format(name))
+        # setup scale and bias params for the input
+        if b_in is None:
+            # batch normalization reshifts are initialized to zero
+            ary = np.zeros((self.out_chans,), dtype=theano.config.floatX)
+            b_in = theano.shared(value=ary, name="{0:s}_b_in".format(name))
+        if s_in is None:
+            # batch normalization rescales are initialized to zero
+            ary = np.zeros((self.out_chans,), dtype=theano.config.floatX)
+            s_in = theano.shared(value=ary, name="{0:s}_s_in".format(name))
+        return W, b, b_in, s_in
+
     def apply(self, input, use_drop=False):
         """
         Apply feedforward to this input, returning several partial results.
         """
+        # Reshape input if a reshape command was provided
+        if not (self.shape_func_in is None):
+            input = self.shape_func_in(input)
         # Apply masking noise to the input (if desired)
         if use_drop:
-            input = self._drop_from_input(input, self.drop_rate[0])
-        if self.layer_type == 'FC':
-            # Compute linear "pre-activation" for this layer
+            input = self._drop_from_input(input, self.drop_rate)
+        if self.layer_type == 'fc':
+            # Feedforward through fully-connected layer
             linear_output = T.dot(input, self.W) + self.b
-            # Apply batch normalization if desired
-            if self.apply_bn:
-                linear_output = batchnorm(linear_output, rescale=self.s_in,
-                                          reshift=self.b_in, u=None, s=None)
-            # Apply activation function
-            final_output = self.activation(linear_output)
-            # package partial results for easy return
-            results = [final_output, linear_output]
-        elif self.layer_type == 'CONV':
-            # Compute linear "pre-activation" for this layer
-            linear_output = T.dot(input, self.W) + self.b
-            # Apply batch normalization if desired
-            if self.apply_bn:
-                linear_output = batchnorm(linear_output, rescale=self.s_in,
-                                          reshift=self.b_in, u=None, s=None)
-            # Apply activation function
-            final_output = self.activation(linear_output)
-            # package partial results for easy return
-            results = [final_output, linear_output]
+        elif self.layer_type == 'conv':
+            # Feedforward through convolutional layer, with adjustable stride
+            bm = int((self.filt_dim - 1) / 2) # use "same" mode convolutions
+            if self.conv_stride == 'double':
+                linear_output = dnn_conv(input, self.W, subsample=(2, 2),
+                                         border_mode=(bm, bm))
+            elif self.conv_stride == 'single':
+                linear_output = dnn_conv(input, self.W, subsample=(1, 1),
+                                         border_mode=(bm, bm))
+            elif self.conv_stride == 'half':
+                linear_output = deconv(input, self.W, subsample=(2, 2),
+                                       border_mode=(bm, bm))
+            else:
+                assert False, "Unknown stride type!"
+            linear_output = linear_output + self.b
         else:
             assert False, "Unknown layer type!"
-        return results
+        # Apply batch normalization if desired
+        if self.apply_bn:
+            linear_output = batchnorm(linear_output, rescale=self.s_in,
+                                      reshift=self.b_in, u=None, s=None)
+        # Apply activation function
+        final_output = self.activation(linear_output)
+        # Reshape output if a reshape command was provided
+        if not (self.shape_func_out is None):
+            linear_output = self.shape_func_out(linear_output)
+            final_output = self.shape_func_out(final_output)
+        return final_output, linear_output
 
     def _drop_from_input(self, input, p):
         """p is the probability of dropping elements of input."""

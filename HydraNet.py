@@ -24,27 +24,22 @@ from HelperFuncs import constFX, to_fX
 
 class HydraNet(object):
     """
-    A net that turns one input into multiple outputs.
+    A net that turns one input into one or more outputs.
 
-    All hidden layers are shared between the outputs. The outputs can be
-    of different dimension. Each output is computed as a linear function of
-    the final shared layer.
+    Some shared hidden layers feed into one or more output layers.
 
     Parameters:
         rng: a numpy.random RandomState object
         Xd: symbolic input matrix for inputs
         params: a dict of parameters describing the desired network:
-            shared_config: list of "layer descriptions" for shared part
-            shared_bn: flags for where to apply batch normalization
-            output_config: list of dimensions for the output layers
-            activation: "function handle" for the desired non-linearity
-            init_scale: scaling factor for hidden layer weights (__ * 0.01)
+            shared_config: list of "layer descriptions" for the shared layers
+            output_config: list of "layer descriptions" for the output layers
         shared_param_dicts: parameters for this HydraNet
     """
-    def __init__(self, \
-            rng=None, \
-            Xd=None, \
-            params=None, \
+    def __init__(self,
+            rng=None,
+            Xd=None,
+            params=None,
             shared_param_dicts=None):
         # Setup a shared random generator for this network
         self.rng = RandStream(rng.randint(1000000))
@@ -75,103 +70,52 @@ class HydraNet(object):
             # referring to the given param dict (i.e. shared_param_dicts).
             self.shared_param_dicts = shared_param_dicts
             self.is_clone = True
-        # Get the configuration/prototype for this network. The config is a
-        # list of layer descriptions, including a description for the input
-        # layer, which is typically just the dimension of the inputs. So, the
-        # depth of the mlp is one less than the number of layer configs.
+        # Get the configuration/prototype for this network.
         self.shared_config = params['shared_config']
         self.output_config = params['output_config']
-        if 'shared_bn' in params:
-            assert (len(params['shared_bn']) == len(self.shared_config)-1), \
-                    "shared_bn must be suitable for shared_config."
-            self.shared_bn = params['shared_bn']
-        else:
-            self.shared_bn = [False for _ in self.shared_config[:-1]]
-        if 'activation' in params:
-            self.activation = params['activation']
-        else:
-            self.activation = relu_actfun
 
         ###
         self.shared_layers = []
-        if len(self.shared_config) > 1:
-            #########################################
-            # Initialize the shared part of network #
-            #########################################
-            layer_defs = zip(self.shared_config[:-1],self.shared_config[1:],self.shared_bn)
-            layer_num = 0
-            # Construct input to the inference network
-            next_input = self.Xd
-            for in_def, out_def, apply_bn in layer_defs:
-                first_layer = (layer_num == 0)
-                last_layer = (layer_num == (len(layer_defs) - 1))
-                l_name = "shared_layer_{0:d}".format(layer_num)
-                if (type(in_def) is list) or (type(in_def) is tuple):
-                    # Receiving input from a poolish layer...
-                    in_dim = in_def[0]
-                else:
-                    # Receiving input from a normal layer...
-                    in_dim = in_def
-                if (type(out_def) is list) or (type(out_def) is tuple):
-                    # Applying some sort of pooling in this layer...
-                    out_dim = out_def[0]
-                    pool_size = out_def[1]
-                else:
-                    # Not applying any pooling in this layer...
-                    out_dim = out_def
-                    pool_size = 0
-                # set in-bound weights to have norm self.init_scale
-                i_scale = self.init_scale
-                if not self.is_clone:
-                    ##########################################
-                    # Initialize a layer with new parameters #
-                    ##########################################
-                    new_layer = HiddenLayer(rng=rng, input=next_input,
-                            activation=self.activation, pool_size=pool_size,
-                            in_dim=in_dim, out_dim=out_dim,
-                            name=l_name, W_scale=i_scale, apply_bn=apply_bn)
-                    self.shared_layers.append(new_layer)
-                    self.shared_param_dicts['shared'].append(
-                            new_layer.shared_param_dicts)
-                else:
-                    ##################################################
-                    # Initialize a layer with some shared parameters #
-                    ##################################################
-                    init_params = self.shared_param_dicts['shared'][layer_num]
-                    new_layer = HiddenLayer(rng=rng, input=next_input,
-                            activation=self.activation, pool_size=pool_size,
-                            in_dim=in_dim, out_dim=out_dim,
-                            W=init_params['W'], b=init_params['b'],
-                            b_in=init_params['b_in'], s_in=init_params['s_in'],
-                            name=l_name, W_scale=i_scale, apply_bn=apply_bn)
-                    self.shared_layers.append(new_layer)
-                next_input = self.shared_layers[-1].output
-                # Acknowledge layer completion
-                layer_num = layer_num + 1
-        ################################
-        # Initialize the output layers #
-        ################################
-        self.output_layers = []
-        i_scale = self.init_scale
-        # take input from the output of the shared network
-        if len(self.shared_config) > 1:
-            in_dim = self.shared_layers[-1].out_dim
-            ol_input = self.shared_layers[-1].output
-        else:
-            in_dim = self.shared_config[0]
-            ol_input = self.Xd
-        for ol_num, out_dim in enumerate(self.output_config):
-            ol_name = "output_layer_{0:d}".format(ol_num)
-            # Select the appropriate noise to add to this layer
-            pool_size = 0
+        #########################################
+        # Initialize the shared part of network #
+        #########################################
+        for sl_num, sl_desc in self.shared_config:
+            l_name = "shared_layer_{0:d}".format(sl_num)
             if not self.is_clone:
                 ##########################################
                 # Initialize a layer with new parameters #
                 ##########################################
-                new_layer = HiddenLayer(rng=rng, input=ol_input,
-                        activation=self.activation, pool_size=pool_size,
-                        in_dim=in_dim, out_dim=out_dim,
-                        name=ol_name, W_scale=i_scale)
+                new_layer = HiddenLayer(rng=rng,
+                        layer_description=sl_desc,
+                        name=l_name, W_scale=self.init_scale)
+                self.shared_layers.append(new_layer)
+                self.shared_param_dicts['shared'].append(
+                        new_layer.shared_param_dicts)
+            else:
+                ##################################################
+                # Initialize a layer with some shared parameters #
+                ##################################################
+                init_params = self.shared_param_dicts['shared'][sl_num]
+                new_layer = HiddenLayer(rng=rng,
+                        layer_description=sl_desc,
+                        W=init_params['W'], b=init_params['b'],
+                        b_in=init_params['b_in'], s_in=init_params['s_in'],
+                        name=l_name, W_scale=self.init_scale)
+                self.shared_layers.append(new_layer)
+        ################################
+        # Initialize the output layers #
+        ################################
+        self.output_layers = []
+        # take input from the output of the shared network
+        for ol_num, ol_desc in enumerate(self.output_config):
+            ol_name = "output_layer_{0:d}".format(ol_num)
+            if not self.is_clone:
+                ##########################################
+                # Initialize a layer with new parameters #
+                ##########################################
+                new_layer = HiddenLayer(rng=rng,
+                        layer_description=ol_desc,
+                        name=ol_name, W_scale=self.init_scale)
                 self.output_layers.append(new_layer)
                 self.shared_param_dicts['output'].append(
                         new_layer.shared_param_dicts)
@@ -180,12 +124,11 @@ class HydraNet(object):
                 # Initialize a layer with some shared parameters #
                 ##################################################
                 init_params = self.shared_param_dicts['output'][ol_num]
-                new_layer = HiddenLayer(rng=rng, input=ol_input,
-                        activation=self.activation, pool_size=pool_size,
-                        in_dim=in_dim, out_dim=out_dim,
+                new_layer = HiddenLayer(rng=rng,
+                        layer_description=ol_desc,
                         W=init_params['W'], b=init_params['b'],
                         b_in=init_params['b_in'], s_in=init_params['s_in'],
-                        name=ol_name, W_scale=i_scale)
+                        name=ol_name, W_scale=self.init_scale)
                 self.output_layers.append(new_layer)
 
         # mash all the parameters together, into a list.
@@ -194,36 +137,33 @@ class HydraNet(object):
             self.mlp_params.extend(layer.params)
         for layer in self.output_layers:
             self.mlp_params.extend(layer.params)
-
-        # create a symbolic handle for the outputs of this net
-        self.outputs = self.apply(Xd)
         return
 
-    def apply(self, X):
+    def apply(self, X, use_drop=False):
         """
         Pass input X through this HydraNet and get the resulting outputs.
         """
         # pass activations through the shared layers
         shared_acts = [X]
         for layer in self.shared_layers:
-            layer_acts, _ = layer.apply(shared_acts[-1], use_drop=False)
+            layer_acts, _ = layer.apply(shared_acts[-1], use_drop=use_drop)
             shared_acts.append(layer_acts)
         shared_output = shared_acts[-1]
         # compute outputs of the output layers
         outputs = []
         for layer in self.output_layers:
-            _, layer_acts = layer.apply(shared_output, use_drop=False)
+            _, layer_acts = layer.apply(shared_output, use_drop=use_drop)
             outputs.append(layer_acts)
         return outputs
 
-    def apply_shared(self, X):
+    def apply_shared(self, X, use_drop=False):
         """
         Pass input X through this HydraNet's shared layers.
         """
         # pass activations through the shared layers
         shared_acts = [X]
         for layer in self.shared_layers:
-            layer_acts, _ = layer.apply(shared_acts[-1])
+            layer_acts, _ = layer.apply(shared_acts[-1], use_drop=use_drop)
             shared_acts.append(layer_acts)
         shared_output = shared_acts[-1]
         return shared_output
