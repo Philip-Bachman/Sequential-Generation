@@ -58,23 +58,23 @@ def test_two_stage_model1():
     ###############
     params = {}
     shared_config = \
-    [ {'layer_type': fc,
+    [ {'layer_type': 'fc',
        'in_chans': z_dim,
        'out_chans': 100,
        'activation': tanh_actfun,
        'apply_bn': True}, \
-      {'layer_type': fc,
+      {'layer_type': 'fc',
        'in_chans': 100,
        'out_chans': 100,
        'activation': tanh_actfun,
        'apply_bn': True} ]
     output_config = \
-    [ {'layer_type': fc,
+    [ {'layer_type': 'fc',
        'in_chans': 100,
        'out_chans': h_dim,
        'activation': tanh_actfun,
        'apply_bn': True}, \
-      {'layer_type': fc,
+      {'layer_type': 'fc',
        'in_chans': 100,
        'out_chans': h_dim,
        'activation': tanh_actfun,
@@ -91,23 +91,23 @@ def test_two_stage_model1():
     ###############
     params = {}
     shared_config = \
-    [ {'layer_type': fc,
+    [ {'layer_type': 'fc',
        'in_chans': h_dim,
        'out_chans': 200,
        'activation': tanh_actfun,
        'apply_bn': True}, \
-      {'layer_type': fc,
+      {'layer_type': 'fc',
        'in_chans': 200,
        'out_chans': 200,
        'activation': tanh_actfun,
        'apply_bn': True} ]
     output_config = \
-    [ {'layer_type': fc,
+    [ {'layer_type': 'fc',
        'in_chans': 200,
        'out_chans': x_dim,
        'activation': tanh_actfun,
        'apply_bn': True}, \
-      {'layer_type': fc,
+      {'layer_type': 'fc',
        'in_chans': 200,
        'out_chans': x_dim,
        'activation': tanh_actfun,
@@ -124,23 +124,23 @@ def test_two_stage_model1():
     ###############
     params = {}
     shared_config = \
-    [ {'layer_type': fc,
+    [ {'layer_type': 'fc',
        'in_chans': x_dim,
        'out_chans': 200,
        'activation': tanh_actfun,
        'apply_bn': True}, \
-      {'layer_type': fc,
+      {'layer_type': 'fc',
        'in_chans': 200,
        'out_chans': 200,
        'activation': tanh_actfun,
        'apply_bn': True} ]
     output_config = \
-    [ {'layer_type': fc,
+    [ {'layer_type': 'fc',
        'in_chans': 200,
        'out_chans': z_dim,
        'activation': tanh_actfun,
        'apply_bn': True}, \
-      {'layer_type': fc,
+      {'layer_type': 'fc',
        'in_chans': 200,
        'out_chans': z_dim,
        'activation': tanh_actfun,
@@ -158,23 +158,23 @@ def test_two_stage_model1():
     params = {}
     params = {}
     shared_config = \
-    [ {'layer_type': fc,
+    [ {'layer_type': 'fc',
        'in_chans': (h_dim + x_dim),
        'out_chans': 200,
        'activation': tanh_actfun,
        'apply_bn': True}, \
-      {'layer_type': fc,
+      {'layer_type': 'fc',
        'in_chans': 200,
        'out_chans': 200,
        'activation': tanh_actfun,
        'apply_bn': True} ]
     output_config = \
-    [ {'layer_type': fc,
+    [ {'layer_type': 'fc',
        'in_chans': 200,
        'out_chans': h_dim,
        'activation': tanh_actfun,
        'apply_bn': True}, \
-      {'layer_type': fc,
+      {'layer_type': 'fc',
        'in_chans': 200,
        'out_chans': h_dim,
        'activation': tanh_actfun,
