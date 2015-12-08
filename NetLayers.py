@@ -273,13 +273,16 @@ class HiddenLayer(object):
         self.activation = layer_description['activation']
         self.filt_dim = layer_description.get('filt_dim', None)
         self.conv_stride = layer_description.get('conv_stride', None)
-        self.apply_bn = layer_descriptions.get('apply_bn', False)
-        self.drop_rate = layer_descriptions.get('drop_rate', 0.0)
+        self.apply_bn = layer_description.get('apply_bn', False)
+        self.drop_rate = layer_description.get('drop_rate', 0.0)
         self.shape_func_in = layer_description.get('shape_func_in', None)
         self.shape_func_out = layer_description.get('shape_func_out', None)
 
-        # Setup a shared random generator for this layer
+        # setup additional params
         self.rng = RandStream(rng.randint(1000000))
+        self.W_scale = W_scale
+        self.name = name
+
 
         if self.layer_type == 'fc':
             self.W, self.b, self.b_in, self.s_in = \
@@ -307,26 +310,26 @@ class HiddenLayer(object):
         if W is None:
             # Generate initial filters using orthogonal random trick
             W_shape = (self.in_chans, self.out_chans)
-            if W_scale == 'xg':
+            if self.W_scale == 'xg':
                 W_init = glorot_matrix(W_shape)
             else:
-                #W_init = (W_scale * (1.0 / np.sqrt(self.in_dim))) * \
+                #W_init = (self.W_scale * (1.0 / np.sqrt(self.in_dim))) * \
                 #          npr.normal(0.0, 1.0, W_shape)
-                W_init = ortho_matrix(shape=W_shape, gain=W_scale)
+                W_init = ortho_matrix(shape=W_shape, gain=self.W_scale)
             W_init = W_init.astype(theano.config.floatX)
-            W = theano.shared(value=W_init, name="{0:s}_W".format(name))
+            W = theano.shared(value=W_init, name="{0:s}_W".format(self.name))
         if b is None:
             b_init = np.zeros((self.out_chans,), dtype=theano.config.floatX)
-            b = theano.shared(value=b_init, name="{0:s}_b".format(name))
+            b = theano.shared(value=b_init, name="{0:s}_b".format(self.name))
         # setup scale and bias params for the input
         if b_in is None:
             # batch normalization reshifts are initialized to zero
             ary = np.zeros((self.out_chans,), dtype=theano.config.floatX)
-            b_in = theano.shared(value=ary, name="{0:s}_b_in".format(name))
+            b_in = theano.shared(value=ary, name="{0:s}_b_in".format(self.name))
         if s_in is None:
             # batch normalization rescales are initialized to zero
             ary = np.zeros((self.out_chans,), dtype=theano.config.floatX)
-            s_in = theano.shared(value=ary, name="{0:s}_s_in".format(name))
+            s_in = theano.shared(value=ary, name="{0:s}_s_in".format(self.name))
         return W, b, b_in, s_in
 
     def _init_conv_params(self, W=None, b=None, b_in=None, s_in=None):
@@ -338,26 +341,26 @@ class HiddenLayer(object):
         if W is None:
             # Generate initial filters using orthogonal random trick
             W_shape = (self.in_chans, self.out_chans)
-            if W_scale == 'xg':
+            if self.W_scale == 'xg':
                 W_init = glorot_matrix(W_shape)
             else:
-                #W_init = (W_scale * (1.0 / np.sqrt(self.in_dim))) * \
+                #W_init = (self.W_scale * (1.0 / np.sqrt(self.in_dim))) * \
                 #          npr.normal(0.0, 1.0, W_shape)
-                W_init = ortho_matrix(shape=W_shape, gain=W_scale)
+                W_init = ortho_matrix(shape=W_shape, gain=self.W_scale)
             W_init = W_init.astype(theano.config.floatX)
-            W = theano.shared(value=W_init, name="{0:s}_W".format(name))
+            W = theano.shared(value=W_init, name="{0:s}_W".format(self.name))
         if b is None:
             b_init = np.zeros((self.out_chans,), dtype=theano.config.floatX)
-            b = theano.shared(value=b_init, name="{0:s}_b".format(name))
+            b = theano.shared(value=b_init, name="{0:s}_b".format(self.name))
         # setup scale and bias params for the input
         if b_in is None:
             # batch normalization reshifts are initialized to zero
             ary = np.zeros((self.out_chans,), dtype=theano.config.floatX)
-            b_in = theano.shared(value=ary, name="{0:s}_b_in".format(name))
+            b_in = theano.shared(value=ary, name="{0:s}_b_in".format(self.name))
         if s_in is None:
             # batch normalization rescales are initialized to zero
             ary = np.zeros((self.out_chans,), dtype=theano.config.floatX)
-            s_in = theano.shared(value=ary, name="{0:s}_s_in".format(name))
+            s_in = theano.shared(value=ary, name="{0:s}_s_in".format(self.name))
         return W, b, b_in, s_in
 
     def apply(self, input, use_drop=False):
