@@ -263,7 +263,7 @@ class HiddenLayer(object):
         assert 'layer_type' in layer_description, \
                 "layer_description must provide layer_type"
         assert ((layer_description['layer_type'] == 'fc') or \
-                (layer_description['layer_type'] == 'conv')) \
+                (layer_description['layer_type'] == 'conv')), \
                 "layer_type must be fc or conv"
 
         self.layer_description = layer_description
