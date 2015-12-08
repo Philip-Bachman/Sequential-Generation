@@ -79,7 +79,7 @@ class HydraNet(object):
         #########################################
         # Initialize the shared part of network #
         #########################################
-        for sl_num, sl_desc in self.shared_config:
+        for sl_num, sl_desc in enumerate(self.shared_config):
             l_name = "shared_layer_{0:d}".format(sl_num)
             if not self.is_clone:
                 ##########################################
