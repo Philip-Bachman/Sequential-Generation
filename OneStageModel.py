@@ -14,7 +14,7 @@ import theano.tensor as T
 from theano.sandbox.cuda.rng_curand import CURAND_RandomStreams as RandStream
 
 # phil's sweetness
-from HelperFuncs import apply_mask, to_fX
+from HelperFuncs import apply_mask, to_fX, reparametrize
 from DKCode import get_adam_updates, get_adadelta_updates
 from LogPDFs import log_prob_bernoulli, log_prob_gaussian2, gaussian_kld
 
@@ -29,7 +29,7 @@ class OneStageModel(object):
 
     Parameters:
         rng: numpy.random.RandomState (for reproducibility)
-        x_in: symbolic "data" input to this VAE
+        x_in: symbolic input to this VAE
         p_x_given_z: HydraNet for x given z (2 outputs)
         q_z_given_x: HydraNet for z given x (2 outputs)
         x_dim: dimension of the "observation" variables
@@ -75,8 +75,8 @@ class OneStageModel(object):
         assert((self.x_type == 'bernoulli') or (self.x_type == 'gaussian'))
 
         # record the dimensions of various spaces relevant to this model
-        self.z_dim = z_dim
         self.x_dim = x_dim
+        self.z_dim = z_dim
 
         # set parameters for the isotropic Gaussian prior over z
         self.prior_mean = 0.0
@@ -93,8 +93,7 @@ class OneStageModel(object):
         self.q_z_given_x = q_z_given_x
         self.z_mean, self.z_logvar = self.q_z_given_x.apply(self.x_in)
         # reparametrize ZMUV Gaussian samples to get latent samples...
-        zmuv_gauss = self.rng.normal(size=self.z_mean.shape)
-        self.z = self.z_mean + (T.exp(0.5*self.z_logvar) * zmuv_gauss
+        self.z = reparametrize(self.z_mean, self.z_logvar, self.rng)
 
         # generator model for observations given latent variables
         self.p_x_given_z = p_x_given_z
@@ -127,10 +126,8 @@ class OneStageModel(object):
         self.lam_nll = theano.shared(value=zero_ary, name='osm_lam_nll')
         self.set_lam_nll(lam_nll=1.0)
         # init shared var for weighting controlling KL(q(z|x) || p(z))
-        self.lam_kld_1 = theano.shared(value=zero_ary, name='osm_lam_kld_1')
-        self.lam_kld_2 = theano.shared(value=zero_ary, name='osm_lam_kld_2')
-        self.kld_z_mean = theano.shared(value=zero_ary, name='osm_kld_z_mean')
-        self.set_lam_kld(lam_kld_1=1.0, lam_kld_2=0.0)
+        self.lam_kld = theano.shared(value=zero_ary, name='osm_lam_kld')
+        self.set_lam_kld(lam_kld=1.0)
         # init shared var for controlling l2 regularization on params
         self.lam_l2w = theano.shared(value=zero_ary, name='osm_lam_l2w')
         self.set_lam_l2w(1e-4)
@@ -147,22 +144,17 @@ class OneStageModel(object):
         self.nll_costs = self.lam_nll[0] * self._construct_nll_costs()
         self.nll_cost = T.mean(self.nll_costs)
         # second, do KLd
-        self.kld_costs_1, self.kld_costs_2 = self._construct_kld_costs()
-        self.kld_costs = (self.lam_kld_1[0] * self.kld_costs_1) + \
-                         (self.lam_kld_2[0] * self.kld_costs_2)
+        self.kld_costs = self.lam_kld[0] * self._construct_kld_costs()
         self.kld_cost = T.mean(self.kld_costs)
-        self.kld_z_mean_new = (0.95 * self.kld_z_mean) + \
-                              (0.05 * T.mean(self.kld_costs_1))
         # third, do regularization
         self.reg_cost = self.lam_l2w[0] * self._construct_reg_costs()
         # finally, combine them for the joint cost.
-        self.joint_cost = self.nll_cost + self.kld_cost + self.reg_cost
+        self.joint_cost = self.nll_cost + self.kld_cost
 
         # Get the gradient of the joint cost for all optimizable parameters
         print("Computing gradients of self.joint_cost...")
         self.joint_grads = OrderedDict()
-        grad_list = T.grad(self.joint_cost, self.joint_params, \
-                           consider_constant=[self.kld_z_mean])
+        grad_list = T.grad(self.joint_cost, self.joint_params)
         for i, p in enumerate(self.joint_params):
             self.joint_grads[p] = grad_list[i]
 
@@ -171,7 +163,6 @@ class OneStageModel(object):
                 grads=self.joint_grads, alpha=self.lr, \
                 beta1=self.mom_1, beta2=self.mom_2, \
                 mom2_init=1e-3, smoothing=1e-4, max_grad_norm=10.0)
-        self.joint_updates[self.kld_z_mean] = self.kld_z_mean_new
 
         # Construct a function for jointly training the generator/inferencer
         print("Compiling self.train_joint...")
@@ -214,15 +205,13 @@ class OneStageModel(object):
         self.lam_nll.set_value(to_fX(new_lam))
         return
 
-    def set_lam_kld(self, lam_kld_1=1.0, lam_kld_2=0.0):
+    def set_lam_kld(self, lam_kld=1.0):
         """
         Set the relative weight of prior KL-divergence vs. data likelihood.
         """
         zero_ary = np.zeros((1,))
-        new_lam = zero_ary + lam_kld_1
-        self.lam_kld_1.set_value(to_fX(new_lam))
-        new_lam = zero_ary + lam_kld_2
-        self.lam_kld_2.set_value(to_fX(new_lam))
+        new_lam = zero_ary + lam_kld
+        self.lam_kld.set_value(to_fX(new_lam))
         return
 
     def set_lam_l2w(self, lam_l2w=1e-3):
@@ -232,17 +221,6 @@ class OneStageModel(object):
         zero_ary = np.zeros((1,))
         new_lam = zero_ary + lam_l2w
         self.lam_l2w.set_value(to_fX(new_lam))
-        return
-
-    def set_kld_z_mean(self, x):
-        """
-        Compute mean of KL(q(z|x) || p(z)) for the observations in x, and
-        then use it to reset self.kld_z_mean.
-        """
-        nll, kld = self.compute_fe_terms(x, 10)
-        old_mean = self.kld_z_mean.get_value(borrow=False)
-        new_mean = (0.0 * old_mean) + np.mean(kld)
-        self.kld_z_mean.set_value(to_fX(new_mean))
         return
 
     def _construct_nll_costs(self):
@@ -265,10 +243,8 @@ class OneStageModel(object):
         # independently for each input and each latent variable dimension
         kld_z = gaussian_kld(self.z_mean, self.z_logvar, \
                              self.prior_mean, self.prior_logvar)
-        # compute the batch-wise L1 and L2 penalties on per-dim KLds
-        kld_l1_costs = T.sum(kld_z, axis=1, keepdims=True)
-        kld_l2_costs = (kld_l1_costs - self.kld_z_mean[0])**2.0
-        return [kld_l1_costs, kld_l2_costs]
+        kld_costs = T.sum(kld_z, axis=1, keepdims=True)
+        return kld_costs
 
     def _construct_reg_costs(self):
         """
