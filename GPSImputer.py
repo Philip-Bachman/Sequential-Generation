@@ -35,13 +35,10 @@ class GPSImputer(object):
         x_mask: mask for state dims to keep fixed during imputation
         p_zi_given_xi: HydraNet for stochastic part of step (2 outputs)
         p_sip1_given_zi: HydraNet for deterministic part of step (3 outputs)
-        p_x_given_si: HydraNet for transform from s-space to x-space (2 outputs)
         q_zi_given_xi: HydraNet for the guide policy (2 outputs)
         params: REQUIRED PARAMS SHOWN BELOW
                 x_dim: dimension of inputs to reconstruct
                 z_dim: dimension of latent space for policy wobble
-                s_dim: dimension of space for hypothesis construction
-                use_p_x_given_si: boolean for whether to use ----
                 imp_steps: number of reconstruction steps to perform
                 step_type: either "add", "jump", "lstm", or "layer"
                 x_type: can be "bernoulli" or "gaussian"
@@ -51,7 +48,6 @@ class GPSImputer(object):
             x_in=None, x_mask=None, x_out=None, \
             p_zi_given_xi=None, \
             p_sip1_given_zi=None, \
-            p_x_given_si=None, \
             q_zi_given_xi=None, \
             params=None, \
             shared_param_dicts=None):
@@ -63,15 +59,9 @@ class GPSImputer(object):
         self.x_dim = self.params['x_dim']
         self.z_dim = self.params['z_dim']
         self.s_dim = self.params['s_dim']
-        self.use_p_x_given_si = self.params['use_p_x_given_si']
         self.imp_steps = self.params['imp_steps']
         self.step_type = self.params['step_type']
         self.x_type = self.params['x_type']
-        if self.use_p_x_given_si:
-            print("Constructing hypotheses via p_x_given_si...")
-        else:
-            print("Constructing hypotheses directly in x-space...")
-            assert(self.s_dim == self.x_dim)
         assert((self.x_type == 'bernoulli') or (self.x_type == 'gaussian'))
         if 'obs_transform' in self.params:
             assert((self.params['obs_transform'] == 'sigmoid') or \
@@ -89,7 +79,6 @@ class GPSImputer(object):
         # grab handles to the relevant InfNets
         self.p_zi_given_xi = p_zi_given_xi
         self.p_sip1_given_zi = p_sip1_given_zi
-        self.p_x_given_si = p_x_given_si
         self.q_zi_given_xi = q_zi_given_xi
 
         # record the symbolic variables that will provide inputs to the
@@ -131,7 +120,7 @@ class GPSImputer(object):
         ##################################################
         self.ones_mask = T.ones_like(self.x_mask)
         def imp_step_func(zi_zmuv, si):
-            si_as_x = self._from_si_to_x(si)
+            si_as_x = si
             xi_unmasked = self.x_out
             xi_masked = (self.x_mask * xi_unmasked) + \
                         ((1.0 - self.x_mask) * si_as_x)
@@ -194,7 +183,7 @@ class GPSImputer(object):
 
         # get the initial imputation state
         self.x0 = (self.x_mask * self.x_in) + \
-                  ((1.0 - self.x_mask) * self._from_si_to_x(self.s0_full))
+                  ((1.0 - self.x_mask) * self.s0_full)
 
         ######################################################################
         # ALL SYMBOLIC VARS NEEDED FOR THE OBJECTIVE SHOULD NOW BE AVAILABLE #
@@ -224,7 +213,6 @@ class GPSImputer(object):
         self.joint_params = [self.s0, self.obs_logvar]
         self.joint_params.extend(self.p_zi_given_xi.mlp_params)
         self.joint_params.extend(self.p_sip1_given_zi.mlp_params)
-        self.joint_params.extend(self.p_x_given_si.mlp_params)
         self.joint_params.extend(self.q_zi_given_xi.mlp_params)
 
         #################################
@@ -282,17 +270,6 @@ class GPSImputer(object):
         # make easy access points for some interesting parameters
         #self.gen_inf_weights = self.p_zi_given_xi.shared_layers[0].W
         return
-
-    def _from_si_to_x(self, si):
-        """
-        Convert the given si from s-space to x-space.
-        """
-        if self.use_p_x_given_si:
-            x_pre_trans, _ = self.p_x_given_si.apply(si)
-        else:
-            x_pre_trans = si
-        x_post_trans = self.obs_transform(x_pre_trans)
-        return x_post_trans
 
     def set_sgd_params(self, lr=0.01, mom_1=0.9, mom_2=0.999):
         """
@@ -368,7 +345,7 @@ class GPSImputer(object):
         Construct the negative log-likelihood part of free energy.
         """
         # average log-likelihood over the refinement sequence
-        xh = self._from_si_to_x( si )
+        xh = si
         xm_inv = 1.0 - xm # we will measure nll only where xm_inv is 1
         if self.x_type == 'bernoulli':
             ll_costs = log_prob_bernoulli(xo, xh, mask=xm_inv)
@@ -554,7 +531,7 @@ class GPSImputer(object):
         xo = T.matrix()
         xm = T.matrix()
         zizmuv = self._construct_zi_zmuv(xi, 1)
-        oputs = [self.x0] + [self._from_si_to_x(self.si[i]) for i in range(self.imp_steps)]
+        oputs = [self.x0] + [self.si[i] for i in range(self.imp_steps)]
         sample_func = theano.function(inputs=[xi, xo, xm], outputs=oputs, \
                 givens={self.x_in: xi, \
                         self.x_out: xo, \
@@ -607,7 +584,6 @@ class GPSImputer(object):
         child_model_dicts = {}
         child_model_dicts['p_zi_given_xi'] = self.p_zi_given_xi.save_to_dict()
         child_model_dicts['p_sip1_given_zi'] = self.p_sip1_given_zi.save_to_dict()
-        child_model_dicts['p_x_given_si'] = self.p_x_given_si.save_to_dict()
         child_model_dicts['q_zi_given_xi'] = self.q_zi_given_xi.save_to_dict()
         # dump the numpy child model dicts to the pickle file
         cPickle.dump(child_model_dicts, f_handle, protocol=-1)
@@ -636,8 +612,6 @@ def load_gpsimputer_from_file(f_name=None, rng=None):
             child_model_dicts['p_zi_given_xi'], rng=rng, Xd=xd)
     p_sip1_given_zi = load_hydranet_from_dict( \
             child_model_dicts['p_sip1_given_zi'], rng=rng, Xd=xd)
-    p_x_given_si = load_hydranet_from_dict( \
-            child_model_dicts['p_x_given_si'], rng=rng, Xd=xd)
     q_zi_given_xi = load_hydranet_from_dict( \
             child_model_dicts['q_zi_given_xi'], rng=rng, Xd=xd)
     # now, create a new GPSImputer based on the loaded data
@@ -648,7 +622,6 @@ def load_gpsimputer_from_file(f_name=None, rng=None):
                            x_in=xi, x_mask=xm, x_out=xo, \
                            p_zi_given_xi=p_zi_given_xi, \
                            p_sip1_given_zi=p_sip1_given_zi, \
-                           p_x_given_si=p_x_given_si, \
                            q_zi_given_xi=q_zi_given_xi, \
                            params=self_dot_params, \
                            shared_param_dicts=self_dot_shared_param_dicts)
