@@ -153,12 +153,11 @@ def test_one_stage_model():
         # set sgd and objective function hyperparams for this update
         OSM.set_sgd_params(lr=scale*learn_rate, \
                            mom_1=(scale*momentum), mom_2=0.98)
-        OSM.set_train_switch(1.0)
         OSM.set_lam_nll(lam_nll=1.0)
         OSM.set_lam_kld(lam_kld=1.0)
         OSM.set_lam_l2w(1e-5)
         # perform a minibatch update and record the cost for this batch
-        result = OSM.train_joint(Xb, Xb, batch_reps)
+        result = OSM.train_joint(Xb, batch_reps)
         costs = [(costs[j] + result[j]) for j in range(len(result))]
         if ((i % 500) == 0):
             costs = [(v / 500.0) for v in costs]
@@ -180,7 +179,7 @@ def test_one_stage_model():
             utils.visualize_samples(model_samps, file_name, num_rows=15)
             # compute free energy estimate for validation samples
             Xva = row_shuffle(Xva)
-            fe_terms = OSM.compute_fe_terms(Xva[0:5000], Xva[0:5000], 20)
+            fe_terms = OSM.compute_fe_terms(Xva[0:5000], 20)
             fe_mean = np.mean(fe_terms[0]) + np.mean(fe_terms[1])
             out_str = "    nll_bound : {0:.4f}".format(fe_mean)
             print(out_str)

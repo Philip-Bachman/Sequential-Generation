@@ -150,7 +150,7 @@ class OneStageModel(object):
         # third, do regularization
         self.reg_cost = self.lam_l2w[0] * self._construct_reg_costs()
         # finally, combine them for the joint cost.
-        self.joint_cost = self.nll_cost + self.kld_cost
+        self.joint_cost = self.nll_cost + self.kld_cost + self.reg_cost
 
         # Get the gradient of the joint cost for all optimizable parameters
         print("Computing gradients of self.joint_cost...")
