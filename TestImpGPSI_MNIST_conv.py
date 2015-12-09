@@ -111,7 +111,7 @@ def test_mnist(step_type='add',
        'apply_bn': False} ]
     params['shared_config'] = shared_config
     params['output_config'] = output_config
-    params['init_scale'] = 1.0
+    params['init_scale'] = 0.5
     params['build_theano_funcs'] = False
     p_zi_given_xi = HydraNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
@@ -166,7 +166,7 @@ def test_mnist(step_type='add',
        'shape_func_out': lambda x: T.flatten(x, 2)} ]
     params['shared_config'] = shared_config
     params['output_config'] = output_config
-    params['init_scale'] = 1.0
+    params['init_scale'] = 0.5
     params['build_theano_funcs'] = False
     p_sip1_given_zi = HydraNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
@@ -211,7 +211,7 @@ def test_mnist(step_type='add',
        'apply_bn': False} ]
     params['shared_config'] = shared_config
     params['output_config'] = output_config
-    params['init_scale'] = 1.0
+    params['init_scale'] = 0.5
     params['build_theano_funcs'] = False
     q_zi_given_xi = HydraNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
@@ -298,7 +298,7 @@ def test_mnist(step_type='add',
             out_file.write(joint_str+"\n")
             out_file.flush()
         if ((i % 2000) == 0):
-            GPSI.save_to_file("{}_PARAMS.pkl".format(result_tag))
+            #GPSI.save_to_file("{}_PARAMS.pkl".format(result_tag))
             # Get some validation samples for evaluating model performance
             xb = to_fX( Xva[0:100] )
             xi, xo, xm = construct_masked_data(xb, drop_prob=drop_prob, \
@@ -465,5 +465,5 @@ if __name__=="__main__":
     # test_mnist_results(step_type='lstm', imp_steps=1, occ_dim=0, drop_prob=0.9)
     # test_mnist_results(step_type='lstm', imp_steps=2, occ_dim=0, drop_prob=0.9)
     # test_mnist_results(step_type='lstm', imp_steps=5, occ_dim=0, drop_prob=0.9)
-    test_mnist_results(step_type='lstm', imp_steps=10, occ_dim=0, drop_prob=0.9)
+    # test_mnist_results(step_type='lstm', imp_steps=10, occ_dim=0, drop_prob=0.9)
     # test_mnist_results(step_type='lstm', imp_steps=15, occ_dim=0, drop_prob=0.9)

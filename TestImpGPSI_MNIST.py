@@ -63,8 +63,6 @@ def test_mnist(step_type='add',
     # Setup some parameters for the Iterative Refinement Model #
     ############################################################
     x_dim = Xtr.shape[1]
-    s_dim = x_dim
-    #s_dim = 300
     z_dim = 100
     init_scale = 1.0
 
@@ -76,14 +74,28 @@ def test_mnist(step_type='add',
     # p_zi_given_xi #
     #################
     params = {}
-    shared_config = [x_dim, 800, 800]
-    shared_bn = [True, True]
-    output_config = [z_dim, z_dim]
+    shared_config = \
+    [ {'layer_type': 'fc',
+       'in_chans': (x_dim+x_dim),
+       'out_chans': 800,
+       'activation': relu_actfun,
+       'apply_bn': True}, \
+      {'layer_type': 'fc',
+       'in_chans': 800,
+       'out_chans': 800,
+       'activation': relu_actfun,
+       'apply_bn': True} ]
+    out_layer = {
+        'layer_type': 'fc',
+        'in_chans': 800,
+        'out_chans': z_dim,
+        'activation': relu_actfun,
+        'apply_bn': False
+    }
+    output_config = [out_layer, out_layer]
     params['shared_config'] = shared_config
-    params['shared_bn'] = shared_bn
     params['output_config'] = output_config
-    params['activation'] = relu_actfun
-    params['init_scale'] = init_scale
+    params['init_scale'] = 1.0
     params['build_theano_funcs'] = False
     p_zi_given_xi = HydraNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
@@ -92,48 +104,63 @@ def test_mnist(step_type='add',
     # p_sip1_given_zi #
     ###################
     params = {}
-    shared_config = [z_dim, 800, 800]
-    shared_bn = [True, True]
-    output_config = [s_dim, s_dim, s_dim]
+    shared_config = \
+    [ {'layer_type': 'fc',
+       'in_chans': z_dim,
+       'out_chans': 800,
+       'activation': relu_actfun,
+       'apply_bn': True}, \
+      {'layer_type': 'fc',
+       'in_chans': 800,
+       'out_chans': 800,
+       'activation': relu_actfun,
+       'apply_bn': True} ]
+    out_layer = {
+        'layer_type': 'fc',
+        'in_chans': 800,
+        'out_chans': x_dim,
+        'activation': relu_actfun,
+        'apply_bn': False
+    }
+    output_config = [out_layer, out_layer, out_layer]
     params['shared_config'] = shared_config
-    params['shared_bn'] = shared_bn
     params['output_config'] = output_config
-    params['activation'] = relu_actfun
-    params['init_scale'] = init_scale
+    params['init_scale'] = 1.0
     params['build_theano_funcs'] = False
     p_sip1_given_zi = HydraNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
-    p_sip1_given_zi.init_biases(0.2)
-    ################
-    # p_x_given_si #
-    ################
-    params = {}
-    shared_config = [s_dim]
-    output_config = [x_dim, x_dim]
-    params['shared_config'] = shared_config
-    params['output_config'] = output_config
-    params['activation'] = relu_actfun
-    params['init_scale'] = init_scale
-    params['build_theano_funcs'] = False
-    p_x_given_si = HydraNet(rng=rng, Xd=x_in_sym, \
-            params=params, shared_param_dicts=None)
-    p_x_given_si.init_biases(0.2)
+    p_sip1_given_zi.init_biases(0.0)
+
     #################
     # q_zi_given_xi #
     #################
     params = {}
-    shared_config = [(x_dim + x_dim), 800, 800]
-    shared_bn = [True, True]
-    output_config = [z_dim, z_dim]
+    shared_config = \
+    [ {'layer_type': 'fc',
+       'in_chans': (x_dim+x_dim),
+       'out_chans': 800,
+       'activation': relu_actfun,
+       'apply_bn': True}, \
+      {'layer_type': 'fc',
+       'in_chans': 800,
+       'out_chans': 800,
+       'activation': relu_actfun,
+       'apply_bn': True} ]
+    out_layer = {
+        'layer_type': 'fc',
+        'in_chans': 800,
+        'out_chans': z_dim,
+        'activation': relu_actfun,
+        'apply_bn': False
+    }
+    output_config = [out_layer, out_layer]
     params['shared_config'] = shared_config
-    params['shared_bn'] = shared_bn
     params['output_config'] = output_config
-    params['activation'] = relu_actfun
-    params['init_scale'] = init_scale
+    params['init_scale'] = 1.0
     params['build_theano_funcs'] = False
     q_zi_given_xi = HydraNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
-    q_zi_given_xi.init_biases(0.2)
+    q_zi_given_xi.init_biases(0.0)
 
     ###########################################################
     # Define parameters for the GPSImputer, and initialize it #
@@ -142,9 +169,7 @@ def test_mnist(step_type='add',
     gpsi_params = {}
     gpsi_params['x_dim'] = x_dim
     gpsi_params['z_dim'] = z_dim
-    gpsi_params['s_dim'] = s_dim
     # switch between direct construction and construction via p_x_given_si
-    gpsi_params['use_p_x_given_si'] = False
     gpsi_params['imp_steps'] = imp_steps
     gpsi_params['step_type'] = step_type
     gpsi_params['x_type'] = 'bernoulli'
@@ -152,7 +177,6 @@ def test_mnist(step_type='add',
     GPSI = GPSImputer(rng=rng,
             x_in=x_in_sym, x_out=x_out_sym, x_mask=x_mask_sym,
             p_zi_given_xi=p_zi_given_xi,
-            p_sip1_given_zi=p_sip1_given_zi,
             p_x_given_si=p_x_given_si,
             q_zi_given_xi=q_zi_given_xi,
             params=gpsi_params,
