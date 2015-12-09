@@ -93,7 +93,7 @@ class OneStageModel(object):
         self.q_z_given_x = q_z_given_x
         self.z_mean, self.z_logvar = self.q_z_given_x.apply(self.x_in)
         # reparametrize ZMUV Gaussian samples to get latent samples...
-        self.z = reparametrize(self.z_mean, self.z_logvar, self.rng)
+        self.z = reparametrize(self.z_mean, self.z_logvar, rng=self.rng)
 
         # generator model for observations given latent variables
         self.p_x_given_z = p_x_given_z
@@ -106,7 +106,8 @@ class OneStageModel(object):
             self.xg = self.xt_transform(self.xt)
 
         # self.output_logvar modifies the output distribution
-        self.output_logvar = self.p_x_given_z.output_layers[0].b
+        zero_ary = to_fX( np.zeros((1,)) )
+        self.output_logvar = theano.shared(value=zero_ary, name='osm_output_logvar')
         self.bounded_logvar = self.logvar_bound * \
                     T.tanh(self.output_logvar[0] / self.logvar_bound)
 
@@ -133,7 +134,7 @@ class OneStageModel(object):
         self.set_lam_l2w(1e-4)
 
         # grab a list of all the parameters to optimize
-        self.joint_params = []
+        self.joint_params = [self.output_logvar]
         self.joint_params.extend(self.q_z_given_x.mlp_params)
         self.joint_params.extend(self.p_x_given_z.mlp_params)
 

@@ -125,11 +125,11 @@ class TwoStageModel1(object):
         print("Building TSM...")
         # samples of "hidden" latent state (from both p and q)
         z_q_mean, z_q_logvar = self.q_z_given_x.apply(self.x_in)
-        z_q = reparametrize(z_q_mean, z_q_logvar, self.rng)
+        z_q = reparametrize(z_q_mean, z_q_logvar, rng=self.rng)
 
         z_p_mean = self.p_z_mean.repeat(z_q.shape[0], axis=0)
         z_p_logvar = self.p_z_logvar.repeat(z_q.shape[0], axis=0)
-        z_p = reparametrize(z_p_mean, z_p_logvar, self.rng)
+        z_p = reparametrize(z_p_mean, z_p_logvar, rng=self.rng)
 
         self.z = (self.train_switch[0] * z_q) + \
                  ((1.0 - self.train_switch[0]) * z_p)
@@ -140,11 +140,11 @@ class TwoStageModel1(object):
                                       z_q_mean, z_q_logvar)
         # samples of "hidden" latent state (from both p and q)
         h_p_mean, h_p_logvar = self.p_h_given_z.apply(self.z)
-        h_p = reparametrize(h_p_mean, h_p_logvar, self.rng)
+        h_p = reparametrize(h_p_mean, h_p_logvar, rng=self.rng)
 
         h_q_mean, h_q_logvar = self.q_h_given_z_x.apply(
                 T.concatenate([h_p_mean, self.x_out], axis=1))
-        h_q = reparametrize(h_q_mean, h_q_logvar, self.rng)
+        h_q = reparametrize(h_q_mean, h_q_logvar, rng=self.rng)
 
         # compute "stochastic" and "deterministic" parts of latent state
         h_sto = (self.train_switch[0] * h_q) + \
@@ -514,20 +514,20 @@ class TwoStageModel2(object):
         print("Building TSM...")
         # samples of "hidden" latent state (from q)
         h_q_mean, h_q_logvar = self.q_h_given_x.apply(self.x_in)
-        h_q = reparametrize(h_q_mean, h_q_logvar, self.rng)
+        h_q = reparametrize(h_q_mean, h_q_logvar, rng=self.rng)
         # samples of "prior" latent state (from q)
         z_q_mean, z_q_logvar = self.q_z_given_h.apply(h_q)
-        z_q = reparametrize(z_q_mean, z_q_logvar, self.rng)
+        z_q = reparametrize(z_q_mean, z_q_logvar, rng=self.rng)
         # samples of "prior" latent state (from p)
         z_p_mean = self.p_z_mean.repeat(z_q.shape[0], axis=0)
         z_p_logvar = self.p_z_logvar.repeat(z_q.shape[0], axis=0)
-        z_p = reparametrize(z_p_mean, z_p_logvar, self.rng)
+        z_p = reparametrize(z_p_mean, z_p_logvar, rng=self.rng)
         # samples from z -- switched between q/p
         self.z = (self.train_switch[0] * z_q) + \
                  ((1.0 - self.train_switch[0]) * z_p)
         # samples of "hidden" latent state (from p)
         h_p_mean, h_p_logvar = self.p_h_given_z.apply(self.z)
-        h_p = reparametrize(h_p_mean, h_p_logvar, self.rng)
+        h_p = reparametrize(h_p_mean, h_p_logvar, rng=self.rng)
         # samples from h -- switched between q/p
         self.h = (self.train_switch[0] * h_q) + \
                  ((1.0 - self.train_switch[0]) * h_p)

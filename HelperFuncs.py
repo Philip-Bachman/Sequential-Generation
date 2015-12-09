@@ -9,11 +9,20 @@ import theano.tensor as T
 # MISCELLANEOUS HELPER FUNCTIONS #
 ##################################
 
-def reparametrize(z_mean, z_logvar, t_rng):
+def reparametrize(z_mean, z_logvar, rng=None, rvs=None):
     """
     Gaussian reparametrization helper function.
     """
-    zmuv_gauss = t_rng.normal(size=z_mean.shape, dtype=theano.config.floatX)
+    assert not ((rng is None) and (rvs is None)), \
+            "must provide either rng or rvs."
+    assert ((rng is None) or (rvs is None)), \
+            "must provide either rng or rvs."
+    if not (rng is None):
+        # generate zmuv samples from the provided rng
+        zmuv_gauss = rng.normal(size=z_mean.shape, dtype=theano.config.floatX)
+    else:
+        # use zmuv samples provided by the user
+        zmuv_gauss = rvs
     reparam_gauss = z_mean + (T.exp(0.5*z_logvar) * zmuv_gauss)
     return reparam_gauss
 
