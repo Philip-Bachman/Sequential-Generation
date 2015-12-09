@@ -120,7 +120,6 @@ def test_one_stage_model():
        'out_chans': 256,
        'activation': relu_actfun,
        'apply_bn': True} ]
-    ]
     output_config = \
     [ {'layer_type': 'fc',
        'in_chans': 256,
@@ -144,7 +143,7 @@ def test_one_stage_model():
     ##############################################################
     # Define parameters for the TwoStageModel, and initialize it #
     ##############################################################
-    print("Building the TwoStageModel...")
+    print("Building the OneStageModel...")
     osm_params = {}
     osm_params['x_type'] = x_type
     osm_params['obs_transform'] = 'sigmoid'
