@@ -47,7 +47,6 @@ def test_one_stage_model():
     x_type = 'bernoulli'
     xin_sym = T.matrix('xin_sym')
 
-
     ###############
     # p_x_given_z #
     ###############
@@ -55,25 +54,39 @@ def test_one_stage_model():
     shared_config = \
     [ {'layer_type': 'fc',
        'in_chans': z_dim,
-       'out_chans': 200,
-       'activation': tanh_actfun,
+       'out_chans': 256,
+       'activation': relu_actfun,
        'apply_bn': True}, \
       {'layer_type': 'fc',
-       'in_chans': 200,
-       'out_chans': 200,
-       'activation': tanh_actfun,
+       'in_chans': 256,
+       'out_chans': 7*7*128,
+       'activation': relu_actfun,
+       'apply_bn': True,
+       'shape_func_out': lambda x: T.reshape(x, (-1, 128, 7, 7))}, \
+      {'layer_type': 'conv',
+       'in_chans': 128, # in shape:  (batch, 128, 7, 7)
+       'out_chans': 64, # out shape: (batch, 64, 14, 14)
+       'activation': relu_actfun,
+       'filt_dim': 5,
+       'conv_stride': 'half',
        'apply_bn': True} ]
     output_config = \
-    [ {'layer_type': 'fc',
-       'in_chans': 200,
-       'out_chans': x_dim,
-       'activation': tanh_actfun,
-       'apply_bn': False}, \
-      {'layer_type': 'fc',
-       'in_chans': 200,
-       'out_chans': x_dim,
-       'activation': tanh_actfun,
-       'apply_bn': False} ]
+    [ {'layer_type': 'conv',
+       'in_chans': 64, # in shape:  (batch, 64, 14, 14)
+       'out_chans': 1, # out shape: (batch, 1, 28, 28)
+       'activation': relu_actfun,
+       'filt_dim': 5,
+       'conv_stride': 'half',
+       'apply_bn': False,
+       'shape_func_out': lambda x: T.flatten(x, 2)}, \
+      {'layer_type': 'conv',
+       'in_chans': 64,
+       'out_chans': 1,
+       'activation': relu_actfun,
+       'filt_dim': 5,
+       'conv_stride': 'half',
+       'apply_bn': False,
+       'shape_func_out': lambda x: T.flatten(x, 2)} ]
     params['shared_config'] = shared_config
     params['output_config'] = output_config
     params['init_scale'] = 1.0
@@ -86,26 +99,38 @@ def test_one_stage_model():
     ###############
     params = {}
     shared_config = \
-    [ {'layer_type': 'fc',
-       'in_chans': x_dim,
-       'out_chans': 200,
-       'activation': tanh_actfun,
-       'apply_bn': True}, \
+    [ {'layer_type': 'conv',
+       'in_chans': 1,   # in shape:  (batch, 784)
+       'out_chans': 64, # out shape: (batch, 64, 14, 14)
+       'activation': relu_actfun,
+       'filt_dim': 5,
+       'conv_stride': 'double',
+       'apply_bn': True,
+       'shape_func_in': lambda x: T.reshape(x, (-1, 1, 28, 28))}, \
+      {'layer_type': 'conv',
+       'in_chans': 64,   # in shape:  (batch, 64, 14, 14)
+       'out_chans': 128, # out shape: (batch, 128, 7, 7)
+       'activation': relu_actfun,
+       'filt_dim': 5,
+       'conv_stride': 'double',
+       'apply_bn': True,
+       'shape_func_out': lambda x: T.flatten(x, 2)}, \
       {'layer_type': 'fc',
-       'in_chans': 200,
-       'out_chans': 200,
-       'activation': tanh_actfun,
+       'in_chans': 128*7*7,
+       'out_chans': 256,
+       'activation': relu_actfun,
        'apply_bn': True} ]
+    ]
     output_config = \
     [ {'layer_type': 'fc',
-       'in_chans': 200,
+       'in_chans': 256,
        'out_chans': z_dim,
-       'activation': tanh_actfun,
+       'activation': relu_actfun,
        'apply_bn': False}, \
       {'layer_type': 'fc',
-       'in_chans': 200,
+       'in_chans': 256,
        'out_chans': z_dim,
-       'activation': tanh_actfun,
+       'activation': relu_actfun,
        'apply_bn': False} ]
     params['shared_config'] = shared_config
     params['output_config'] = output_config

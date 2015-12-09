@@ -382,7 +382,7 @@ class HiddenLayer(object):
                                        border_mode=(bm, bm))
             else:
                 assert False, "Unknown stride type!"
-            linear_output = linear_output + self.b
+            linear_output = linear_output + self.b.dimshuffle('x',0,'x','x')
         else:
             assert False, "Unknown layer type!"
         # Apply batch normalization if desired
