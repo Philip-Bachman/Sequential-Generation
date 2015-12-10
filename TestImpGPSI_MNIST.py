@@ -65,6 +65,7 @@ def test_mnist(step_type='add',
     x_dim = Xtr.shape[1]
     z_dim = 100
     init_scale = 1.0
+    use_bn = False
 
     x_in_sym = T.matrix('x_in_sym')
     x_out_sym = T.matrix('x_out_sym')
@@ -76,15 +77,15 @@ def test_mnist(step_type='add',
     params = {}
     shared_config = \
     [ {'layer_type': 'fc',
-       'in_chans': (x_dim+x_dim),
+       'in_chans': x_dim,
        'out_chans': 800,
        'activation': relu_actfun,
-       'apply_bn': True}, \
+       'apply_bn': use_bn}, \
       {'layer_type': 'fc',
        'in_chans': 800,
        'out_chans': 800,
        'activation': relu_actfun,
-       'apply_bn': True} ]
+       'apply_bn': use_bn} ]
     out_layer = {
         'layer_type': 'fc',
         'in_chans': 800,
@@ -109,12 +110,12 @@ def test_mnist(step_type='add',
        'in_chans': z_dim,
        'out_chans': 800,
        'activation': relu_actfun,
-       'apply_bn': True}, \
+       'apply_bn': use_bn}, \
       {'layer_type': 'fc',
        'in_chans': 800,
        'out_chans': 800,
        'activation': relu_actfun,
-       'apply_bn': True} ]
+       'apply_bn': use_bn} ]
     out_layer = {
         'layer_type': 'fc',
         'in_chans': 800,
@@ -140,12 +141,12 @@ def test_mnist(step_type='add',
        'in_chans': (x_dim+x_dim),
        'out_chans': 800,
        'activation': relu_actfun,
-       'apply_bn': True}, \
+       'apply_bn': use_bn}, \
       {'layer_type': 'fc',
        'in_chans': 800,
        'out_chans': 800,
        'activation': relu_actfun,
-       'apply_bn': True} ]
+       'apply_bn': use_bn} ]
     out_layer = {
         'layer_type': 'fc',
         'in_chans': 800,
@@ -177,7 +178,7 @@ def test_mnist(step_type='add',
     GPSI = GPSImputer(rng=rng,
             x_in=x_in_sym, x_out=x_out_sym, x_mask=x_mask_sym,
             p_zi_given_xi=p_zi_given_xi,
-            p_x_given_si=p_x_given_si,
+            p_sip1_given_zi=p_sip1_given_zi,
             q_zi_given_xi=q_zi_given_xi,
             params=gpsi_params,
             shared_param_dicts=None)

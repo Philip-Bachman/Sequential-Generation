@@ -42,7 +42,6 @@ class GPSImputer(object):
                 imp_steps: number of reconstruction steps to perform
                 step_type: either "add", "jump", "lstm", or "layer"
                 x_type: can be "bernoulli" or "gaussian"
-                obs_transform: can be 'none' or 'sigmoid'
     """
     def __init__(self, rng=None,
             x_in=None, x_mask=None, x_out=None, \
@@ -58,22 +57,10 @@ class GPSImputer(object):
         self.params = params
         self.x_dim = self.params['x_dim']
         self.z_dim = self.params['z_dim']
-        self.s_dim = self.params['s_dim']
         self.imp_steps = self.params['imp_steps']
         self.step_type = self.params['step_type']
         self.x_type = self.params['x_type']
         assert((self.x_type == 'bernoulli') or (self.x_type == 'gaussian'))
-        if 'obs_transform' in self.params:
-            assert((self.params['obs_transform'] == 'sigmoid') or \
-                    (self.params['obs_transform'] == 'none'))
-            if self.params['obs_transform'] == 'sigmoid':
-                self.obs_transform = lambda x: T.nnet.sigmoid(x)
-            else:
-                self.obs_transform = lambda x: x
-        else:
-            self.obs_transform = lambda x: T.nnet.sigmoid(x)
-        if self.x_type == 'bernoulli':
-            self.obs_transform = lambda x: T.nnet.sigmoid(x)
         self.shared_param_dicts = shared_param_dicts
 
         # grab handles to the relevant InfNets
@@ -95,7 +82,7 @@ class GPSImputer(object):
 
         if self.shared_param_dicts is None:
             # initialize parameters "owned" by this model
-            s0_init = to_fX( np.zeros((self.s_dim,)) )
+            s0_init = to_fX( np.zeros((self.x_dim,)) )
             init_ary = to_fX( np.zeros((self.x_dim,)) )
             self.x_null = theano.shared(value=init_ary, name='gpis_xn')
             self.grad_null = theano.shared(value=init_ary, name='gpsi_gn')
@@ -120,7 +107,7 @@ class GPSImputer(object):
         ##################################################
         self.ones_mask = T.ones_like(self.x_mask)
         def imp_step_func(zi_zmuv, si):
-            si_as_x = si
+            si_as_x = self._si_as_x(si)
             xi_unmasked = self.x_out
             xi_masked = (self.x_mask * xi_unmasked) + \
                         ((1.0 - self.x_mask) * si_as_x)
@@ -156,8 +143,8 @@ class GPSImputer(object):
                 sip1 = si + si_step
             elif (self.step_type == 'lstm'):
                 # LSTM-style updates with write and erase gates
-                write_gate = 1.2 * T.nnet.sigmoid(1.0 + hydra_out[1])
-                erase_gate = 1.2 * T.nnet.sigmoid(1.0 + hydra_out[2])
+                write_gate = 1.1 * T.nnet.sigmoid(1.0 + hydra_out[1])
+                erase_gate = 1.1 * T.nnet.sigmoid(1.0 + hydra_out[2])
                 sip1 = (erase_gate * si) + (write_gate * si_step)
             elif (self.step_type == 'layer'):
                 alpha_gate = T.nnet.sigmoid(hydra_out[1])
@@ -170,7 +157,7 @@ class GPSImputer(object):
             return sip1, nlli, kldi_q2p, kldi_p2q, kldi_p2g
 
         # apply scan op for the sequential imputation loop
-        self.s0_full = T.alloc(0.0, self.x_in.shape[0], self.s_dim) + self.s0
+        self.s0_full = T.alloc(0.0, self.x_in.shape[0], self.x_dim) + self.s0
         init_vals = [self.s0_full, None, None, None, None]
         self.scan_results, self.scan_updates = theano.scan(imp_step_func, \
                     outputs_info=init_vals, sequences=self.zi_zmuv)
@@ -183,7 +170,7 @@ class GPSImputer(object):
 
         # get the initial imputation state
         self.x0 = (self.x_mask * self.x_in) + \
-                  ((1.0 - self.x_mask) * self.s0_full)
+                  ((1.0 - self.x_mask) * self._si_as_x(self.s0_full))
 
         ######################################################################
         # ALL SYMBOLIC VARS NEEDED FOR THE OBJECTIVE SHOULD NOW BE AVAILABLE #
@@ -271,6 +258,13 @@ class GPSImputer(object):
         #self.gen_inf_weights = self.p_zi_given_xi.shared_layers[0].W
         return
 
+    def _si_as_x(self, si):
+        """
+        Convert from "state" to "observation".
+        """
+        si_as_x = T.nnet.sigmoid(si)
+        return si_as_x
+
     def set_sgd_params(self, lr=0.01, mom_1=0.9, mom_2=0.999):
         """
         Set learning rate and momentum parameter for all updates.
@@ -345,7 +339,7 @@ class GPSImputer(object):
         Construct the negative log-likelihood part of free energy.
         """
         # average log-likelihood over the refinement sequence
-        xh = si
+        xh = self._si_as_x(si)
         xm_inv = 1.0 - xm # we will measure nll only where xm_inv is 1
         if self.x_type == 'bernoulli':
             ll_costs = log_prob_bernoulli(xo, xh, mask=xm_inv)
@@ -531,7 +525,7 @@ class GPSImputer(object):
         xo = T.matrix()
         xm = T.matrix()
         zizmuv = self._construct_zi_zmuv(xi, 1)
-        oputs = [self.x0] + [self.si[i] for i in range(self.imp_steps)]
+        oputs = [self.x0] + [self._si_as_x(self.si[i]) for i in range(self.imp_steps)]
         sample_func = theano.function(inputs=[xi, xo, xm], outputs=oputs, \
                 givens={self.x_in: xi, \
                         self.x_out: xo, \

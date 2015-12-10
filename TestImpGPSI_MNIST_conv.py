@@ -36,7 +36,7 @@ def test_mnist(step_type='add',
     # Format the result tag more thoroughly #
     #########################################
     dp_int = int(100.0 * drop_prob)
-    result_tag = "{}GPSI_conv_OD{}_DP{}_IS{}_{}_NA".format(RESULT_PATH, occ_dim, dp_int, imp_steps, step_type)
+    result_tag = "{}GPSI_conv_bn_OD{}_DP{}_IS{}_{}_NA".format(RESULT_PATH, occ_dim, dp_int, imp_steps, step_type)
 
     ##########################
     # Get some training data #
@@ -63,10 +63,9 @@ def test_mnist(step_type='add',
     # Setup some parameters for the Iterative Refinement Model #
     ############################################################
     x_dim = Xtr.shape[1]
-    s_dim = x_dim
-    #s_dim = 300
     z_dim = 100
     init_scale = 1.0
+    use_bn = True
 
     x_in_sym = T.matrix('x_in_sym')
     x_out_sym = T.matrix('x_out_sym')
@@ -83,7 +82,7 @@ def test_mnist(step_type='add',
        'activation': relu_actfun,
        'filt_dim': 5,
        'conv_stride': 'double',
-       'apply_bn': True,
+       'apply_bn': use_bn,
        'shape_func_in': lambda x: T.reshape(x, (-1, 1, 28, 28))}, \
       {'layer_type': 'conv',
        'in_chans': 64,   # in shape:  (batch, 64, 14, 14)
@@ -91,13 +90,13 @@ def test_mnist(step_type='add',
        'activation': relu_actfun,
        'filt_dim': 5,
        'conv_stride': 'double',
-       'apply_bn': True,
+       'apply_bn': use_bn,
        'shape_func_out': lambda x: T.flatten(x, 2)}, \
       {'layer_type': 'fc',
        'in_chans': 128*7*7,
        'out_chans': 256,
        'activation': relu_actfun,
-       'apply_bn': True} ]
+       'apply_bn': use_bn} ]
     output_config = \
     [ {'layer_type': 'fc',
        'in_chans': 256,
@@ -111,7 +110,7 @@ def test_mnist(step_type='add',
        'apply_bn': False} ]
     params['shared_config'] = shared_config
     params['output_config'] = output_config
-    params['init_scale'] = 0.5
+    params['init_scale'] = init_scale
     params['build_theano_funcs'] = False
     p_zi_given_xi = HydraNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
@@ -125,12 +124,12 @@ def test_mnist(step_type='add',
        'in_chans': z_dim,
        'out_chans': 256,
        'activation': relu_actfun,
-       'apply_bn': True}, \
+       'apply_bn': use_bn}, \
       {'layer_type': 'fc',
        'in_chans': 256,
        'out_chans': 7*7*128,
        'activation': relu_actfun,
-       'apply_bn': True,
+       'apply_bn': use_bn,
        'shape_func_out': lambda x: T.reshape(x, (-1, 128, 7, 7))}, \
       {'layer_type': 'conv',
        'in_chans': 128, # in shape:  (batch, 128, 7, 7)
@@ -138,7 +137,7 @@ def test_mnist(step_type='add',
        'activation': relu_actfun,
        'filt_dim': 5,
        'conv_stride': 'half',
-       'apply_bn': True} ]
+       'apply_bn': use_bn} ]
     output_config = \
     [ {'layer_type': 'conv',
        'in_chans': 64, # in shape:  (batch, 64, 14, 14)
@@ -166,7 +165,7 @@ def test_mnist(step_type='add',
        'shape_func_out': lambda x: T.flatten(x, 2)} ]
     params['shared_config'] = shared_config
     params['output_config'] = output_config
-    params['init_scale'] = 0.5
+    params['init_scale'] = init_scale
     params['build_theano_funcs'] = False
     p_sip1_given_zi = HydraNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
@@ -183,7 +182,7 @@ def test_mnist(step_type='add',
        'activation': relu_actfun,
        'filt_dim': 5,
        'conv_stride': 'double',
-       'apply_bn': True,
+       'apply_bn': use_bn,
        'shape_func_in': lambda x: T.reshape(x, (-1, 2, 28, 28))}, \
       {'layer_type': 'conv',
        'in_chans': 64,   # in shape:  (batch, 64, 14, 14)
@@ -191,13 +190,13 @@ def test_mnist(step_type='add',
        'activation': relu_actfun,
        'filt_dim': 5,
        'conv_stride': 'double',
-       'apply_bn': True,
+       'apply_bn': iuse_bn,
        'shape_func_out': lambda x: T.flatten(x, 2)}, \
       {'layer_type': 'fc',
        'in_chans': 128*7*7,
        'out_chans': 256,
        'activation': relu_actfun,
-       'apply_bn': True} ]
+       'apply_bn': use_bn} ]
     output_config = \
     [ {'layer_type': 'fc',
        'in_chans': 256,
@@ -211,7 +210,7 @@ def test_mnist(step_type='add',
        'apply_bn': False} ]
     params['shared_config'] = shared_config
     params['output_config'] = output_config
-    params['init_scale'] = 0.5
+    params['init_scale'] = init_scale
     params['build_theano_funcs'] = False
     q_zi_given_xi = HydraNet(rng=rng, Xd=x_in_sym, \
             params=params, shared_param_dicts=None)
