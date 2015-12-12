@@ -190,7 +190,7 @@ def test_mnist(step_type='add',
        'activation': relu_actfun,
        'filt_dim': 5,
        'conv_stride': 'double',
-       'apply_bn': iuse_bn,
+       'apply_bn': use_bn,
        'shape_func_out': lambda x: T.flatten(x, 2)}, \
       {'layer_type': 'fc',
        'in_chans': 128*7*7,
@@ -415,17 +415,17 @@ if __name__=="__main__":
     #########
     # TRAINING
     # test_mnist(step_type='add', occ_dim=14, drop_prob=0.0)
-    # test_mnist(step_type='add', occ_dim=16, drop_prob=0.0)
+    # test_mnist(step_type='add', imp_steps=10, occ_dim=17, drop_prob=0.0)
     # test_mnist(step_type='add', occ_dim=0, drop_prob=0.6)
     # test_mnist(step_type='add', occ_dim=0, drop_prob=0.8)
     # test_mnist(step_type='jump', occ_dim=14, drop_prob=0.0)
     # test_mnist(step_type='jump', occ_dim=16, drop_prob=0.0)
     # test_mnist(step_type='jump', occ_dim=0, drop_prob=0.6)
     # test_mnist(step_type='jump', occ_dim=0, drop_prob=0.8)
-    test_mnist(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
+    # test_mnist(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
     # test_mnist(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
     # test_mnist(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
-    # test_mnist(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
+    test_mnist(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
     # test_mnist(step_type='add', imp_steps=15, occ_dim=0, drop_prob=0.9)
     # test_mnist(step_type='jump', imp_steps=5, occ_dim=0, drop_prob=0.9)
     # test_mnist(step_type='jump', imp_steps=2, occ_dim=0, drop_prob=0.9)
@@ -440,7 +440,7 @@ if __name__=="__main__":
 
     # RESULTS
     # test_mnist_results(step_type='add', occ_dim=14, drop_prob=0.0)
-    # test_mnist_results(step_type='add', occ_dim=16, drop_prob=0.0)
+    # test_mnist_results(step_type='add', imp_steps=5, occ_dim=17, drop_prob=0.0)
     # test_mnist_results(step_type='add', occ_dim=0, drop_prob=0.6)
     # test_mnist_results(step_type='add', occ_dim=0, drop_prob=0.7)
     # test_mnist_results(step_type='add', occ_dim=0, drop_prob=0.8)
@@ -453,7 +453,7 @@ if __name__=="__main__":
     # test_mnist_results(step_type='jump', occ_dim=0, drop_prob=0.9)
     # test_mnist_results(step_type='add', imp_steps=1, occ_dim=0, drop_prob=0.9)
     # test_mnist_results(step_type='add', imp_steps=2, occ_dim=0, drop_prob=0.9)
-    test_mnist_results(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
+    # test_mnist_results(step_type='add', imp_steps=5, occ_dim=0, drop_prob=0.9)
     # test_mnist_results(step_type='add', imp_steps=10, occ_dim=0, drop_prob=0.9)
     # test_mnist_results(step_type='add', imp_steps=15, occ_dim=0, drop_prob=0.9)
     # test_mnist_results(step_type='jump', imp_steps=1, occ_dim=0, drop_prob=0.9)
